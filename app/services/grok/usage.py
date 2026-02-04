@@ -23,6 +23,15 @@ DEFAULT_MAX_CONCURRENT = 25
 _USAGE_SEMAPHORE = asyncio.Semaphore(DEFAULT_MAX_CONCURRENT)
 _USAGE_SEM_VALUE = DEFAULT_MAX_CONCURRENT
 
+
+def _get_api_url(default_url: str) -> str:
+    """获取 API URL，支持反向代理"""
+    api_base = get_config("grok.api_base", "")
+    if api_base:
+        return default_url.replace("https://grok.com", api_base.rstrip("/"))
+    return default_url
+
+
 def _get_usage_semaphore() -> asyncio.Semaphore:
     global _USAGE_SEMAPHORE, _USAGE_SEM_VALUE
     value = get_config("performance.usage_max_concurrent", DEFAULT_MAX_CONCURRENT)
@@ -116,7 +125,7 @@ class UsageService:
                     
                     async with AsyncSession() as session:
                         response = await session.post(
-                            LIMITS_API,
+                            _get_api_url(LIMITS_API),
                             headers=headers,
                             json=payload,
                             impersonate=BROWSER,

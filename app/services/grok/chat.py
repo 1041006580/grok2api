@@ -30,6 +30,14 @@ TIMEOUT = 120
 BROWSER = "chrome136"
 
 
+def _get_api_url(default_url: str) -> str:
+    """获取 API URL，支持反向代理"""
+    api_base = get_config("grok.api_base", "")
+    if api_base:
+        return default_url.replace("https://grok.com", api_base.rstrip("/"))
+    return default_url
+
+
 @dataclass
 class ChatRequest:
     """聊天请求数据"""
@@ -317,7 +325,7 @@ class GrokChatService:
             session = AsyncSession(impersonate=BROWSER)
             try:
                 response = await session.post(
-                    CHAT_API,
+                    _get_api_url(CHAT_API),
                     headers=headers,
                     data=orjson.dumps(payload),
                     timeout=timeout,

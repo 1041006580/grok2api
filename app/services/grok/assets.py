@@ -43,6 +43,22 @@ TIMEOUT = 120
 BROWSER = "chrome136"
 DEFAULT_MIME = "application/octet-stream"
 
+
+def _get_api_url(default_url: str) -> str:
+    """获取 API URL，支持反向代理"""
+    api_base = get_config("grok.api_base", "")
+    if api_base:
+        return default_url.replace("https://grok.com", api_base.rstrip("/"))
+    return default_url
+
+
+def _get_asset_url(default_url: str) -> str:
+    """获取资源 URL，支持反向代理"""
+    asset_base = get_config("grok.asset_base", "")
+    if asset_base:
+        return default_url.replace("https://assets.grok.com", asset_base.rstrip("/"))
+    return default_url
+
 # 并发控制
 DEFAULT_MAX_CONCURRENT = 25
 DEFAULT_DELETE_BATCH_SIZE = 10
@@ -321,7 +337,7 @@ class UploadService(BaseService):
                 # 执行上传
                 session = await self._get_session()
                 response = await session.post(
-                    UPLOAD_API,
+                    _get_api_url(UPLOAD_API),
                     headers=headers,
                     json=payload,
                     impersonate=BROWSER,
@@ -382,7 +398,7 @@ class ListService(BaseService):
                     params["pageToken"] = page_token
 
                 response = await session.get(
-                    LIST_API,
+                    _get_api_url(LIST_API),
                     headers=headers,
                     params=params,
                     impersonate=BROWSER,
@@ -457,7 +473,7 @@ class DeleteService(BaseService):
         async with _get_assets_semaphore():
             try:
                 headers = self._headers(token, referer="https://grok.com/files")
-                url = f"{DELETE_API}/{asset_id}"
+                url = f"{_get_api_url(DELETE_API)}/{asset_id}"
                 
                 session = await self._get_session()
                 response = await session.delete(
@@ -583,8 +599,8 @@ class DownloadService(BaseService):
                     # 下载文件
                     if not file_path.startswith("/"):
                         file_path = f"/{file_path}"
-                        
-                    url = f"{DOWNLOAD_API}{file_path}"
+
+                    url = f"{_get_asset_url(DOWNLOAD_API)}{file_path}"
                     headers = self._dl_headers(token, file_path)
                     
                     session = await self._get_session()
@@ -836,7 +852,7 @@ class DownloadService(BaseService):
         """
         app_url = get_config("app.app_url", "")
         if not app_url:
-            return f"{DOWNLOAD_API}{file_path if file_path.startswith('/') else '/' + file_path}"
+            return f"{_get_asset_url(DOWNLOAD_API)}{file_path if file_path.startswith('/') else '/' + file_path}"
             
         if not file_path.startswith("/"):
             file_path = f"/{file_path}"

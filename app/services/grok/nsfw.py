@@ -23,6 +23,14 @@ BROWSER = "chrome136"
 TIMEOUT = 30
 
 
+def _get_api_url(default_url: str) -> str:
+    """获取 API URL，支持反向代理"""
+    api_base = get_config("grok.api_base", "")
+    if api_base:
+        return default_url.replace("https://grok.com", api_base.rstrip("/"))
+    return default_url
+
+
 @dataclass
 class NSFWResult:
     """NSFW 操作结果"""
@@ -75,7 +83,7 @@ class NSFWService:
         try:
             async with AsyncSession(impersonate=BROWSER) as session:
                 response = await session.post(
-                    NSFW_API,
+                    _get_api_url(NSFW_API),
                     data=payload,
                     headers=headers,
                     timeout=TIMEOUT,

@@ -34,6 +34,14 @@ _MEDIA_SEMAPHORE = asyncio.Semaphore(DEFAULT_MAX_CONCURRENT)
 _MEDIA_SEM_VALUE = DEFAULT_MAX_CONCURRENT
 
 
+def _get_api_url(default_url: str) -> str:
+    """获取 API URL，支持反向代理"""
+    api_base = get_config("grok.api_base", "")
+    if api_base:
+        return default_url.replace("https://grok.com", api_base.rstrip("/"))
+    return default_url
+
+
 def _get_media_semaphore() -> asyncio.Semaphore:
     global _MEDIA_SEMAPHORE, _MEDIA_SEM_VALUE
     value = get_config("performance.media_max_concurrent", DEFAULT_MAX_CONCURRENT)
@@ -127,7 +135,7 @@ class VideoService:
 
             async with AsyncSession() as session:
                 response = await session.post(
-                    CREATE_POST_API,
+                    _get_api_url(CREATE_POST_API),
                     headers=headers,
                     json=payload,
                     impersonate=BROWSER,
@@ -254,7 +262,7 @@ class VideoService:
 
                 session = AsyncSession(impersonate=BROWSER)
                 response = await session.post(
-                    CHAT_API,
+                    _get_api_url(CHAT_API),
                     headers=headers,
                     data=orjson.dumps(payload),
                     timeout=self.timeout,
@@ -336,7 +344,7 @@ class VideoService:
 
                 session = AsyncSession(impersonate=BROWSER)
                 response = await session.post(
-                    CHAT_API,
+                    _get_api_url(CHAT_API),
                     headers=headers,
                     data=orjson.dumps(payload),
                     timeout=self.timeout,
