@@ -39,8 +39,10 @@ const LOCALE_MAP = {
     "dynamic_statsig": { title: "动态指纹", desc: "是否启用动态生成 Statsig 值。" },
     "filter_tags": { title: "过滤标签", desc: "自动过滤 Grok 响应中的特殊标签。" },
     "timeout": { title: "超时时间", desc: "请求 Grok 服务的超时时间（秒）。" },
-    "base_proxy_url": { title: "基础代理 URL", desc: "代理请求到 Grok 官网的基础服务地址。" },
-    "asset_proxy_url": { title: "资源代理 URL", desc: "代理请求到 Grok 官网的静态资源（图片/视频）地址。" },
+    "api_base": { title: "API 反代地址", desc: "替换 grok.com 的反向代理地址，如 Cloudflare Worker URL。" },
+    "asset_base": { title: "资源反代地址", desc: "替换 assets.grok.com 的反向代理地址。" },
+    "base_proxy_url": { title: "HTTP 代理", desc: "HTTP/SOCKS5 代理地址，用于请求 Grok API。" },
+    "asset_proxy_url": { title: "资源代理", desc: "HTTP/SOCKS5 代理地址，用于请求静态资源。" },
     "cf_clearance": { title: "CF Clearance", desc: "Cloudflare 验证 Cookie，用于验证 Cloudflare 的验证。" },
     "max_retry": { title: "最大重试", desc: "请求 Grok 服务失败时的最大重试次数。" },
     "retry_status_codes": { title: "重试状态码", desc: "触发重试的 HTTP 状态码列表。" }

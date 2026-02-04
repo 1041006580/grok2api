@@ -1,7 +1,9 @@
 (function (global) {
   function openBatchStream(taskId, apiKey, handlers = {}) {
     if (!taskId) return null;
-    const url = `/api/v1/admin/batch/${taskId}/stream?api_key=${encodeURIComponent(apiKey || '')}`;
+    // 去掉 Bearer 前缀，后端期望纯 api_key
+    const cleanKey = apiKey ? apiKey.replace(/^Bearer\s+/i, '') : '';
+    const url = `/api/v1/admin/batch/${taskId}/stream?api_key=${encodeURIComponent(cleanKey)}`;
     const es = new EventSource(url);
 
     es.onmessage = (e) => {
