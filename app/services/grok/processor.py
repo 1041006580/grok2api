@@ -493,7 +493,7 @@ class ImageCollectProcessor(BaseProcessor):
     async def process(self, response: AsyncIterable[bytes]) -> List[str]:
         """处理并收集图片"""
         images = []
-        
+
         try:
             async for line in response:
                 if not line:
@@ -502,11 +502,12 @@ class ImageCollectProcessor(BaseProcessor):
                     data = orjson.loads(line)
                 except orjson.JSONDecodeError:
                     continue
-                
+
                 resp = data.get("result", {}).get("response", {})
-                
+
                 if mr := resp.get("modelResponse"):
                     if urls := mr.get("generatedImageUrls"):
+                        logger.info(f"Grok returned image URLs: {urls}")
                         for url in urls:
                             dl_service = self._get_dl()
                             base64_data = await dl_service.to_base64(url, self.token, "image")
