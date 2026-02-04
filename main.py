@@ -21,6 +21,7 @@ if env_file.exists():
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import Depends
+from fastapi.responses import RedirectResponse
 
 from app.core.auth import verify_api_key
 from app.core.config import get_config
@@ -113,7 +114,12 @@ def create_app() -> FastAPI:
     # 注册管理路由
     from app.api.v1.admin import router as admin_router
     app.include_router(admin_router)
-    
+
+    # 根路径重定向到管理页面
+    @app.get("/")
+    async def root():
+        return RedirectResponse(url="/admin")
+
     return app
 
 

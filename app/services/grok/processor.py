@@ -506,6 +506,7 @@ class ImageCollectProcessor(BaseProcessor):
                 resp = data.get("result", {}).get("response", {})
 
                 if mr := resp.get("modelResponse"):
+                    logger.debug(f"Grok modelResponse: {mr}")
                     if urls := mr.get("generatedImageUrls"):
                         logger.info(f"Grok returned image URLs: {urls}")
                         for url in urls:
