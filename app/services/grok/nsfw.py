@@ -91,6 +91,7 @@ class NSFWService:
                 )
 
                 if response.status_code != 200:
+                    logger.warning(f"NSFW enable HTTP error: {response.status_code}")
                     return NSFWResult(
                         success=False,
                         http_status=response.status_code,
@@ -107,6 +108,9 @@ class NSFWService:
 
                 # HTTP 200 且无 grpc-status（空响应）或 grpc-status=0 都算成功
                 success = grpc_status.code == -1 or grpc_status.ok
+
+                if not success:
+                    logger.warning(f"NSFW enable gRPC error: code={grpc_status.code}, msg={grpc_status.message}")
 
                 return NSFWResult(
                     success=success,
