@@ -167,7 +167,26 @@ class StreamProcessor(BaseProcessor):
                 
                 # 普通 token
                 if (token := resp.get("token")) is not None:
-                    # 检测 <think> 和 </think> 标签来跟踪思考状态
+                    is_thinking = resp.get("isThinking", False)
+
+                    # 处理 isThinking 字段 (grok-4.1-thinking 模型)
+                    if is_thinking:
+                        if not self.show_think:
+                            continue
+                        # 显示思考内容时，包裹在 <think> 标签中
+                        if not self.think_opened:
+                            yield self._sse("<think>\n")
+                            self.think_opened = True
+                        if token and not (self.filter_tags and any(t in token for t in self.filter_tags)):
+                            yield self._sse(token)
+                        continue
+
+                    # isThinking=False 时，关闭思考标签
+                    if self.think_opened and self.show_think:
+                        yield self._sse("</think>\n")
+                        self.think_opened = False
+
+                    # 检测 <think> 和 </think> 标签来跟踪思考状态 (旧模型兼容)
                     if "<think>" in token:
                         self.in_think_block = True
                         if not self.show_think:
