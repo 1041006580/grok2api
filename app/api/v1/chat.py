@@ -208,11 +208,18 @@ async def chat_completions(request: ChatCompletionRequest, http_request: Request
     """Chat Completions API - 兼容 OpenAI"""
 
     start_time = time.time()
+
+    # 调试：打印所有相关 headers
+    xff = http_request.headers.get("X-Forwarded-For", "")
+    xri = http_request.headers.get("X-Real-IP", "")
+    client_host = http_request.client.host if http_request.client else "unknown"
+    logger.info(f"[IP Debug] X-Forwarded-For: '{xff}', X-Real-IP: '{xri}', client.host: '{client_host}'")
+
     # 获取真实 IP（支持反向代理）
     client_ip = (
-        http_request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
-        or http_request.headers.get("X-Real-IP", "")
-        or (http_request.client.host if http_request.client else "unknown")
+        xff.split(",")[0].strip()
+        or xri
+        or client_host
     )
     status_code = 200
     error_msg = ""
