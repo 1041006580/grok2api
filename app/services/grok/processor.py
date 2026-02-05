@@ -162,6 +162,23 @@ class StreamProcessor(BaseProcessor):
                 
                 # 普通 token
                 if (token := resp.get("token")) is not None:
+                    # 检查是否是思考内容
+                    is_thinking = resp.get("isThinking", False)
+
+                    if is_thinking and not self.show_think:
+                        # 不显示思考内容时跳过
+                        continue
+
+                    if is_thinking and self.show_think:
+                        # 显示思考内容，用 <think> 标签包裹
+                        if not self.think_opened:
+                            yield self._sse("<think>\n")
+                            self.think_opened = True
+                    elif self.think_opened:
+                        # 思考结束，关闭标签
+                        yield self._sse("</think>\n")
+                        self.think_opened = False
+
                     if token and not (self.filter_tags and any(t in token for t in self.filter_tags)):
                         yield self._sse(token)
                         
