@@ -102,6 +102,7 @@
   font-weight: 500;
   background: #f3f4f6;
   color: #4b5563;
+  white-space: nowrap;
 }
 
 .status-badge {
