@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Grok2API - 请求日志</title>
+  <link rel="icon" href="/static/favicon/favicon.ico">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://cdn.jsdelivr.net/npm/geist@1.0.0/dist/fonts/geist-sans/style.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/geist@1.0.0/dist/fonts/geist-mono/style.css" rel="stylesheet">
+  <link href="/static/common/common.css?v=2" rel="stylesheet">
+  <link href="/static/logs/logs.css?v=1" rel="stylesheet">
+  <link href="/static/common/toast.css" rel="stylesheet">
+</head>
+
+<body class="min-h-screen flex flex-col" style="background-color: var(--bg);">
+  <div id="app-header"></div>
+
+  <main class="space-y-6 flex-1 container mx-auto max-w-6xl px-6 py-8 fade-in">
+    <div class="space-y-6">
+      <div class="flex justify-between items-center">
+        <div>
+          <h2 class="text-2xl font-semibold tracking-tight">请求日志</h2>
+          <p class="text-[var(--accents-4)] mt-1 text-sm">查看近期 API 请求记录，最多保留 1000 条。</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <button onclick="refreshLogs()" class="geist-button-outline text-xs px-3 py-1.5 flex items-center gap-1">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            刷新
+          </button>
+          <button onclick="confirmClearLogs()" class="geist-button-danger text-xs px-3 py-1.5 flex items-center gap-1">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+            清空
+          </button>
+        </div>
+      </div>
+
+      <div class="h-px bg-[var(--border)] my-6"></div>
+
+      <!-- 统计卡片 -->
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div class="stat-card">
+          <div class="stat-label">总请求数</div>
+          <div class="stat-value" id="stat-total">0</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">成功请求</div>
+          <div class="stat-value text-green-600" id="stat-success">0</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">失败请求</div>
+          <div class="stat-value text-red-600" id="stat-failed">0</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">平均耗时</div>
+          <div class="stat-value" id="stat-avg-duration">0s</div>
+        </div>
+      </div>
+
+      <!-- 筛选器 -->
+      <div class="filter-bar">
+        <div class="flex items-center gap-2">
+          <label class="text-xs text-[var(--accents-5)]">模型:</label>
+          <select id="filter-model" onchange="applyFilters()" class="filter-select">
+            <option value="">全部</option>
+          </select>
+        </div>
+        <div class="flex items-center gap-2">
+          <label class="text-xs text-[var(--accents-5)]">状态:</label>
+          <select id="filter-status" onchange="applyFilters()" class="filter-select">
+            <option value="">全部</option>
+            <option value="success">成功</option>
+            <option value="failed">失败</option>
+          </select>
+        </div>
+        <div class="flex items-center gap-2">
+          <label class="text-xs text-[var(--accents-5)]">IP:</label>
+          <input id="filter-ip" type="text" placeholder="搜索 IP" oninput="applyFilters()" class="filter-input">
+        </div>
+      </div>
+
+      <!-- 日志表格 -->
+      <div class="rounded-lg overflow-hidden bg-white overflow-x-auto">
+        <table class="geist-table min-w-[900px]">
+          <thead>
+            <tr>
+              <th class="w-44 text-left">时间</th>
+              <th class="w-32 text-left">IP</th>
+              <th class="w-36 text-left">模型</th>
+              <th class="w-24 text-center">状态</th>
+              <th class="w-24 text-right">耗时</th>
+              <th class="text-left">错误信息</th>
+            </tr>
+          </thead>
+          <tbody id="logs-table-body"></tbody>
+        </table>
+        <div id="logs-empty" class="hidden table-empty">暂无请求日志</div>
+        <div id="logs-loading" class="table-empty">
+          <span class="loading-spinner"></span>
+          加载中...
+        </div>
+      </div>
+
+    </div>
+  </main>
+  <div id="app-footer"></div>
+
+  <dialog id="confirm-dialog" class="confirm-dialog">
+    <div class="confirm-dialog-body">
+      <div class="confirm-dialog-title">请确认</div>
+      <div id="confirm-message" class="confirm-dialog-message">确定要清空所有请求日志吗？此操作不可恢复。</div>
+      <div class="confirm-dialog-actions">
+        <button id="confirm-cancel" type="button" class="geist-button-outline text-xs px-3">取消</button>
+        <button id="confirm-ok" type="button" class="geist-button-danger text-xs px-3">确定</button>
+      </div>
+    </div>
+  </dialog>
+
+  <script src="/static/common/admin-auth.js?v=2"></script>
+  <script src="/static/common/header.js?v=2"></script>
+  <script src="/static/common/footer.js?v=1"></script>
+  <script src="/static/common/toast.js"></script>
+  <script src="/static/logs/logs.js?v=1"></script>
+</body>
+
+</html>

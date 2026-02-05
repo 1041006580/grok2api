@@ -43,6 +43,7 @@ env/
 # Logs
 logs/
 *.log
+!app/static/logs/
 
 # Data
 data/*.json

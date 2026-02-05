@@ -2,15 +2,18 @@
 Chat Completions API 路由
 """
 
+import time
 from typing import Any, Dict, List, Optional, Union
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel, Field, field_validator
 
 from app.services.grok.chat import ChatService
 from app.services.grok.model import ModelService
 from app.core.exceptions import ValidationException
+from app.services.request_logger import request_logger
+from app.core.logger import logger
 
 
 router = APIRouter(tags=["Chat"])
@@ -201,46 +204,107 @@ def validate_request(request: ChatCompletionRequest):
 
 
 @router.post("/chat/completions")
-async def chat_completions(request: ChatCompletionRequest):
+async def chat_completions(request: ChatCompletionRequest, http_request: Request):
     """Chat Completions API - 兼容 OpenAI"""
-    
+
+    start_time = time.time()
+    client_ip = http_request.client.host if http_request.client else "unknown"
+    status_code = 200
+    error_msg = ""
+
     # 参数验证
     validate_request(request)
-    
-    # 检测视频模型
-    model_info = ModelService.get(request.model)
-    if model_info and model_info.is_video:
-        from app.services.grok.media import VideoService
-        
-        # 提取视频配置 (默认值在 Pydantic 模型中处理)
-        v_conf = request.video_config or VideoConfig()
-        
-        result = await VideoService.completions(
-            model=request.model,
-            messages=[msg.model_dump() for msg in request.messages],
-            stream=request.stream,
-            thinking=request.thinking,
-            aspect_ratio=v_conf.aspect_ratio,
-            video_length=v_conf.video_length,
-            resolution=v_conf.resolution,
-            preset=v_conf.preset
-        )
-    else:
-        result = await ChatService.completions(
-            model=request.model,
-            messages=[msg.model_dump() for msg in request.messages],
-            stream=request.stream,
-            thinking=request.thinking
-        )
-    
-    if isinstance(result, dict):
-        return JSONResponse(content=result)
-    else:
-        return StreamingResponse(
-            result,
-            media_type="text/event-stream",
-            headers={"Cache-Control": "no-cache", "Connection": "keep-alive"}
-        )
+
+    try:
+        # 检测视频模型
+        model_info = ModelService.get(request.model)
+        if model_info and model_info.is_video:
+            from app.services.grok.media import VideoService
+
+            # 提取视频配置 (默认值在 Pydantic 模型中处理)
+            v_conf = request.video_config or VideoConfig()
+
+            result = await VideoService.completions(
+                model=request.model,
+                messages=[msg.model_dump() for msg in request.messages],
+                stream=request.stream,
+                thinking=request.thinking,
+                aspect_ratio=v_conf.aspect_ratio,
+                video_length=v_conf.video_length,
+                resolution=v_conf.resolution,
+                preset=v_conf.preset
+            )
+        else:
+            result = await ChatService.completions(
+                model=request.model,
+                messages=[msg.model_dump() for msg in request.messages],
+                stream=request.stream,
+                thinking=request.thinking
+            )
+
+        if isinstance(result, dict):
+            # 非流式响应，直接记录日志
+            duration = time.time() - start_time
+            try:
+                await request_logger.add_log(
+                    ip=client_ip,
+                    model=request.model,
+                    duration=duration,
+                    status=status_code,
+                    key_name="",
+                    token_suffix="",
+                    error=""
+                )
+            except Exception as e:
+                logger.warning(f"Failed to log request: {e}")
+            return JSONResponse(content=result)
+        else:
+            # 流式响应，包装生成器以记录日志
+            async def stream_with_logging():
+                nonlocal status_code, error_msg
+                try:
+                    async for chunk in result:
+                        yield chunk
+                except Exception as e:
+                    status_code = 500
+                    error_msg = str(e)
+                    raise
+                finally:
+                    duration = time.time() - start_time
+                    try:
+                        await request_logger.add_log(
+                            ip=client_ip,
+                            model=request.model,
+                            duration=duration,
+                            status=status_code,
+                            key_name="",
+                            token_suffix="",
+                            error=error_msg
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to log request: {e}")
+
+            return StreamingResponse(
+                stream_with_logging(),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "Connection": "keep-alive"}
+            )
+    except Exception as e:
+        # 记录错误日志
+        duration = time.time() - start_time
+        try:
+            await request_logger.add_log(
+                ip=client_ip,
+                model=request.model,
+                duration=duration,
+                status=500,
+                key_name="",
+                token_suffix="",
+                error=str(e)
+            )
+        except Exception as log_e:
+            logger.warning(f"Failed to log request: {log_e}")
+        raise
 
 
 __all__ = ["router"]

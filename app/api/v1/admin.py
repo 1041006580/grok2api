@@ -1227,3 +1227,36 @@ async def clear_online_cache_api_async(data: dict):
         "task_id": task.id,
         "total": len(token_list),
     }
+
+
+# ==================== 请求日志审计 ====================
+
+
+@router.get("/admin/logs", response_class=HTMLResponse, include_in_schema=False)
+async def admin_logs_page():
+    """请求日志审计页"""
+    return await render_template("logs/logs.html")
+
+
+@router.get("/api/v1/admin/logs", dependencies=[Depends(verify_api_key)])
+async def get_logs_api(limit: int = 1000):
+    """获取请求日志"""
+    from app.services.request_logger import request_logger
+
+    try:
+        logs = await request_logger.get_logs(limit)
+        return {"status": "success", "logs": logs, "total": len(logs)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/v1/admin/logs/clear", dependencies=[Depends(verify_api_key)])
+async def clear_logs_api():
+    """清空请求日志"""
+    from app.services.request_logger import request_logger
+
+    try:
+        await request_logger.clear_logs()
+        return {"status": "success", "message": "日志已清空"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
