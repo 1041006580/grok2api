@@ -81,16 +81,17 @@ class BaseProcessor:
 
 class StreamProcessor(BaseProcessor):
     """流式响应处理器"""
-    
+
     def __init__(self, model: str, token: str = "", think: bool = None):
         super().__init__(model, token)
         self.response_id: Optional[str] = None
         self.fingerprint: str = ""
         self.think_opened: bool = False
+        self.in_think_block: bool = False  # 跟踪是否在 <think> 块内
         self.role_sent: bool = False
         self.filter_tags = get_config("grok.filter_tags", [])
         self.image_format = get_config("app.image_format", "url")
-        
+
         if think is None:
             self.show_think = get_config("grok.thinking", False)
         else:
@@ -162,22 +163,27 @@ class StreamProcessor(BaseProcessor):
                 
                 # 普通 token
                 if (token := resp.get("token")) is not None:
-                    # 检查是否是思考内容
-                    is_thinking = resp.get("isThinking", False)
+                    # 检测 <think> 和 </think> 标签来跟踪思考状态
+                    if "<think>" in token:
+                        self.in_think_block = True
+                        if not self.show_think:
+                            # 不显示思考时，跳过 <think> 标签
+                            # 但要处理标签后面可能跟着的内容
+                            token = token.replace("<think>", "").replace("\n", "")
+                            if not token.strip():
+                                continue
 
-                    if is_thinking and not self.show_think:
-                        # 不显示思考内容时跳过
+                    if "</think>" in token:
+                        self.in_think_block = False
+                        if not self.show_think:
+                            # 不显示思考时，跳过 </think> 标签
+                            token = token.replace("</think>", "").replace("\n", "")
+                            if not token.strip():
+                                continue
+
+                    # 在思考块内且不显示思考时，跳过内容
+                    if self.in_think_block and not self.show_think:
                         continue
-
-                    if is_thinking and self.show_think:
-                        # 显示思考内容，用 <think> 标签包裹
-                        if not self.think_opened:
-                            yield self._sse("<think>\n")
-                            self.think_opened = True
-                    elif self.think_opened:
-                        # 思考结束，关闭标签
-                        yield self._sse("</think>\n")
-                        self.think_opened = False
 
                     if token and not (self.filter_tags and any(t in token for t in self.filter_tags)):
                         yield self._sse(token)
