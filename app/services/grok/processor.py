@@ -110,10 +110,6 @@ class StreamProcessor(BaseProcessor):
 
                 resp = data.get("result", {}).get("response", {})
 
-                # 调试：打印 Grok 原始响应中的 token
-                if resp.get("token") is not None:
-                    logger.info(f"[Grok Raw] {resp}")
-                
                 # 元数据
                 if (llm := resp.get("llmInfo")) and not self.fingerprint:
                     self.fingerprint = llm.get("modelHash", "")
