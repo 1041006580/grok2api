@@ -10,14 +10,15 @@
   <link href="https://cdn.jsdelivr.net/npm/geist@1.0.0/dist/fonts/geist-sans/style.css" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/geist@1.0.0/dist/fonts/geist-mono/style.css" rel="stylesheet">
   <link href="/static/common/common.css?v=2" rel="stylesheet">
-  <link href="/static/logs/logs.css?v=1" rel="stylesheet">
+  <link href="/static/cache/cache.css?v=4" rel="stylesheet">
+  <link href="/static/logs/logs.css?v=2" rel="stylesheet">
   <link href="/static/common/toast.css" rel="stylesheet">
 </head>
 
 <body class="min-h-screen flex flex-col" style="background-color: var(--bg);">
   <div id="app-header"></div>
 
-  <main class="space-y-6 flex-1 container mx-auto max-w-6xl px-6 py-8 fade-in">
+  <main class="space-y-6 flex-1 container mx-auto max-w-5xl px-6 py-8 fade-in">
     <div class="space-y-6">
       <div class="flex justify-between items-center">
         <div>
@@ -47,20 +48,20 @@
       <!-- 统计卡片 -->
       <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div class="stat-card">
-          <div class="stat-label">总请求数</div>
-          <div class="stat-value" id="stat-total">0</div>
+          <div class="cache-stat-label">总请求数</div>
+          <div class="cache-stat-value" id="stat-total">0</div>
         </div>
         <div class="stat-card">
-          <div class="stat-label">成功请求</div>
-          <div class="stat-value text-green-600" id="stat-success">0</div>
+          <div class="cache-stat-label">成功请求</div>
+          <div class="cache-stat-value" style="color: #059669;" id="stat-success">0</div>
         </div>
         <div class="stat-card">
-          <div class="stat-label">失败请求</div>
-          <div class="stat-value text-red-600" id="stat-failed">0</div>
+          <div class="cache-stat-label">失败请求</div>
+          <div class="cache-stat-value" style="color: #dc2626;" id="stat-failed">0</div>
         </div>
         <div class="stat-card">
-          <div class="stat-label">平均耗时</div>
-          <div class="stat-value" id="stat-avg-duration">0s</div>
+          <div class="cache-stat-label">平均耗时</div>
+          <div class="cache-stat-value" id="stat-avg-duration">0s</div>
         </div>
       </div>
 
@@ -127,7 +128,7 @@
   <script src="/static/common/header.js?v=2"></script>
   <script src="/static/common/footer.js?v=1"></script>
   <script src="/static/common/toast.js"></script>
-  <script src="/static/logs/logs.js?v=1"></script>
+  <script src="/static/logs/logs.js?v=2"></script>
 </body>
 
 </html>
