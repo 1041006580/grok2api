@@ -4,8 +4,8 @@ let allLogs = [];
 let filteredLogs = [];
 
 // 初始化
-document.addEventListener('DOMContentLoaded', () => {
-  refreshLogs();
+document.addEventListener('DOMContentLoaded', async () => {
+  await refreshLogs();
 });
 
 // 刷新日志
@@ -19,9 +19,11 @@ async function refreshLogs() {
   loadingEl.classList.remove('hidden');
 
   try {
-    const apiKey = localStorage.getItem('api_key') || '';
+    const apiKey = await ensureApiKey();
+    if (!apiKey) return;
+
     const res = await fetch('/api/v1/admin/logs', {
-      headers: { 'Authorization': `Bearer ${apiKey}` }
+      headers: buildAuthHeaders(apiKey)
     });
 
     if (!res.ok) {
@@ -172,11 +174,13 @@ function confirmClearLogs() {
 // 清空日志
 async function clearLogs() {
   try {
-    const apiKey = localStorage.getItem('api_key') || '';
+    const apiKey = await ensureApiKey();
+    if (!apiKey) return;
+
     const res = await fetch('/api/v1/admin/logs/clear', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${apiKey}`,
+        ...buildAuthHeaders(apiKey),
         'Content-Type': 'application/json'
       }
     });
