@@ -209,23 +209,11 @@ async def chat_completions(request: ChatCompletionRequest, http_request: Request
 
     start_time = time.time()
 
-    # 调试：打印所有可能包含真实 IP 的 headers
-    ip_headers = [
-        "X-Forwarded-For", "X-Real-IP", "CF-Connecting-IP",
-        "True-Client-IP", "X-Client-IP", "X-Envoy-External-Address"
-    ]
-    for h in ip_headers:
-        v = http_request.headers.get(h, "")
-        if v:
-            logger.info(f"[IP Debug] {h}: '{v}'")
-    client_host = http_request.client.host if http_request.client else "unknown"
-    logger.info(f"[IP Debug] client.host: '{client_host}'")
-
     # 获取真实 IP（支持反向代理）
     client_ip = (
-        xff.split(",")[0].strip()
-        or xri
-        or client_host
+        http_request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+        or http_request.headers.get("X-Real-IP", "")
+        or (http_request.client.host if http_request.client else "unknown")
     )
     status_code = 200
     error_msg = ""

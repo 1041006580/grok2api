@@ -129,6 +129,8 @@ class RequestLogger:
 
     async def get_logs(self, limit: int = 1000) -> List[Dict]:
         """获取日志"""
+        if not self._loaded:
+            await self.init()
         async with self._lock:
             return list(self._logs)[:limit]
     
