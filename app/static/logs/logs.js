@@ -126,12 +126,12 @@ function renderLogs() {
     const statusText = isSuccess ? '成功' : `失败 (${log.status})`;
 
     tr.innerHTML = `
-      <td class="text-xs text-[var(--accents-5)]">${escapeHtml(log.time || '-')}</td>
-      <td class="ip-text">${escapeHtml(log.ip || '-')}</td>
-      <td><span class="model-badge">${escapeHtml(log.model || '-')}</span></td>
+      <td class="text-left">${escapeHtml(log.time || '-')}</td>
+      <td class="text-left ip-text">${escapeHtml(log.ip || '-')}</td>
+      <td class="text-left"><span class="model-badge">${escapeHtml(log.model || '-')}</span></td>
       <td class="text-center"><span class="status-badge ${statusClass}">${statusText}</span></td>
       <td class="text-right duration-text">${log.duration ? log.duration.toFixed(2) + 's' : '-'}</td>
-      <td class="error-text" title="${escapeHtml(log.error || '')}">${escapeHtml(log.error || '-')}</td>
+      <td class="text-left error-text" title="${escapeHtml(log.error || '')}">${escapeHtml(log.error || '-')}</td>
     `;
 
     tableBody.appendChild(tr);
