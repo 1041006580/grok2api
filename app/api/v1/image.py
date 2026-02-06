@@ -249,12 +249,11 @@ async def _handle_imagine_ws(request: ImageGenerationRequest, token: str, token_
     client = ImagineWSClient()
 
     if request.stream:
-        # 流式模式
+        # 流式模式 - 不传入 token，让客户端自动获取
         async def stream_generator():
             async for progress in client.generate_stream(
                 prompt=request.prompt,
-                n=request.n,
-                token=token
+                n=request.n
             ):
                 if progress.get("type") == "progress":
                     # 发送进度事件
@@ -290,11 +289,10 @@ async def _handle_imagine_ws(request: ImageGenerationRequest, token: str, token_
             headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
         )
     else:
-        # 非流式模式
+        # 非流式模式 - 不传入 token，让客户端自动获取和轮换
         result = await client.generate(
             prompt=request.prompt,
-            n=request.n,
-            token=token
+            n=request.n
         )
 
         if not result.get("success"):
