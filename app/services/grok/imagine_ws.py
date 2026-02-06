@@ -7,15 +7,29 @@ import time
 import base64
 import ssl
 import re
-from typing import Optional, List, Dict, Any, Callable, Awaitable
+from typing import Optional, List, Dict, Any, Callable, Awaitable, Set
 from dataclasses import dataclass, field
 
 import aiohttp
 from aiohttp_socks import ProxyConnector
 
+try:
+    from curl_cffi import requests as curl_requests
+    CURL_CFFI_AVAILABLE = True
+except ImportError:
+    CURL_CFFI_AVAILABLE = False
+    curl_requests = None
+
 from app.core.config import config
 from app.core.logger import logger
 from app.services.token import TokenService, EffortType
+
+
+# WebSocket 常量
+WS_URL = "wss://grok.com/ws/imagine/listen"
+
+# 已完成年龄验证的 token 集合（内存缓存）
+_age_verified_tokens: Set[str] = set()
 
 
 @dataclass
@@ -205,17 +219,14 @@ class ImagineWSClient:
         request_id = str(uuid.uuid4())
         headers = self._get_ws_headers(token)
 
-        ws_url = config.get("imagine.ws_url", "wss://grok.com/ws/imagine/listen")
         ws_timeout = config.get("imagine.ws_timeout", 120)
-
-        logger.info(f"[ImagineWS] 连接 WebSocket: {ws_url}")
 
         connector = self._get_connector()
 
         try:
             async with aiohttp.ClientSession(connector=connector) as session:
                 async with session.ws_connect(
-                    ws_url,
+                    WS_URL,
                     headers=headers,
                     heartbeat=20,
                     receive_timeout=ws_timeout

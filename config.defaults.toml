@@ -45,7 +45,9 @@ nsfw_batch_size = 50
 nsfw_max_tokens = 1000
 
 [imagine]
-ws_url = "wss://grok.com/ws/imagine/listen"
+# WebSocket 连接超时时间（秒）
 ws_timeout = 120
+# 默认图片宽高比: "1:1", "2:3", "3:2"
 default_aspect_ratio = "2:3"
+# 默认生成图片数量 (1-4)
 default_image_count = 4
