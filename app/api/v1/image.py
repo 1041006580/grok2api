@@ -3,7 +3,9 @@ Image Generation API 路由
 """
 
 import asyncio
+import json
 import random
+import time
 from typing import List, Optional
 
 from fastapi import APIRouter
@@ -13,6 +15,7 @@ from pydantic import BaseModel, Field
 from app.services.grok.chat import GrokChatService
 from app.services.grok.model import ModelService
 from app.services.grok.processor import ImageStreamProcessor, ImageCollectProcessor
+from app.services.grok.imagine_ws import ImagineWSClient
 from app.services.token import get_token_manager, EffortType
 from app.core.exceptions import ValidationException, AppException, ErrorType
 from app.core.logger import logger
@@ -149,6 +152,10 @@ async def create_image(request: ImageGenerationRequest):
     # 获取模型信息
     model_info = ModelService.get(request.model)
 
+    # grok-imagine-ws 模型使用 WebSocket 方式
+    if request.model == "grok-imagine-ws":
+        return await _handle_imagine_ws(request, token, token_mgr)
+
     # 流式模式
     if request.stream:
         chat_service = GrokChatService()
@@ -219,8 +226,6 @@ async def create_image(request: ImageGenerationRequest):
             selected_images.append("error")
 
     # 构建响应
-    import time
-
     data = [{"b64_json": img} for img in selected_images]
 
     return JSONResponse(
@@ -237,6 +242,84 @@ async def create_image(request: ImageGenerationRequest):
             },
         }
     )
+
+
+async def _handle_imagine_ws(request: ImageGenerationRequest, token: str, token_mgr):
+    """处理 grok-imagine-ws 模型的请求"""
+    client = ImagineWSClient()
+
+    if request.stream:
+        # 流式模式
+        async def stream_generator():
+            async for progress in client.generate_stream(
+                prompt=request.prompt,
+                n=request.n,
+                token=token
+            ):
+                if progress.get("type") == "progress":
+                    # 发送进度事件
+                    if progress.get("is_final"):
+                        event_data = {
+                            "type": "image_generation.partial_image",
+                            "partial_image_b64": progress.get("blob", ""),
+                            "partial_image_index": progress.get("completed", 1) - 1,
+                        }
+                        yield f"event: image_generation.partial_image\ndata: {json.dumps(event_data)}\n\n"
+                elif progress.get("type") == "result":
+                    # 发送完成事件
+                    if progress.get("success"):
+                        b64_list = progress.get("b64_list", [])
+                        data = [{"b64_json": b64} for b64 in b64_list]
+                        event_data = {
+                            "type": "image_generation.completed",
+                            "created": int(time.time()),
+                            "data": data,
+                        }
+                        yield f"event: image_generation.completed\ndata: {json.dumps(event_data)}\n\n"
+                    else:
+                        error_data = {
+                            "type": "error",
+                            "error": progress.get("error", "Unknown error"),
+                        }
+                        yield f"event: error\ndata: {json.dumps(error_data)}\n\n"
+                    yield "data: [DONE]\n\n"
+
+        return StreamingResponse(
+            stream_generator(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+        )
+    else:
+        # 非流式模式
+        result = await client.generate(
+            prompt=request.prompt,
+            n=request.n,
+            token=token
+        )
+
+        if not result.get("success"):
+            raise AppException(
+                message=result.get("error", "Image generation failed"),
+                error_type=ErrorType.SERVER.value,
+                code=result.get("error_code", "generation_failed"),
+                status_code=500,
+            )
+
+        b64_list = result.get("b64_list", [])
+        data = [{"b64_json": b64} for b64 in b64_list]
+
+        return JSONResponse(
+            content={
+                "created": int(time.time()),
+                "data": data,
+                "usage": {
+                    "total_tokens": 0,
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "input_tokens_details": {"text_tokens": 0, "image_tokens": 0},
+                },
+            }
+        )
 
 
 __all__ = ["router"]

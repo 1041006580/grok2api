@@ -113,6 +113,15 @@ class ModelService:
             description="Video generation model",
             is_video=True
         ),
+        ModelInfo(
+            model_id="grok-imagine-ws",
+            grok_model="imagine_x_1",
+            model_mode="",
+            cost=Cost.HIGH,
+            display_name="Grok Imagine WebSocket",
+            description="Image generation with streaming preview via WebSocket",
+            is_image=True
+        ),
     ]
     
     _map = {m.model_id: m for m in MODELS}

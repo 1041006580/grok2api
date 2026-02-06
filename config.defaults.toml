@@ -43,3 +43,9 @@ usage_max_tokens = 1000
 nsfw_max_concurrent = 10
 nsfw_batch_size = 50
 nsfw_max_tokens = 1000
+
+[imagine]
+ws_url = "wss://grok.com/ws/imagine/listen"
+ws_timeout = 120
+default_aspect_ratio = "2:3"
+default_image_count = 4
