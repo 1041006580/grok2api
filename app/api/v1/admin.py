@@ -523,8 +523,15 @@ async def enable_nsfw_api_async(data: dict):
                 }
 
             async def _on_item(item: str, res: dict):
-                ok = bool(res.get("ok") and res.get("data", {}).get("success"))
-                task.record(ok)
+                data = res.get("data", {})
+                ok = bool(res.get("ok") and data.get("success"))
+                masked = f"{item[:8]}...{item[-8:]}" if len(item) > 20 else item
+                detail = {
+                    "age_set": data.get("age_set"),
+                    "unhinged_enabled": data.get("unhinged_enabled"),
+                }
+                error = "" if ok else (data.get("error") or res.get("error") or "")
+                task.record(ok, item=masked, detail=detail, error=error)
 
             raw_results = await run_in_batches(
                 unique_tokens,
@@ -539,28 +546,15 @@ async def enable_nsfw_api_async(data: dict):
                 task.finish_cancelled()
                 return
 
-            results = {}
-            ok_count = 0
-            fail_count = 0
-            for token, res in raw_results.items():
-                masked = f"{token[:8]}...{token[-8:]}" if len(token) > 20 else token
-                if res.get("ok") and res.get("data", {}).get("success"):
-                    ok_count += 1
-                    results[masked] = res.get("data", {})
-                else:
-                    fail_count += 1
-                    results[masked] = res.get("data") or {"error": res.get("error")}
-
             await mgr._save()
 
             result = {
                 "status": "success",
                 "summary": {
                     "total": len(unique_tokens),
-                    "ok": ok_count,
-                    "fail": fail_count,
+                    "ok": task.ok,
+                    "fail": task.fail,
                 },
-                "results": results,
             }
             warning = None
             if truncated:
