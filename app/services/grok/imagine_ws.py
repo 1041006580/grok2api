@@ -100,6 +100,36 @@ class ImagineWSClient:
         """判断是否是最终高清图片"""
         return msg.get("percentage_complete") == 100
 
+    def _build_request_message(
+        self,
+        request_id: str,
+        text: str,
+        aspect_ratio: str,
+        enable_nsfw: bool,
+        msg_type: str = "input_text"
+    ) -> Dict[str, Any]:
+        """构建 WebSocket 请求消息"""
+        return {
+            "type": "conversation.item.create",
+            "timestamp": int(time.time() * 1000),
+            "item": {
+                "type": "message",
+                "content": [{
+                    "requestId": request_id,
+                    "text": text,
+                    "type": msg_type,
+                    "properties": {
+                        "section_count": 0,
+                        "is_kids_mode": False,
+                        "enable_nsfw": enable_nsfw,
+                        "skip_upsampler": False,
+                        "is_initial": False,
+                        "aspect_ratio": aspect_ratio
+                    }
+                }]
+            }
+        }
+
     async def generate(
         self,
         prompt: str,
@@ -223,27 +253,14 @@ class ImagineWSClient:
                     heartbeat=20,
                     receive_timeout=ws_timeout
                 ) as ws:
-                    # 发送生成请求
-                    message = {
-                        "type": "conversation.item.create",
-                        "timestamp": int(time.time() * 1000),
-                        "item": {
-                            "type": "message",
-                            "content": [{
-                                "requestId": request_id,
-                                "text": prompt,
-                                "type": "input_text",
-                                "properties": {
-                                    "section_count": 0,
-                                    "is_kids_mode": False,
-                                    "enable_nsfw": enable_nsfw,
-                                    "skip_upsampler": False,
-                                    "is_initial": False,
-                                    "aspect_ratio": aspect_ratio
-                                }
-                            }]
-                        }
-                    }
+                    # 发送初始生成请求
+                    message = self._build_request_message(
+                        request_id=request_id,
+                        text=prompt,
+                        aspect_ratio=aspect_ratio,
+                        enable_nsfw=enable_nsfw,
+                        msg_type="input_text"
+                    )
 
                     await ws.send_json(message)
                     logger.info(f"[ImagineWS] 已发送请求: {prompt[:50]}...")
@@ -254,6 +271,9 @@ class ImagineWSClient:
                     start_time = time.time()
                     last_activity = time.time()
                     filtered_count = 0  # 被 NSFW 过滤的图片数量
+                    translated_prompt = None  # 服务端翻译后的 prompt（用于 scroll）
+                    scroll_count = 0
+                    max_scroll = max((n - 1) // 6, 0)  # 每批约 6 张
 
                     while time.time() - start_time < ws_timeout:
                         try:
@@ -265,7 +285,12 @@ class ImagineWSClient:
                                 msg_type = msg.get("type")
 
                                 if msg_type == "json":
-                                    # 状态消息：检查是否被 NSFW 过滤
+                                    # 提取翻译后的 prompt（用于 scroll 请求）
+                                    server_prompt = msg.get("prompt")
+                                    if server_prompt:
+                                        translated_prompt = server_prompt
+
+                                    # 检查是否被 NSFW 过滤
                                     pct = msg.get("percentage_complete")
                                     r_rated = msg.get("r_rated", False)
                                     if pct == 100 and r_rated:
@@ -350,10 +375,27 @@ class ImagineWSClient:
                                 break
 
                         except asyncio.TimeoutError:
-                            # 如果已经有一些最终图片且超过10秒没有新消息，认为完成
                             if progress.completed > 0 and time.time() - last_activity > 10:
-                                logger.info(f"[ImagineWS] 超时，已收集 {progress.completed} 张最终图片")
-                                break
+                                # 还没收够且可以 scroll
+                                if progress.completed < n and translated_prompt and scroll_count < max_scroll:
+                                    scroll_count += 1
+                                    scroll_msg = self._build_request_message(
+                                        request_id=str(uuid.uuid4()),
+                                        text=translated_prompt,
+                                        aspect_ratio=aspect_ratio,
+                                        enable_nsfw=enable_nsfw,
+                                        msg_type="input_scroll"
+                                    )
+                                    await ws.send_json(scroll_msg)
+                                    logger.info(
+                                        f"[ImagineWS] 发送 scroll 请求 ({scroll_count}/{max_scroll})，"
+                                        f"继续生成更多图片..."
+                                    )
+                                    last_activity = time.time()
+                                    continue
+                                else:
+                                    logger.info(f"[ImagineWS] 超时，已收集 {progress.completed} 张最终图片")
+                                    break
                             continue
 
                     # 收集最终图片的 base64
