@@ -49,17 +49,10 @@ class GenerationProgress:
     total: int = 4  # 预期生成数量
     images: Dict[str, ImageProgress] = field(default_factory=dict)
     completed: int = 0  # 已完成的最终图片数量
-    has_medium: bool = False  # 是否有 medium 阶段的图片
 
     def get_completed_images(self) -> List[ImageProgress]:
         """获取所有已完成的图片"""
         return [img for img in self.images.values() if img.is_final]
-
-    def check_blocked(self) -> bool:
-        """检查是否被 blocked (有 medium 但没有 final)"""
-        has_medium = any(img.stage == "medium" for img in self.images.values())
-        has_final = any(img.is_final for img in self.images.values())
-        return has_medium and not has_final
 
 
 # 流式回调类型
@@ -103,10 +96,9 @@ class ImagineWSClient:
             return match.group(1)
         return None
 
-    def _is_final_image(self, url: str, blob_size: int) -> bool:
+    def _is_final_image(self, msg: Dict[str, Any]) -> bool:
         """判断是否是最终高清图片"""
-        # 最终版本是 .jpg 格式，大小通常 > 100KB
-        return url.endswith('.jpg') and blob_size > 100000
+        return msg.get("percentage_complete") == 100
 
     async def generate(
         self,
@@ -261,7 +253,7 @@ class ImagineWSClient:
                     error_info = None
                     start_time = time.time()
                     last_activity = time.time()
-                    medium_received_time = None
+                    filtered_count = 0  # 被 NSFW 过滤的图片数量
 
                     while time.time() - start_time < ws_timeout:
                         try:
@@ -272,7 +264,18 @@ class ImagineWSClient:
                                 msg = json.loads(ws_msg.data)
                                 msg_type = msg.get("type")
 
-                                if msg_type == "image":
+                                if msg_type == "json":
+                                    # 状态消息：检查是否被 NSFW 过滤
+                                    pct = msg.get("percentage_complete")
+                                    r_rated = msg.get("r_rated", False)
+                                    if pct == 100 and r_rated:
+                                        filtered_count += 1
+                                        logger.warning(
+                                            f"[ImagineWS] 图片被 NSFW 过滤 "
+                                            f"(已过滤 {filtered_count} 张)"
+                                        )
+
+                                elif msg_type == "image":
                                     blob = msg.get("blob", "")
                                     url = msg.get("url", "")
 
@@ -282,15 +285,11 @@ class ImagineWSClient:
                                             continue
 
                                         blob_size = len(blob)
-                                        is_final = self._is_final_image(url, blob_size)
+                                        is_final = self._is_final_image(msg)
 
                                         # 确定阶段
                                         if is_final:
                                             stage = "final"
-                                        elif blob_size > 30000:
-                                            stage = "medium"
-                                            if medium_received_time is None:
-                                                medium_received_time = time.time()
                                         else:
                                             stage = "preview"
 
@@ -346,42 +345,14 @@ class ImagineWSClient:
                                     logger.info(f"[ImagineWS] 已收集 {progress.completed} 张最终图片")
                                     break
 
-                                # 检查是否被 blocked: 有 medium 但超过 15 秒没有 final
-                                if medium_received_time and progress.completed == 0:
-                                    time_since_medium = time.time() - medium_received_time
-                                    if time_since_medium > 15:
-                                        logger.warning(
-                                            f"[ImagineWS] 检测到 blocked: 收到 medium 后 "
-                                            f"{time_since_medium:.1f}s 仍无 final"
-                                        )
-                                        return {
-                                            "success": False,
-                                            "error_code": "blocked",
-                                            "error": "生成被阻止，无法获取最终图片"
-                                        }
-
                             elif ws_msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
                                 logger.warning(f"[ImagineWS] WebSocket 关闭或错误: {ws_msg.type}")
                                 break
 
                         except asyncio.TimeoutError:
-                            # 检查是否被 blocked
-                            if medium_received_time and progress.completed == 0:
-                                time_since_medium = time.time() - medium_received_time
-                                if time_since_medium > 10:
-                                    logger.warning(
-                                        f"[ImagineWS] 超时检测到 blocked: 收到 medium 后 "
-                                        f"{time_since_medium:.1f}s 仍无 final"
-                                    )
-                                    return {
-                                        "success": False,
-                                        "error_code": "blocked",
-                                        "error": "生成被阻止，无法获取最终图片"
-                                    }
-
                             # 如果已经有一些最终图片且超过10秒没有新消息，认为完成
                             if progress.completed > 0 and time.time() - last_activity > 10:
-                                logger.info(f"[ImagineWS] 超时，已收集 {progress.completed} 张图片")
+                                logger.info(f"[ImagineWS] 超时，已收集 {progress.completed} 张最终图片")
                                 break
                             continue
 
@@ -389,21 +360,23 @@ class ImagineWSClient:
                     result_b64 = self._collect_final_images(progress, n)
 
                     if result_b64:
-                        return {
+                        result = {
                             "success": True,
                             "b64_list": result_b64,
                             "count": len(result_b64)
                         }
+                        if filtered_count > 0:
+                            result["filtered"] = filtered_count
+                        return result
                     elif error_info:
                         return {"success": False, **error_info}
+                    elif filtered_count > 0:
+                        return {
+                            "success": False,
+                            "error_code": "nsfw_filtered",
+                            "error": f"所有 {filtered_count} 张图片都被 NSFW 过滤"
+                        }
                     else:
-                        # 检查是否是 blocked
-                        if progress.check_blocked():
-                            return {
-                                "success": False,
-                                "error_code": "blocked",
-                                "error": "生成被阻止，无法获取最终图片"
-                            }
                         return {"success": False, "error": "未收到图片数据"}
 
         except aiohttp.ClientError as e:
@@ -415,16 +388,13 @@ class ImagineWSClient:
         progress: GenerationProgress,
         n: int
     ) -> List[str]:
-        """收集最终图片的 base64 列表"""
+        """收集最终图片的 base64 列表（只收集 final 阶段的图片）"""
         result_b64 = []
         saved_ids = set()
 
-        # 优先选择最终版本，如果没有则使用最大的版本
-        for img in sorted(
-            progress.images.values(),
-            key=lambda x: (x.is_final, x.blob_size),
-            reverse=True
-        ):
+        # 只选择 final 图片
+        final_images = [img for img in progress.images.values() if img.is_final]
+        for img in sorted(final_images, key=lambda x: x.blob_size, reverse=True):
             if img.image_id in saved_ids:
                 continue
             if len(saved_ids) >= n:
@@ -435,7 +405,7 @@ class ImagineWSClient:
 
             logger.info(
                 f"[ImagineWS] 收集图片: {img.image_id[:8]}... "
-                f"({img.blob_size / 1024:.1f}KB, {img.stage})"
+                f"({img.blob_size / 1024:.1f}KB)"
             )
 
         return result_b64
