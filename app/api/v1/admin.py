@@ -411,6 +411,8 @@ async def enable_nsfw_api(data: dict):
                 "grpc_status": result.grpc_status,
                 "grpc_message": result.grpc_message,
                 "error": result.error,
+                "age_set": result.age_set,
+                "unhinged_enabled": result.unhinged_enabled,
             }
 
         # 执行批量操作
@@ -516,6 +518,8 @@ async def enable_nsfw_api_async(data: dict):
                     "grpc_status": result.grpc_status,
                     "grpc_message": result.grpc_message,
                     "error": result.error,
+                    "age_set": result.age_set,
+                    "unhinged_enabled": result.unhinged_enabled,
                 }
 
             async def _on_item(item: str, res: dict):
