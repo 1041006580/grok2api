@@ -19,7 +19,9 @@ const NUMERIC_FIELDS = new Set([
   'reload_interval_sec',
   'nsfw_max_concurrent',
   'nsfw_batch_size',
-  'nsfw_max_tokens'
+  'nsfw_max_tokens',
+  'ws_timeout',
+  'default_image_count'
 ]);
 
 const LOCALE_MAP = {
@@ -73,6 +75,12 @@ const LOCALE_MAP = {
     "assets_batch_size": { title: "Assets 处理批次大小", desc: "批量查找/删除资产时的单批处理数量。推荐 10。" },
     "assets_max_tokens": { title: "Assets 处理最大数量", desc: "单次批量查找/删除资产时的处理数量上限。推荐 1000。" },
     "assets_delete_batch_size": { title: "Assets 单账号删除批量大小", desc: "单账号批量删除资产时的单批并发数量。推荐 10。" }
+  },
+  "imagine": {
+    "label": "imagine 设置",
+    "ws_timeout": { title: "ws timeout", desc: "WebSocket 连接超时时间（秒），超时后自动断开并重试。" },
+    "default_aspect_ratio": { title: "default aspect ratio", desc: "默认图片宽高比，可选值: \"1:1\", \"2:3\", \"3:2\"。" },
+    "default_image_count": { title: "default image count", desc: "默认生成图片数量 (1-4)。" }
   }
 };
 
