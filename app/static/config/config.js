@@ -79,7 +79,7 @@ const LOCALE_MAP = {
   "imagine": {
     "label": "imagine 设置",
     "ws_timeout": { title: "ws timeout", desc: "WebSocket 连接超时时间（秒），超时后自动断开并重试。" },
-    "default_aspect_ratio": { title: "default aspect ratio", desc: "默认图片宽高比，可选值: \"1:1\", \"2:3\", \"3:2\"。" },
+    "default_aspect_ratio": { title: "default aspect ratio", desc: "默认图片/视频宽高比。" },
     "default_image_count": { title: "default image count", desc: "默认生成图片数量 (1-4)。" }
   }
 };
@@ -280,6 +280,15 @@ function renderConfig(data) {
       else if (key === 'video_format') {
         built = buildSelectInput(section, key, 'url', [
           { val: 'url', text: 'URL' }
+        ]);
+      }
+      else if (key === 'default_aspect_ratio') {
+        built = buildSelectInput(section, key, val, [
+          { val: '2:3', text: '2:3 (竖屏)' },
+          { val: '3:2', text: '3:2 (横屏)' },
+          { val: '1:1', text: '1:1 (方形)' },
+          { val: '9:16', text: '9:16 (竖屏)' },
+          { val: '16:9', text: '16:9 (横屏)' }
         ]);
       }
       else if (Array.isArray(val) || typeof val === 'object') {

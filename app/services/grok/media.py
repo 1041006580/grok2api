@@ -461,6 +461,10 @@ class VideoService:
             video_length = 10 if is_super else 6
         if resolution is None:
             resolution = "720p" if is_super else "480p"
+        if aspect_ratio is None:
+            aspect_ratio = get_config("imagine.default_aspect_ratio", "2:3")
+        if preset is None:
+            preset = "custom"
 
         # 获取 token
         try:
