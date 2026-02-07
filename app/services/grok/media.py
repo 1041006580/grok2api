@@ -214,6 +214,7 @@ class VideoService:
                             "parentPostId": post_id,
                             "aspectRatio": aspect_ratio,
                             "videoLength": video_length,
+                            "isVideoEdit": False,
                             "resolutionName": resolution,
                         }
                     }
@@ -267,6 +268,10 @@ class VideoService:
                 payload = self._build_payload(
                     prompt, post_id, aspect_ratio, video_length, resolution, preset
                 )
+
+                # 调试日志：打印完整的 videoGenModelConfig
+                video_config = payload.get("responseMetadata", {}).get("modelConfigOverride", {}).get("modelMap", {}).get("videoGenModelConfig", {})
+                logger.info(f"Video API request: videoGenModelConfig={video_config}")
 
                 session = AsyncSession(impersonate=BROWSER)
                 response = await session.post(
