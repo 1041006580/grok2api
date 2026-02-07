@@ -40,7 +40,7 @@ class VideoConfig(BaseModel):
     """视频生成配置"""
     aspect_ratio: Optional[str] = Field(None, description="视频比例: 3:2, 16:9, 1:1 等")
     video_length: Optional[int] = Field(None, description="视频时长(秒): 5-15，super模型默认10秒，普通模型默认6秒")
-    resolution: Optional[str] = Field(None, description="视频分辨率: SD, HD，super模型默认HD，普通模型默认SD")
+    resolution: Optional[str] = Field(None, description="视频分辨率: 480p, 720p，super模型默认720p，普通模型默认480p")
     preset: Optional[str] = Field(None, description="风格预设: fun, normal, spicy, custom")
     
     @field_validator("aspect_ratio")
@@ -70,7 +70,7 @@ class VideoConfig(BaseModel):
     @field_validator("resolution")
     @classmethod
     def validate_resolution(cls, v):
-        allowed = ["SD", "HD"]
+        allowed = ["480p", "720p"]
         if v and v not in allowed:
             raise ValidationException(
                 message=f"resolution must be one of {allowed}",

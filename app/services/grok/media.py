@@ -186,7 +186,7 @@ class VideoService:
         post_id: str,
         aspect_ratio: str = "3:2",
         video_length: int = 6,
-        resolution: str = "SD",
+        resolution: str = "480p",
         preset: str = "normal",
     ) -> dict:
         """构建视频生成载荷"""
@@ -200,7 +200,7 @@ class VideoService:
 
         full_prompt = f"{prompt} {mode_flag}"
 
-        return {
+        payload = {
             "temporary": True,
             "modelName": "grok-3",
             "message": full_prompt,
@@ -214,12 +214,19 @@ class VideoService:
                             "parentPostId": post_id,
                             "aspectRatio": aspect_ratio,
                             "videoLength": video_length,
-                            "videoResolution": resolution,
+                            "resolutionName": resolution,
                         }
                     }
                 },
             },
         }
+
+        logger.info(
+            f"Video payload: video_length={video_length}, resolution={resolution}, "
+            f"aspect_ratio={aspect_ratio}, preset={preset}"
+        )
+
+        return payload
 
     async def generate(
         self,
@@ -448,7 +455,7 @@ class VideoService:
         if video_length is None:
             video_length = 10 if is_super else 6
         if resolution is None:
-            resolution = "HD" if is_super else "SD"
+            resolution = "720p" if is_super else "480p"
 
         # 获取 token
         try:
