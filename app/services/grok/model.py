@@ -110,7 +110,17 @@ class ModelService:
             model_mode="MODEL_MODE_FAST",
             cost=Cost.HIGH,
             display_name="Grok Video",
-            description="Video generation model",
+            description="Video generation model (6s, basic token)",
+            is_video=True
+        ),
+        ModelInfo(
+            model_id="grok-imagine-1.0-video-super",
+            grok_model="grok-3",
+            model_mode="MODEL_MODE_FAST",
+            cost=Cost.HIGH,
+            tier=Tier.SUPER,
+            display_name="Grok Video Super",
+            description="Video generation model (10-15s, super token)",
             is_video=True
         ),
         ModelInfo(

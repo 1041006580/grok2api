@@ -38,10 +38,10 @@ class MessageItem(BaseModel):
 
 class VideoConfig(BaseModel):
     """视频生成配置"""
-    aspect_ratio: Optional[str] = Field("3:2", description="视频比例: 3:2, 16:9, 1:1 等")
-    video_length: Optional[int] = Field(6, description="视频时长(秒): 5-15")
-    resolution: Optional[str] = Field("SD", description="视频分辨率: SD, HD")
-    preset: Optional[str] = Field("custom", description="风格预设: fun, normal, spicy")
+    aspect_ratio: Optional[str] = Field(None, description="视频比例: 3:2, 16:9, 1:1 等")
+    video_length: Optional[int] = Field(None, description="视频时长(秒): 5-15，super模型默认10秒，普通模型默认6秒")
+    resolution: Optional[str] = Field(None, description="视频分辨率: SD, HD，super模型默认HD，普通模型默认SD")
+    preset: Optional[str] = Field(None, description="风格预设: fun, normal, spicy, custom")
     
     @field_validator("aspect_ratio")
     @classmethod

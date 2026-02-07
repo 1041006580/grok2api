@@ -421,9 +421,9 @@ class VideoService:
         stream: bool = None,
         thinking: str = None,
         aspect_ratio: str = "3:2",
-        video_length: int = 6,
-        resolution: str = "SD",
-        preset: str = "normal",
+        video_length: int = None,
+        resolution: str = None,
+        preset: str = "custom",
     ):
         """
         视频生成入口
@@ -441,6 +441,13 @@ class VideoService:
         Returns:
             AsyncGenerator (流式) 或 dict (非流式)
         """
+        # 根据模型设置默认值
+        is_super = model == "grok-imagine-1.0-video-super"
+        if video_length is None:
+            video_length = 10 if is_super else 6
+        if resolution is None:
+            resolution = "HD" if is_super else "SD"
+
         # 获取 token
         try:
             token_mgr = await get_token_manager()
