@@ -4,21 +4,13 @@ import asyncio
 import json
 import uuid
 import time
-import base64
 import ssl
 import re
-from typing import Optional, List, Dict, Any, Callable, Awaitable, Set
+from typing import Optional, List, Dict, Any, Callable, Awaitable
 from dataclasses import dataclass, field
 
 import aiohttp
 from aiohttp_socks import ProxyConnector
-
-try:
-    from curl_cffi import requests as curl_requests
-    CURL_CFFI_AVAILABLE = True
-except ImportError:
-    CURL_CFFI_AVAILABLE = False
-    curl_requests = None
 
 from app.core.config import config
 from app.core.logger import logger
@@ -27,9 +19,6 @@ from app.services.token import TokenService, EffortType
 
 # WebSocket 常量
 WS_URL = "wss://grok.com/ws/imagine/listen"
-
-# 已完成年龄验证的 token 集合（内存缓存）
-_age_verified_tokens: Set[str] = set()
 
 
 @dataclass
@@ -339,7 +328,7 @@ class ImagineWSClient:
                                                 if img.is_final
                                             ])
 
-                                            logger.info(
+                                            logger.debug(
                                                 f"[ImagineWS] 图片 {image_id[:8]}... "
                                                 f"阶段={stage} 大小={blob_size} "
                                                 f"进度={progress.completed}/{n}"
@@ -445,7 +434,7 @@ class ImagineWSClient:
             result_b64.append(img.blob)
             saved_ids.add(img.image_id)
 
-            logger.info(
+            logger.debug(
                 f"[ImagineWS] 收集图片: {img.image_id[:8]}... "
                 f"({img.blob_size / 1024:.1f}KB)"
             )
