@@ -23,6 +23,7 @@ from app.services.grok.assets import UploadService
 from app.services.grok.processor import StreamProcessor, CollectProcessor
 from app.services.grok.retry import retry_on_status
 from app.services.token import get_token_manager, EffortType
+from app.services.token.manager import mask_token
 
 
 CHAT_API = "https://grok.com/rest/app-chat/conversations/new"
@@ -344,7 +345,7 @@ class GrokChatService:
                         f"Chat failed: {response.status_code}, {content}",
                         extra={
                             "status": response.status_code,
-                            "token": token[:10] + "...",
+                            "token": mask_token(token),
                         },
                     )
                     # 关闭 session 并抛出异常
@@ -473,7 +474,7 @@ class ChatService:
     """Chat 业务服务"""
 
     @staticmethod
-    async def _wrap_stream(stream: AsyncGenerator, token_mgr, token: str, model: str):
+    async def _wrap_stream(stream: AsyncGenerator, token_mgr, token: str, model: str, pool_name: str):
         """
         包装流式响应，在完成时记录使用
 
@@ -482,6 +483,7 @@ class ChatService:
             token_mgr: TokenManager 实例
             token: Token 字符串
             model: 模型名称
+            pool_name: Token 池名称
         """
         try:
             async for chunk in stream:
@@ -497,7 +499,7 @@ class ChatService:
                 )
                 await token_mgr.consume(token, effort)
                 logger.debug(
-                    f"Stream completed, recorded usage for token {token[:10]}... (effort={effort.value})"
+                    f"Stream completed, recorded usage for token {mask_token(token, pool_name)} (effort={effort.value})"
                 )
             except Exception as e:
                 logger.warning(f"Failed to record stream usage: {e}")
@@ -574,7 +576,7 @@ class ChatService:
         if is_stream:
             processor = StreamProcessor(model_name, token, think)
             return ChatService._wrap_stream(
-                processor.process(response), token_mgr, token, model
+                processor.process(response), token_mgr, token, model, pool_name
             )
         else:
             result = await CollectProcessor(model_name, token).process(response)
@@ -588,7 +590,7 @@ class ChatService:
                 )
                 await token_mgr.consume(token, effort)
                 logger.debug(
-                    f"Collect completed, recorded usage for token {token[:10]}... (effort={effort.value})"
+                    f"Collect completed, recorded usage for token {mask_token(token, pool_name)} (effort={effort.value})"
                 )
             except Exception as e:
                 logger.warning(f"Failed to record collect usage: {e}")

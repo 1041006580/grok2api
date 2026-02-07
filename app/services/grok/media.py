@@ -20,6 +20,7 @@ from app.core.exceptions import (
 from app.services.grok.statsig import StatsigService
 from app.services.grok.model import ModelService
 from app.services.token import get_token_manager, EffortType
+from app.services.token.manager import mask_token
 from app.services.grok.processor import VideoStreamProcessor, VideoCollectProcessor
 
 # API 端点
@@ -386,7 +387,7 @@ class VideoService:
                 raise UpstreamException(f"Video from image error: {str(e)}")
 
     @staticmethod
-    async def _wrap_stream(stream: AsyncGenerator, token_mgr, token: str, model: str):
+    async def _wrap_stream(stream: AsyncGenerator, token_mgr, token: str, model: str, pool_name: str):
         """
         包装流式响应，在完成时记录使用
 
@@ -395,6 +396,7 @@ class VideoService:
             token_mgr: TokenManager 实例
             token: Token 字符串
             model: 模型名称
+            pool_name: Token 池名称
         """
         try:
             async for chunk in stream:
@@ -409,7 +411,7 @@ class VideoService:
                 )
                 await token_mgr.consume(token, effort)
                 logger.debug(
-                    f"Video stream completed, recorded usage for token {token[:10]}... (effort={effort.value})"
+                    f"Video stream completed, recorded usage for token {mask_token(token, pool_name)} (effort={effort.value})"
                 )
             except Exception as e:
                 logger.warning(f"Failed to record video stream usage: {e}")
@@ -527,7 +529,7 @@ class VideoService:
         if is_stream:
             processor = VideoStreamProcessor(model, token, think)
             return VideoService._wrap_stream(
-                processor.process(response), token_mgr, token, model
+                processor.process(response), token_mgr, token, model, pool_name
             )
         else:
             result = await VideoCollectProcessor(model, token).process(response)
@@ -541,7 +543,7 @@ class VideoService:
                 )
                 await token_mgr.consume(token, effort)
                 logger.debug(
-                    f"Video completed, recorded usage for token {token[:10]}... (effort={effort.value})"
+                    f"Video completed, recorded usage for token {mask_token(token, pool_name)} (effort={effort.value})"
                 )
             except Exception as e:
                 logger.warning(f"Failed to record video usage: {e}")
