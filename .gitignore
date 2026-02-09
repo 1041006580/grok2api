@@ -57,3 +57,4 @@ htmlcov/
 
 # Project specific
 config.local.toml
+data/config.local.toml

@@ -191,8 +191,10 @@ class VideoService:
         video_length: int = 6,
         resolution: str = "480p",
         preset: str = "normal",
+        image_url: str = None,
     ) -> dict:
         """构建视频生成载荷"""
+        preset = str(preset or "custom").strip().lower()
         mode_flag = "--mode=custom"
         if preset == "fun":
             mode_flag = "--mode=extremely-crazy"
@@ -201,7 +203,16 @@ class VideoService:
         elif preset == "spicy":
             mode_flag = "--mode=extremely-spicy-or-crazy"
 
-        full_prompt = f"{prompt} {mode_flag}"
+        prompt = (prompt or "").strip()
+        if image_url:
+            image_url = image_url.strip()
+            # Browser parity: include prompt text for image+prompt mode.
+            if prompt:
+                full_prompt = f"{image_url}  {prompt} {mode_flag}"
+            else:
+                full_prompt = f"{image_url}  {mode_flag}"
+        else:
+            full_prompt = f"{prompt} {mode_flag}" if prompt else mode_flag
 
         payload = {
             "temporary": True,
@@ -355,7 +366,7 @@ class VideoService:
                 # Step 2: 建立连接
                 headers = self._build_headers(token)
                 payload = self._build_payload(
-                    prompt, post_id, aspect_ratio, video_length, resolution, preset
+                    prompt, post_id, aspect_ratio, video_length, resolution, preset, image_url=image_url
                 )
 
                 session = AsyncSession(impersonate=BROWSER)
@@ -441,6 +452,7 @@ class VideoService:
         video_length: int = None,
         resolution: str = None,
         preset: str = "custom",
+        client_type: str = "",
     ):
         """
         视频生成入口
@@ -466,8 +478,6 @@ class VideoService:
             resolution = "720p" if is_super else "480p"
         if aspect_ratio is None:
             aspect_ratio = get_config("imagine.default_aspect_ratio", "2:3")
-        if preset is None:
-            preset = "custom"
 
         # 获取 token
         try:
@@ -529,6 +539,12 @@ class VideoService:
 
         # 图片转视频
         if image_url:
+            configured_mode = str(
+                get_config("grok.video_no_prompt_mode", "normal")
+            ).strip().lower()
+            if configured_mode not in {"fun", "normal", "spicy"}:
+                configured_mode = "normal"
+            effective_preset = preset or ("custom" if prompt else configured_mode)
             response = await service.generate_from_image(
                 token,
                 prompt,
@@ -537,21 +553,28 @@ class VideoService:
                 video_length,
                 resolution,
                 stream,
-                preset,
+                effective_preset,
             )
         else:
+            effective_preset = preset or "custom"
             response = await service.generate(
-                token, prompt, aspect_ratio, video_length, resolution, stream, preset
+                token,
+                prompt,
+                aspect_ratio,
+                video_length,
+                resolution,
+                stream,
+                effective_preset,
             )
 
         # 处理响应
         if is_stream:
-            processor = VideoStreamProcessor(model, token, think)
+            processor = VideoStreamProcessor(model, token, think, client_type)
             return VideoService._wrap_stream(
                 processor.process(response), token_mgr, token, model, pool_name
             )
         else:
-            result = await VideoCollectProcessor(model, token).process(response)
+            result = await VideoCollectProcessor(model, token, client_type).process(response)
             # 非流式：处理完成后立即记录使用
             try:
                 model_info = ModelService.get(model)

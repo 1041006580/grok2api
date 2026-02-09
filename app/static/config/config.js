@@ -47,7 +47,8 @@ const LOCALE_MAP = {
     "asset_proxy_url": { title: "资源代理", desc: "HTTP/SOCKS5 代理地址，用于请求静态资源。" },
     "cf_clearance": { title: "CF Clearance", desc: "Cloudflare 验证 Cookie，用于验证 Cloudflare 的验证。" },
     "max_retry": { title: "最大重试", desc: "请求 Grok 服务失败时的最大重试次数。" },
-    "retry_status_codes": { title: "重试状态码", desc: "触发重试的 HTTP 状态码列表。" }
+    "retry_status_codes": { title: "重试状态码", desc: "触发重试的 HTTP 状态码列表。" },
+    "video_no_prompt_mode": { title: "Image->Video default mode", desc: "Default mode for image-to-video when no prompt is provided (Fun/Normal/Spicy)." }
   },
   "token": {
     "label": "Token 池设置",
@@ -280,6 +281,13 @@ function renderConfig(data) {
       else if (key === 'video_format') {
         built = buildSelectInput(section, key, 'url', [
           { val: 'url', text: 'URL' }
+        ]);
+      }
+      else if (key === 'video_no_prompt_mode') {
+        built = buildSelectInput(section, key, val || 'normal', [
+          { val: 'fun', text: 'Fun' },
+          { val: 'normal', text: 'Normal' },
+          { val: 'spicy', text: 'Spicy' }
         ]);
       }
       else if (key === 'default_aspect_ratio') {

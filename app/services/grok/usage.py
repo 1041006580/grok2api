@@ -137,6 +137,7 @@ class UsageService:
                         data = response.json()
                         remaining = data.get('remainingTokens', 0)
                         logger.info(f"Usage: quota {remaining} remaining")
+                        logger.debug(f"Usage response: {data}")
                         return data
                     
                     logger.error(f"Usage failed: {response.status_code}")

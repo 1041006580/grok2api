@@ -82,9 +82,9 @@ class VideoConfig(BaseModel):
     @field_validator("preset")
     @classmethod
     def validate_preset(cls, v):
-        # 允许为空，默认 custom
+        # Allow empty; service layer decides context-aware default.
         if not v:
-            return "custom"
+            return None
         allowed = ["fun", "normal", "spicy", "custom"]
         if v not in allowed:
              raise ValidationException(
@@ -230,6 +230,9 @@ async def chat_completions(request: ChatCompletionRequest, http_request: Request
             # 提取视频配置 (默认值在 Pydantic 模型中处理)
             v_conf = request.video_config or VideoConfig()
 
+            # 检测客户端类型
+            client_type = http_request.headers.get("x-title", "")
+
             result = await VideoService.completions(
                 model=request.model,
                 messages=[msg.model_dump() for msg in request.messages],
@@ -238,7 +241,8 @@ async def chat_completions(request: ChatCompletionRequest, http_request: Request
                 aspect_ratio=v_conf.aspect_ratio,
                 video_length=v_conf.video_length,
                 resolution=v_conf.resolution,
-                preset=v_conf.preset
+                preset=v_conf.preset,
+                client_type=client_type,
             )
         else:
             result = await ChatService.completions(

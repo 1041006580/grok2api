@@ -10,6 +10,7 @@ import aiofiles
 import asyncio
 import orjson
 from app.core.logger import logger
+from copy import deepcopy
 
 
 router = APIRouter()
@@ -113,9 +114,14 @@ async def admin_login_api():
 
 @router.get("/api/v1/admin/config", dependencies=[Depends(verify_api_key)])
 async def get_config_api():
-    """获取当前配置"""
-    # 暴露原始配置字典
-    return config._config
+    """??????"""
+    cfg = deepcopy(config._config)
+    grok_cfg = cfg.setdefault("grok", {})
+    mode = str(grok_cfg.get("video_no_prompt_mode", "normal")).strip().lower()
+    if mode not in {"fun", "normal", "spicy"}:
+        mode = "normal"
+    grok_cfg["video_no_prompt_mode"] = mode
+    return cfg
 
 
 @router.post("/api/v1/admin/config", dependencies=[Depends(verify_api_key)])

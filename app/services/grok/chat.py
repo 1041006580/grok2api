@@ -58,6 +58,32 @@ class MessageExtractor:
     VIDEO_UNSUPPORTED = {"input_audio", "file"}
 
     @staticmethod
+    def _extract_last_user(messages: List[Dict[str, Any]]) -> tuple[str, List]:
+        """提取最后一条 user 消息（用于视频模型）"""
+        attachments = []
+        for msg in reversed(messages):
+            if msg.get("role") != "user":
+                continue
+            content = msg.get("content", "")
+            if isinstance(content, str):
+                return content.strip(), attachments
+            if isinstance(content, list):
+                text_parts = []
+                for item in content:
+                    item_type = item.get("type", "")
+                    if item_type == "text":
+                        t = item.get("text", "").strip()
+                        if t:
+                            text_parts.append(t)
+                    elif item_type == "image_url":
+                        image_data = item.get("image_url", {})
+                        url = image_data.get("url", "") if isinstance(image_data, dict) else str(image_data)
+                        if url:
+                            attachments.append(("image", url))
+                return "\n".join(text_parts), attachments
+        return "", attachments
+
+    @staticmethod
     def extract(
         messages: List[Dict[str, Any]], is_video: bool = False
     ) -> tuple[str, List[str]]:
@@ -74,9 +100,13 @@ class MessageExtractor:
         Raises:
             ValueError: 视频模型遇到不支持的内容类型
         """
-        texts = []
-        attachments = []  # 需要上传的附件 (URL 或 base64)
+        # 视频模型：只提取最后一条 user 消息
+        if is_video:
+            return MessageExtractor._extract_last_user(messages)
 
+        # 非视频模型：拼接所有消息
+        texts = []
+        attachments = []
         # 先抽取每条消息的文本，保留角色信息用于合并
         extracted: List[Dict[str, str]] = []
 
@@ -335,19 +365,19 @@ class GrokChatService:
                 )
 
                 if response.status_code != 200:
+                    # 尝试读取错误响应内容
+                    content = ""
                     try:
-                        content = await response.text()
-                        content = content[:1000]  # 限制长度避免日志过大
-                    except:
-                        content = "Unable to read response content"
+                        chunks = []
+                        async for chunk in response.aiter_content():
+                            chunks.append(chunk)
+                            if len(b''.join(chunks)) > 2000:
+                                break
+                        content = b''.join(chunks).decode('utf-8', errors='replace')[:2000]
+                    except Exception as read_err:
+                        content = f"Unable to read response: {read_err}"
 
-                    logger.error(
-                        f"Chat failed: {response.status_code}, {content}",
-                        extra={
-                            "status": response.status_code,
-                            "token": mask_token(token),
-                        },
-                    )
+                    logger.error(f"Chat failed: {response.status_code}, response={content}")
                     # 关闭 session 并抛出异常
                     try:
                         await session.close()

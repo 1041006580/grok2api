@@ -188,25 +188,40 @@ class TokenManager:
         获取可用 Token
 
         Args:
-            pool_name: Token 池名称
+            pool_name: 首选 Token 池名称
+                - "ssoSuper": 只从 ssoSuper 池获取（用于 heavy/video-super 等模型）
+                - "ssoBasic": 优先 ssoBasic，没有则尝试 ssoSuper
 
         Returns:
             Token 字符串或 None
         """
-        pool = self.pools.get(pool_name)
-        if not pool:
-            logger.warning(f"Pool '{pool_name}' not found")
-            return None
+        # ssoSuper 模式：只从 ssoSuper 池获取
+        if pool_name == "ssoSuper":
+            pool = self.pools.get("ssoSuper")
+            if not pool:
+                logger.warning("Pool 'ssoSuper' not found")
+                return None
+            token_info = pool.select()
+            if not token_info:
+                logger.warning("No available token in pool 'ssoSuper'")
+                return None
+            token = token_info.token
+            return token[4:] if token.startswith("sso=") else token
 
-        token_info = pool.select()
-        if not token_info:
-            logger.warning(f"No available token in pool '{pool_name}'")
-            return None
+        # ssoBasic 模式：优先 ssoBasic，没有则尝试 ssoSuper
+        for try_pool in [pool_name, "ssoSuper"]:
+            pool = self.pools.get(try_pool)
+            if not pool:
+                continue
+            token_info = pool.select()
+            if token_info:
+                if try_pool != pool_name:
+                    logger.debug(f"Pool '{pool_name}' unavailable, using '{try_pool}'")
+                token = token_info.token
+                return token[4:] if token.startswith("sso=") else token
 
-        token = token_info.token
-        if token.startswith("sso="):
-            return token[4:]
-        return token
+        logger.warning(f"No available token in pool '{pool_name}' or fallback pools")
+        return None
 
     async def consume(
         self, token_str: str, effort: EffortType = EffortType.LOW

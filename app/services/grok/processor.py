@@ -37,6 +37,39 @@ class BaseProcessor:
             await self._dl_service.close()
             self._dl_service = None
 
+    @staticmethod
+    def _should_log_grok_response() -> bool:
+        """Whether to log upstream Grok response chunks for debugging."""
+        return bool(get_config("grok.log_response_chunks", False))
+
+    @staticmethod
+    def _chunk_log_limit() -> int:
+        """Maximum characters to keep per logged Grok chunk."""
+        value = get_config("grok.log_response_chunk_max_chars", 1200)
+        try:
+            return max(200, int(value))
+        except (TypeError, ValueError):
+            return 1200
+
+    def _log_grok_response_chunk(self, line: Any, stage: str) -> None:
+        """Log a truncated raw chunk to help diagnose upstream schema changes."""
+        if not self._should_log_grok_response():
+            return
+
+        if isinstance(line, (bytes, bytearray)):
+            raw = line.decode("utf-8", errors="replace")
+        else:
+            raw = str(line)
+
+        raw = raw.replace("\r", "").replace("\n", "\\n")
+        limit = self._chunk_log_limit()
+        if len(raw) > limit:
+            omitted = len(raw) - limit
+            raw = f"{raw[:limit]}...<truncated {omitted} chars>"
+
+        logger.info(f"Grok chunk[{stage}]: {raw}")
+
+
     async def process_url(self, path: str, media_type: str = "image") -> str:
         """处理资产 URL"""
         # 处理可能的绝对路径
@@ -209,7 +242,8 @@ class StreamProcessor(BaseProcessor):
                         
             if self.think_opened:
                 yield self._sse("</think>\n")
-            yield self._sse(finish="stop")
+            finish_reason = "content_filter" if self.content_filtered else "stop"
+            yield self._sse(finish=finish_reason)
             yield "data: [DONE]\n\n"
         except Exception as e:
             logger.error(f"Stream processing error: {e}", extra={"model": self.model})
@@ -296,32 +330,46 @@ class CollectProcessor(BaseProcessor):
 
 class VideoStreamProcessor(BaseProcessor):
     """视频流式响应处理器"""
-    
-    def __init__(self, model: str, token: str = "", think: bool = None):
+
+    def __init__(self, model: str, token: str = "", think: bool = None, client_type: str = ""):
         super().__init__(model, token)
         self.response_id: Optional[str] = None
         self.think_opened: bool = False
         self.role_sent: bool = False
         self.video_format = get_config("app.video_format", "url")
-        
+        self.client_type = client_type
+        self.content_filtered: bool = False
+
         if think is None:
             self.show_think = get_config("grok.thinking", False)
         else:
             self.show_think = think
-    
+
     def _build_video_html(self, video_url: str, thumbnail_url: str = "") -> str:
         """构建视频 HTML 标签"""
         poster_attr = f' poster="{thumbnail_url}"' if thumbnail_url else ""
+        # Cherry Studio 使用 markdown 链接格式
+        if self.client_type == "Cherry Studio":
+            return f"[点击播放视频]({video_url})"
         return f'''<video id="video" controls="" preload="none"{poster_attr}>
   <source id="mp4" src="{video_url}" type="video/mp4">
 </video>'''
     
+    @staticmethod
+    def _is_progress_done(progress: Any) -> bool:
+        """Handle both numeric and string progress values (e.g. "100")."""
+        try:
+            return float(progress) >= 100
+        except (TypeError, ValueError):
+            return False
+
     async def process(self, response: AsyncIterable[bytes]) -> AsyncGenerator[str, None]:
         """处理视频流式响应"""
         try:
             async for line in response:
                 if not line:
                     continue
+                self._log_grok_response_chunk(line, "video-stream")
                 try:
                     data = orjson.loads(line)
                 except orjson.JSONDecodeError:
@@ -347,29 +395,80 @@ class VideoStreamProcessor(BaseProcessor):
                             self.think_opened = True
                         yield self._sse(f"正在生成视频中，当前进度{progress}%\n")
                     
-                    if progress == 100:
-                        video_url = video_resp.get("videoUrl", "")
-                        thumbnail_url = video_resp.get("thumbnailImageUrl", "")
-                        
+                    if self._is_progress_done(progress):
+                        model_resp = resp.get("modelResponse", {})
+                        video_url = (
+                            video_resp.get("videoUrl", "")
+                            or video_resp.get("url", "")
+                            or video_resp.get("mediaUrl", "")
+                        )
+                        if not video_url and (urls := video_resp.get("generatedVideoUrls", [])):
+                            if isinstance(urls, list) and urls:
+                                video_url = urls[0] or ""
+                        if not video_url:
+                            model_urls = model_resp.get("generatedVideoUrls", [])
+                            if isinstance(model_urls, list) and model_urls:
+                                video_url = model_urls[0] or ""
+                            if not video_url:
+                                video_url = (
+                                    model_resp.get("videoUrl", "")
+                                    or model_resp.get("mediaUrl", "")
+                                    or model_resp.get("url", "")
+                                )
+
+                        thumbnail_url = (
+                            video_resp.get("thumbnailImageUrl", "")
+                            or video_resp.get("thumbnailUrl", "")
+                            or model_resp.get("thumbnailImageUrl", "")
+                            or model_resp.get("thumbnailUrl", "")
+                        )
+
                         if self.think_opened and self.show_think:
                             yield self._sse("</think>\n")
                             self.think_opened = False
-                        
-                        if video_url:
+
+                        moderated = bool(video_resp.get("moderated", False))
+                        if moderated:
+                            self.content_filtered = True
+                            fallback_text = "Content Moderated. Try a different idea."
+                            logger.warning(
+                                "Video generation moderated by upstream",
+                                extra={
+                                    "model": self.model,
+                                    "response_id": self.response_id,
+                                    "video_id": video_resp.get("videoId", ""),
+                                    "video_post_id": video_resp.get("videoPostId", ""),
+                                },
+                            )
+                            yield self._sse(fallback_text + "\n")
+                        elif video_url:
                             final_video_url = await self.process_url(video_url, "video")
                             final_thumbnail_url = ""
                             if thumbnail_url:
                                 final_thumbnail_url = await self.process_url(thumbnail_url, "image")
-                            
+
                             video_html = self._build_video_html(final_video_url, final_thumbnail_url)
                             yield self._sse(video_html)
-                            
+
                             logger.info(f"Video generated: {video_url}")
+                        else:
+                            fallback_text = model_resp.get("message") or "Video generation completed but no playable URL was returned. Please try again later."
+                            logger.warning(
+                                "Video progress reached 100 but no video URL found",
+                                extra={
+                                    "model": self.model,
+                                    "response_id": self.response_id,
+                                    "video_id": video_resp.get("videoId", ""),
+                                    "video_post_id": video_resp.get("videoPostId", ""),
+                                },
+                            )
+                            yield self._sse(fallback_text + "\n")
                     continue
                         
             if self.think_opened:
                 yield self._sse("</think>\n")
-            yield self._sse(finish="stop")
+            finish_reason = "content_filter" if self.content_filtered else "stop"
+            yield self._sse(finish=finish_reason)
             yield "data: [DONE]\n\n"
         except Exception as e:
             logger.error(f"Video stream processing error: {e}", extra={"model": self.model})
@@ -379,26 +478,40 @@ class VideoStreamProcessor(BaseProcessor):
 
 class VideoCollectProcessor(BaseProcessor):
     """视频非流式响应处理器"""
-    
-    def __init__(self, model: str, token: str = ""):
+
+    def __init__(self, model: str, token: str = "", client_type: str = ""):
         super().__init__(model, token)
         self.video_format = get_config("app.video_format", "url")
-    
+        self.client_type = client_type
+
     def _build_video_html(self, video_url: str, thumbnail_url: str = "") -> str:
         poster_attr = f' poster="{thumbnail_url}"' if thumbnail_url else ""
+        # Cherry Studio 使用 markdown 链接格式
+        if self.client_type == "Cherry Studio":
+            return f"[点击播放视频]({video_url})"
         return f'''<video id="video" controls="" preload="none"{poster_attr}>
   <source id="mp4" src="{video_url}" type="video/mp4">
 </video>'''
     
+    @staticmethod
+    def _is_progress_done(progress: Any) -> bool:
+        """Handle both numeric and string progress values (e.g. "100")."""
+        try:
+            return float(progress) >= 100
+        except (TypeError, ValueError):
+            return False
+
     async def process(self, response: AsyncIterable[bytes]) -> dict[str, Any]:
         """处理并收集视频响应"""
         response_id = ""
         content = ""
-        
+        refusal = None
+
         try:
             async for line in response:
                 if not line:
                     continue
+                self._log_grok_response_chunk(line, "video-collect")
                 try:
                     data = orjson.loads(line)
                 except orjson.JSONDecodeError:
@@ -407,25 +520,75 @@ class VideoCollectProcessor(BaseProcessor):
                 resp = data.get("result", {}).get("response", {})
                 
                 if video_resp := resp.get("streamingVideoGenerationResponse"):
-                    if video_resp.get("progress") == 100:
+                    if self._is_progress_done(video_resp.get("progress")):
                         response_id = resp.get("responseId", "")
-                        video_url = video_resp.get("videoUrl", "")
-                        thumbnail_url = video_resp.get("thumbnailImageUrl", "")
-                        
-                        if video_url:
+                        model_resp = resp.get("modelResponse", {})
+
+                        video_url = (
+                            video_resp.get("videoUrl", "")
+                            or video_resp.get("url", "")
+                            or video_resp.get("mediaUrl", "")
+                        )
+                        if not video_url and (urls := video_resp.get("generatedVideoUrls", [])):
+                            if isinstance(urls, list) and urls:
+                                video_url = urls[0] or ""
+                        if not video_url:
+                            model_urls = model_resp.get("generatedVideoUrls", [])
+                            if isinstance(model_urls, list) and model_urls:
+                                video_url = model_urls[0] or ""
+                            if not video_url:
+                                video_url = (
+                                    model_resp.get("videoUrl", "")
+                                    or model_resp.get("mediaUrl", "")
+                                    or model_resp.get("url", "")
+                                )
+
+                        thumbnail_url = (
+                            video_resp.get("thumbnailImageUrl", "")
+                            or video_resp.get("thumbnailUrl", "")
+                            or model_resp.get("thumbnailImageUrl", "")
+                            or model_resp.get("thumbnailUrl", "")
+                        )
+
+                        moderated = bool(video_resp.get("moderated", False))
+                        if moderated:
+                            content = "Content Moderated. Try a different idea."
+                            refusal = content
+                            logger.warning(
+                                "Video generation moderated by upstream",
+                                extra={
+                                    "model": self.model,
+                                    "response_id": response_id,
+                                    "video_id": video_resp.get("videoId", ""),
+                                    "video_post_id": video_resp.get("videoPostId", ""),
+                                },
+                            )
+                        elif video_url:
                             final_video_url = await self.process_url(video_url, "video")
                             final_thumbnail_url = ""
                             if thumbnail_url:
                                 final_thumbnail_url = await self.process_url(thumbnail_url, "image")
-                            
+
                             content = self._build_video_html(final_video_url, final_thumbnail_url)
                             logger.info(f"Video generated: {video_url}")
+                        else:
+                            content = model_resp.get("message") or "Video generation completed but no playable URL was returned. Please try again later."
+                            logger.warning(
+                                "Video progress reached 100 but no video URL found",
+                                extra={
+                                    "model": self.model,
+                                    "response_id": response_id,
+                                    "video_id": video_resp.get("videoId", ""),
+                                    "video_post_id": video_resp.get("videoPostId", ""),
+                                },
+                            )
                             
         except Exception as e:
             logger.error(f"Video collect processing error: {e}", extra={"model": self.model})
         finally:
             await self.close()
         
+        finish_reason = "content_filter" if refusal else "stop"
         return {
             "id": response_id,
             "object": "chat.completion",
@@ -433,8 +596,8 @@ class VideoCollectProcessor(BaseProcessor):
             "model": self.model,
             "choices": [{
                 "index": 0,
-                "message": {"role": "assistant", "content": content, "refusal": None},
-                "finish_reason": "stop"
+                "message": {"role": "assistant", "content": content, "refusal": refusal},
+                "finish_reason": finish_reason
             }],
             "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
         }
