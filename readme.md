@@ -221,6 +221,15 @@ curl http://localhost:8000/v1/images/generations \
 |                       | `assets_delete_batch_size` | 在线资产删除批量 | 在线资产删除单批并发数量。推荐 10。                  | `10`                                                   |
 |                       | `media_max_concurrent`     | 媒体并发上限 | 视频/媒体生成请求的并发上限。推荐 50。               | `50`                                                   |
 
+### 图生视频图片来源判定
+
+- `imagine-public.x.ai/imagine-public/images/...`：按「文生图来源」处理，直接走图生视频链路。
+- `assets.grok.com/.../content`：按「上传附件来源」处理，并在请求中携带 `fileAttachments`。
+- `/v1/files/image/...`：按「项目转存的生成图」处理，归类为文生图来源。
+- `image_url.url` 为 base64：默认按上传处理；若来源台账里命中历史生成图 hash，则自动回退到文生图来源。
+
+来源台账与现有存储后端共用同一套配置（`SERVER_STORAGE_TYPE` / `SERVER_STORAGE_URL`），支持 local / redis / mysql / pgsql。
+
 <br>
 
 ## Star History

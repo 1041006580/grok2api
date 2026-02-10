@@ -10,6 +10,7 @@ from typing import Any, AsyncGenerator, Optional, AsyncIterable, List
 from app.core.config import get_config
 from app.core.logger import logger
 from app.services.grok.assets import DownloadService
+from app.services.image_origin import ORIGIN_GENERATED, get_image_origin_ledger
 
 
 ASSET_URL = "https://assets.grok.com/"
@@ -83,7 +84,16 @@ class BaseProcessor:
         if self.app_url:
             dl_service = self._get_dl()
             await dl_service.download(path, self.token, media_type)
-            return f"{self.app_url.rstrip('/')}/v1/files/{media_type}{path}"
+            final_url = f"{self.app_url.rstrip('/')}/v1/files/{media_type}{path}"
+            if media_type == "image":
+                ledger = get_image_origin_ledger()
+                await ledger.upsert_origin(
+                    source_type=ORIGIN_GENERATED,
+                    canonical_url=final_url,
+                    original_url=f"{ASSET_URL.rstrip('/')}{path}",
+                    metadata={"via": "processor_proxy_url"},
+                )
+            return final_url
         else:
             return f"{ASSET_URL.rstrip('/')}{path}"
             
