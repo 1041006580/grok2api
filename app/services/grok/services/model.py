@@ -210,6 +210,18 @@ class ModelService:
             is_image_edit=False,
             is_video=True,
         ),
+        ModelInfo(
+            model_id="grok-imagine-1.0-video-super",
+            grok_model="grok-3",
+            model_mode="MODEL_MODE_FAST",
+            tier=Tier.SUPER,
+            cost=Cost.HIGH,
+            display_name="Grok Video Super",
+            description="Video generation model (10-15s, super token)",
+            is_image=False,
+            is_image_edit=False,
+            is_video=True,
+        ),
     ]
 
     _map = {m.model_id: m for m in MODELS}

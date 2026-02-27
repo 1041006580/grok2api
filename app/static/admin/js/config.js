@@ -42,7 +42,7 @@ const LOCALE_MAP = {
     "public_key": { title: "Public 密码", desc: "功能玩法页面的访问密码（可选）。" },
     "app_url": { title: "应用地址", desc: "当前 Grok2API 服务的外部访问 URL，用于文件链接访问。" },
     "image_format": { title: "图片格式", desc: "默认生成的图片格式（url 或 base64）。" },
-    "video_format": { title: "视频格式", desc: "默认生成的视频格式（html 或 url，url 为处理后的链接）。" },
+    "video_format": { title: "视频格式", desc: "生成视频的返回格式（url / markdown / html / poster）。" },
     "temporary": { title: "临时对话", desc: "是否默认启用临时对话模式。" },
     "disable_memory": { title: "禁用记忆", desc: "是否默认禁用 Grok 记忆功能。" },
     "stream": { title: "流式响应", desc: "是否默认启用流式输出。" },
@@ -56,6 +56,8 @@ const LOCALE_MAP = {
     "label": "代理配置",
     "base_proxy_url": { title: "基础代理 URL", desc: "代理请求到 Grok 官网的基础服务地址。" },
     "asset_proxy_url": { title: "资源代理 URL", desc: "代理请求到 Grok 官网的静态资源（图片/视频）地址。" },
+    "reverse_base_url": { title: "反代基础地址", desc: "替换 grok.com 域名的反代地址（如 https://my-proxy.example.com）。" },
+    "reverse_asset_url": { title: "反代资源地址", desc: "替换 assets.grok.com 域名的反代地址（如 https://my-assets-proxy.example.com）。" },
     "cf_clearance": { title: "CF Clearance", desc: "Cloudflare Clearance Cookie，用于绕过反爬虫验证。" },
     "browser": { title: "浏览器指纹", desc: "curl_cffi 浏览器指纹标识（如 chrome136）。" },
     "user_agent": { title: "User-Agent", desc: "HTTP 请求的 User-Agent 字符串，需与浏览器指纹匹配。" }
@@ -66,6 +68,7 @@ const LOCALE_MAP = {
     "label": "重试策略",
     "max_retry": { title: "最大重试次数", desc: "请求 Grok 服务失败时的最大重试次数。" },
     "retry_status_codes": { title: "重试状态码", desc: "触发重试的 HTTP 状态码列表。" },
+    "reset_session_status_codes": { title: "重置会话状态码", desc: "触发重置 curl session 的 HTTP 状态码列表（如 403 表示被 CF 拦截时重建连接）。" },
     "retry_backoff_base": { title: "退避基数", desc: "重试退避的基础延迟（秒）。" },
     "retry_backoff_factor": { title: "退避倍率", desc: "重试退避的指数放大系数。" },
     "retry_backoff_max": { title: "退避上限", desc: "单次重试等待的最大延迟（秒）。" },
@@ -85,7 +88,9 @@ const LOCALE_MAP = {
     "label": "视频配置",
     "concurrent": { title: "并发上限", desc: "Reverse 接口并发上限。" },
     "timeout": { title: "请求超时", desc: "Reverse 接口超时时间（秒）。" },
-    "stream_timeout": { title: "流空闲超时", desc: "流式空闲超时时间（秒）。" }
+    "stream_timeout": { title: "流空闲超时", desc: "流式空闲超时时间（秒）。" },
+    "default_mode": { title: "图生视频默认模式", desc: "图生视频的默认模式（normal / fun / spicy）。" },
+    "default_aspect_ratio": { title: "默认宽高比", desc: "视频生成的默认宽高比。" }
   },
 
 
@@ -96,7 +101,9 @@ const LOCALE_MAP = {
     "final_timeout": { title: "最终图超时", desc: "收到中等图后等待最终图的超时秒数。" },
     "nsfw": { title: "NSFW 模式", desc: "WebSocket 请求是否启用 NSFW。" },
     "medium_min_bytes": { title: "中等图最小字节", desc: "判定中等质量图的最小字节数。" },
-    "final_min_bytes": { title: "最终图最小字节", desc: "判定最终图的最小字节数（通常 JPG > 100KB）。" }
+    "final_min_bytes": { title: "最终图最小字节", desc: "判定最终图的最小字节数（通常 JPG > 100KB）。" },
+    "default_aspect_ratio": { title: "默认宽高比", desc: "图像生成的默认宽高比（如 2:3）。" },
+    "default_image_count": { title: "默认图片数量", desc: "单次图像生成的默认数量。" }
   },
 
 
@@ -408,8 +415,26 @@ function buildFieldCard(section, key, val) {
   }
   else if (key === 'video_format') {
     built = buildSelectInput(section, key, val, [
+      { val: 'url', text: 'URL' },
+      { val: 'markdown', text: 'Markdown' },
       { val: 'html', text: 'HTML' },
-      { val: 'url', text: 'URL' }
+      { val: 'poster', text: 'Poster' }
+    ]);
+  }
+  else if (key === 'default_aspect_ratio') {
+    built = buildSelectInput(section, key, val, [
+      { val: '16:9', text: '16:9' },
+      { val: '9:16', text: '9:16' },
+      { val: '3:2', text: '3:2' },
+      { val: '2:3', text: '2:3' },
+      { val: '1:1', text: '1:1' }
+    ]);
+  }
+  else if (key === 'default_mode') {
+    built = buildSelectInput(section, key, val, [
+      { val: 'normal', text: 'Normal' },
+      { val: 'fun', text: 'Fun' },
+      { val: 'spicy', text: 'Spicy' }
     ]);
   }
   else if (Array.isArray(val) || typeof val === 'object') {

@@ -209,7 +209,7 @@ async def public_imagine_ws(websocket: WebSocket):
                     token=token,
                     model_info=model_info,
                     prompt=prompt,
-                    n=6,
+                    n=int(get_config("image.default_image_count") or 4),
                     response_format="b64_json",
                     size="1024x1024",
                     aspect_ratio=aspect_ratio,
@@ -333,7 +333,7 @@ async def public_imagine_sse(
     request: Request,
     task_id: str = Query(""),
     prompt: str = Query(""),
-    aspect_ratio: str = Query("2:3"),
+    aspect_ratio: str = Query("16:9"),
 ):
     """Imagine 图片瀑布流（SSE 兜底）"""
     session = None
@@ -414,7 +414,7 @@ async def public_imagine_sse(
                         token=token,
                         model_info=model_info,
                         prompt=prompt,
-                        n=6,
+                        n=int(get_config("image.default_image_count") or 4),
                         response_format="b64_json",
                         size="1024x1024",
                         aspect_ratio=ratio,
@@ -481,7 +481,7 @@ async def public_imagine_config():
 
 class ImagineStartRequest(BaseModel):
     prompt: str
-    aspect_ratio: Optional[str] = "2:3"
+    aspect_ratio: Optional[str] = "16:9"
     nsfw: Optional[bool] = None
 
 

@@ -12,6 +12,7 @@ from app.core.exceptions import UpstreamException
 from app.services.token.service import TokenService
 from app.services.reverse.utils.headers import build_headers
 from app.services.reverse.utils.retry import retry_on_status
+from app.services.reverse.utils.urls import resolve_api_url
 
 CHAT_API = "https://grok.com/rest/app-chat/conversations/new"
 
@@ -132,7 +133,7 @@ class AppChatReverse:
 
             async def _do_request():
                 response = await session.post(
-                    CHAT_API,
+                    resolve_api_url(CHAT_API),
                     headers=headers,
                     data=orjson.dumps(payload),
                     timeout=timeout,

@@ -15,6 +15,7 @@ from app.core.config import get_config
 from app.core.logger import logger
 from app.services.reverse.utils.headers import build_ws_headers
 from app.services.reverse.utils.websocket import WebSocketClient
+from app.services.reverse.utils.urls import resolve_api_url
 
 WS_IMAGINE_URL = "wss://grok.com/ws/imagine/listen"
 
@@ -96,11 +97,13 @@ class ImagineWebSocketReverse:
         self,
         token: str,
         prompt: str,
-        aspect_ratio: str = "2:3",
+        aspect_ratio: str = None,
         n: int = 1,
         enable_nsfw: bool = True,
         max_retries: Optional[int] = None,
     ) -> AsyncGenerator[Dict[str, object], None]:
+        if aspect_ratio is None:
+            aspect_ratio = get_config("image.default_aspect_ratio") or "2:3"
         retries = max(1, max_retries if max_retries is not None else 1)
         logger.info(
             f"Image generation: prompt='{prompt[:50]}...', n={n}, ratio={aspect_ratio}, nsfw={enable_nsfw}"
@@ -153,7 +156,7 @@ class ImagineWebSocketReverse:
 
         try:
             conn = await self._client.connect(
-                WS_IMAGINE_URL,
+                resolve_api_url(WS_IMAGINE_URL),
                 headers=headers,
                 timeout=timeout,
                 ws_kwargs={

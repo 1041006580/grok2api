@@ -11,6 +11,7 @@ from app.core.config import get_config
 from app.core.exceptions import UpstreamException
 from app.services.reverse.utils.headers import build_headers
 from app.services.reverse.utils.retry import retry_on_status
+from app.services.reverse.utils.urls import resolve_api_url
 
 RATE_LIMITS_API = "https://grok.com/rest/rate-limits"
 
@@ -54,7 +55,7 @@ class RateLimitsReverse:
 
             async def _do_request():
                 response = await session.post(
-                    RATE_LIMITS_API,
+                    resolve_api_url(RATE_LIMITS_API),
                     headers=headers,
                     data=orjson.dumps(payload),
                     timeout=timeout,

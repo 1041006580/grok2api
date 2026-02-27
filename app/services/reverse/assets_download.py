@@ -13,6 +13,7 @@ from app.core.exceptions import UpstreamException
 from app.services.token.service import TokenService
 from app.services.reverse.utils.headers import build_headers
 from app.services.reverse.utils.retry import retry_on_status
+from app.services.reverse.utils.urls import resolve_asset_url
 
 DOWNLOAD_API = "https://assets.grok.com"
 
@@ -45,7 +46,7 @@ class AssetsDownloadReverse:
             # Normalize path
             if not file_path.startswith("/"):
                 file_path = f"/{file_path}"
-            url = f"{DOWNLOAD_API}{file_path}"
+            url = resolve_asset_url(f"{DOWNLOAD_API}{file_path}")
 
             # Get proxies
             base_proxy = get_config("proxy.base_proxy_url")

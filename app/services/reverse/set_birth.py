@@ -12,6 +12,7 @@ from app.core.config import get_config
 from app.core.exceptions import UpstreamException
 from app.services.reverse.utils.headers import build_headers
 from app.services.reverse.utils.retry import retry_on_status
+from app.services.reverse.utils.urls import resolve_api_url
 
 SET_BIRTH_API = "https://grok.com/rest/auth/set-birth-date"
 
@@ -63,7 +64,7 @@ class SetBirthReverse:
 
             async def _do_request():
                 response = await session.post(
-                    SET_BIRTH_API,
+                    resolve_api_url(SET_BIRTH_API),
                     headers=headers,
                     json=payload,
                     timeout=timeout,

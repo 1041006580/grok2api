@@ -10,6 +10,7 @@ from app.core.exceptions import UpstreamException
 from app.services.reverse.utils.headers import build_headers
 from app.services.reverse.utils.retry import retry_on_status
 from app.services.reverse.utils.grpc import GrpcClient, GrpcStatus
+from app.services.reverse.utils.urls import resolve_api_url
 
 NSFW_MGMT_API = "https://grok.com/auth_mgmt.AuthManagement/UpdateUserFeatureControls"
 
@@ -59,7 +60,7 @@ class NsfwMgmtReverse:
 
             async def _do_request():
                 response = await session.post(
-                    NSFW_MGMT_API,
+                    resolve_api_url(NSFW_MGMT_API),
                     headers=headers,
                     data=payload,
                     timeout=timeout,

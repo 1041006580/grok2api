@@ -11,6 +11,7 @@ from app.core.exceptions import UpstreamException
 from app.services.token.service import TokenService
 from app.services.reverse.utils.headers import build_headers
 from app.services.reverse.utils.retry import retry_on_status
+from app.services.reverse.utils.urls import resolve_api_url
 
 LIST_API = "https://grok.com/rest/assets"
 
@@ -53,7 +54,7 @@ class AssetsListReverse:
 
             async def _do_request():
                 response = await session.get(
-                    LIST_API,
+                    resolve_api_url(LIST_API),
                     headers=headers,
                     params=params,
                     proxies=proxies,

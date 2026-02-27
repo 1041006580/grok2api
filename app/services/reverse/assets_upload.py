@@ -11,6 +11,7 @@ from app.core.exceptions import UpstreamException
 from app.services.token.service import TokenService
 from app.services.reverse.utils.headers import build_headers
 from app.services.reverse.utils.retry import retry_on_status
+from app.services.reverse.utils.urls import resolve_api_url
 
 UPLOAD_API = "https://grok.com/rest/app-chat/upload-file"
 
@@ -62,7 +63,7 @@ class AssetsUploadReverse:
 
             async def _do_request():
                 response = await session.post(
-                    UPLOAD_API,
+                    resolve_api_url(UPLOAD_API),
                     headers=headers,
                     json=payload,
                     proxies=proxies,

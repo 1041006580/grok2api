@@ -11,6 +11,7 @@ from app.core.exceptions import UpstreamException
 from app.services.token.service import TokenService
 from app.services.reverse.utils.headers import build_headers
 from app.services.reverse.utils.retry import retry_on_status
+from app.services.reverse.utils.urls import resolve_api_url
 
 DELETE_API = "https://grok.com/rest/assets-metadata"
 
@@ -53,7 +54,7 @@ class AssetsDeleteReverse:
 
             async def _do_request():
                 response = await session.delete(
-                    f"{DELETE_API}/{asset_id}",
+                    resolve_api_url(f"{DELETE_API}/{asset_id}"),
                     headers=headers,
                     proxies=proxies,
                     timeout=timeout,

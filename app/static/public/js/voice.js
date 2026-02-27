@@ -138,6 +138,15 @@
       startBtn.disabled = true;
       updateMeta();
       setStatus('connecting', '正在连接');
+
+      // Request mic permission early — browsers only expose full WebRTC ICE
+      // candidates (all network interfaces) after media permission is granted.
+      // Without this, ICE negotiation may fail due to insufficient candidates.
+      log('正在请求麦克风权限...');
+      ensureMicSupport();
+      const localTracks = await createLocalTracks({ audio: true, video: false });
+      log('麦克风权限已获取');
+
       log('正在获取 Token...');
 
       const params = new URLSearchParams({
@@ -183,16 +192,15 @@
         resetUI();
       });
 
+      log('正在连接: ' + url);
       await room.connect(url, token);
       log('已连接到 LiveKit 服务器');
 
       setStatus('connected', '通话中');
       setButtons(true);
 
-      log('正在开启麦克风...');
-      ensureMicSupport();
-      const tracks = await createLocalTracks({ audio: true, video: false });
-      for (const track of tracks) {
+      log('正在发布麦克风音轨...');
+      for (const track of localTracks) {
         await room.localParticipant.publishTrack(track);
       }
       log('语音已开启');

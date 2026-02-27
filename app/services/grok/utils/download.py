@@ -20,6 +20,7 @@ from app.core.config import get_config
 from app.core.exceptions import AppException
 from app.services.reverse.assets_download import AssetsDownloadReverse
 from app.services.reverse.utils.session import ResettableSession
+from app.services.reverse.utils.urls import resolve_asset_url
 from app.services.grok.utils.locks import _get_download_semaphore, _file_lock
 
 
@@ -64,12 +65,25 @@ class DownloadService:
             if not path_or_url.startswith("/"):
                 path_or_url = f"/{path_or_url}"
             path = path_or_url
-            asset_url = f"https://assets.grok.com{path_or_url}"
+            asset_url = resolve_asset_url(f"https://assets.grok.com{path_or_url}")
 
         app_url = get_config("app.app_url")
         if app_url:
             await self.download_file(asset_url, token, media_type)
-            return f"{app_url.rstrip('/')}/v1/files/{media_type}{path}"
+            final_url = f"{app_url.rstrip('/')}/v1/files/{media_type}{path}"
+            if media_type == "image":
+                try:
+                    from app.services.image_origin import ORIGIN_GENERATED, get_image_origin_ledger
+                    ledger = get_image_origin_ledger()
+                    await ledger.upsert_origin(
+                        source_type=ORIGIN_GENERATED,
+                        canonical_url=final_url,
+                        original_url=asset_url,
+                        metadata={"via": "processor_proxy_url"},
+                    )
+                except Exception as e:
+                    logger.debug(f"Image origin ledger record failed: {e}")
+            return final_url
         return asset_url
 
     async def render_image(
@@ -95,7 +109,7 @@ class DownloadService:
     ) -> str:
         fmt = get_config("app.video_format")
         fmt = fmt.lower() if isinstance(fmt, str) else "url"
-        if fmt not in ("url", "markdown", "html"):
+        if fmt not in ("url", "markdown", "html", "poster"):
             fmt = "url"
         final_video_url = await self.resolve_url(video_url, token, "video")
         final_thumb_url = ""
@@ -104,11 +118,30 @@ class DownloadService:
         if fmt == "url":
             return f"{final_video_url}\n"
         if fmt == "markdown":
-            return f"[video]({final_video_url})"
+            if final_thumb_url:
+                return f"\n[![video]({final_thumb_url})]({final_video_url})\n"
+            return f"<{final_video_url}>\n"
         import html
 
         safe_video_url = html.escape(final_video_url)
         safe_thumbnail_url = html.escape(final_thumb_url)
+
+        if fmt == "poster":
+            if safe_thumbnail_url:
+                return (
+                    f'<a href="{safe_video_url}" target="_blank" rel="noopener noreferrer" '
+                    f'style="display:inline-block;position:relative;max-width:100%;text-decoration:none;">'
+                    f'<img src="{safe_thumbnail_url}" alt="video" '
+                    f'style="max-width:100%;height:auto;border-radius:12px;display:block;" />'
+                    f'<span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;">'
+                    f'<span style="width:64px;height:64px;border-radius:9999px;background:rgba(0,0,0,.55);'
+                    f'display:flex;align-items:center;justify-content:center;">'
+                    f'<span style="width:0;height:0;border-top:12px solid transparent;'
+                    f'border-bottom:12px solid transparent;border-left:18px solid #fff;margin-left:4px;">'
+                    f'</span></span></span></a>\n'
+                )
+            return f'<a href="{safe_video_url}" target="_blank" rel="noopener noreferrer">{safe_video_url}</a>\n'
+
         poster_attr = f' poster="{safe_thumbnail_url}"' if safe_thumbnail_url else ""
         return f'''<video id="video" controls="" preload="none"{poster_attr}>
   <source id="mp4" src="{safe_video_url}" type="video/mp4">

@@ -308,12 +308,26 @@
 
   function extractVideoInfo(buffer) {
     if (!buffer) return null;
+    // html format: <video>...</video>
     if (buffer.includes('<video')) {
       const matches = buffer.match(/<video[\s\S]*?<\/video>/gi);
       if (matches && matches.length) {
         return { html: matches[matches.length - 1] };
       }
     }
+    // poster format: <a href="VIDEO_URL"...>...<img...>...</a>
+    if (buffer.includes('<a ') && buffer.includes('</a>')) {
+      const hrefMatch = buffer.match(/<a\s[^>]*href="([^"]+)"[^>]*>/i);
+      if (hrefMatch) {
+        return { url: hrefMatch[1] };
+      }
+    }
+    // markdown linked image: [![video](thumb)](url)
+    const mdLinked = buffer.match(/\[!\[video\]\([^)]*\)\]\(([^)]+)\)/);
+    if (mdLinked) {
+      return { url: mdLinked[1] };
+    }
+    // markdown: [video](url)
     const mdMatches = buffer.match(/\[video\]\(([^)]+)\)/g);
     if (mdMatches && mdMatches.length) {
       const last = mdMatches[mdMatches.length - 1];
@@ -322,7 +336,18 @@
         return { url: urlMatch[1] };
       }
     }
-    const urlMatches = buffer.match(/https?:\/\/[^\s<)]+/g);
+    // angle bracket URL: <url>
+    const angleMatch = buffer.match(/<(https?:\/\/[^>]+)>/);
+    if (angleMatch) {
+      return { url: angleMatch[1] };
+    }
+    // bare URL containing /video/ path
+    const videoUrlMatches = buffer.match(/https?:\/\/[^\s<>"]+\/video\/[^\s<>"]+/g);
+    if (videoUrlMatches && videoUrlMatches.length) {
+      return { url: videoUrlMatches[videoUrlMatches.length - 1] };
+    }
+    // bare URL (last resort, exclude trailing quotes)
+    const urlMatches = buffer.match(/https?:\/\/[^\s<>"]+/g);
     if (urlMatches && urlMatches.length) {
       return { url: urlMatches[urlMatches.length - 1] };
     }
@@ -374,8 +399,20 @@
       return;
     }
 
+    if (text.includes('审核拦截') || text.includes('moderated')) {
+      const container = ensurePreviewSlot();
+      if (container) {
+        const body = container.querySelector('.video-item-body');
+        if (body) {
+          body.innerHTML = '<div class="video-item-placeholder" style="color:#dc2626;">内容审核未通过，视频无法生成</div>';
+        }
+        container.classList.remove('is-pending');
+      }
+      return;
+    }
+
     if (!collectingContent) {
-      const maybeVideo = text.includes('<video') || text.includes('[video](') || text.includes('http://') || text.includes('https://');
+      const maybeVideo = text.includes('<video') || text.includes('<a ') || text.includes('[video](') || text.includes('[![video]') || text.includes('/video/');
       if (maybeVideo) {
         collectingContent = true;
       }
