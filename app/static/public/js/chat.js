@@ -814,6 +814,10 @@
     let headers = { 'Content-Type': 'application/json' };
     try {
       const authHeader = await ensurePublicKey();
+      if (authHeader === null) {
+        window.location.href = '/login';
+        return;
+      }
       headers = { ...headers, ...buildAuthHeaders(authHeader) };
     } catch (e) {
       // ignore auth helper failures
@@ -826,6 +830,12 @@
         body: JSON.stringify(payload),
         signal: abortController.signal
       });
+
+      if (res.status === 401) {
+        clearStoredPublicKey();
+        window.location.href = '/login';
+        return;
+      }
 
       if (!res.ok) {
         throw new Error(`请求失败: ${res.status}`);
@@ -884,6 +894,10 @@
     let headers = { 'Content-Type': 'application/json' };
     try {
       const authHeader = await ensurePublicKey();
+      if (authHeader === null) {
+        window.location.href = '/login';
+        return;
+      }
       headers = { ...headers, ...buildAuthHeaders(authHeader) };
     } catch (e) {
       // ignore auth helper failures
@@ -896,6 +910,12 @@
         body: JSON.stringify(payload),
         signal: abortController.signal
       });
+
+      if (res.status === 401) {
+        clearStoredPublicKey();
+        window.location.href = '/login';
+        return;
+      }
 
       if (!res.ok) {
         throw new Error(`请求失败: ${res.status}`);

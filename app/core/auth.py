@@ -60,26 +60,36 @@ async def verify_api_key(
     验证 Bearer Token
 
     如果 config.toml 中未配置 api_key，则不启用认证。
+    当 public 功能启用时，也接受 public_key 认证（供公开页面调用）。
     """
     api_key = get_admin_api_key()
     if not api_key:
         return None
 
     if not auth:
+        # public 启用且未配置 public_key 时，允许匿名访问
+        if is_public_enabled() and not get_public_api_key():
+            return None
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing authentication token",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    if auth.credentials != api_key:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authentication token",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+    if auth.credentials == api_key:
+        return auth.credentials
 
-    return auth.credentials
+    # public 启用时，也接受 public_key
+    if is_public_enabled():
+        public_key = get_public_api_key()
+        if public_key and auth.credentials == public_key:
+            return auth.credentials
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid authentication token",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
 
 
 async def verify_app_key(
