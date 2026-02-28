@@ -135,11 +135,16 @@
             <div class="visualizer" id="visualizer"></div>
           </div>
 
-          <div class="voice-card">
-            <div class="card-title">音频输出</div>
-            <div class="voice-hint">订阅到的音轨会自动插入此区域。</div>
-            <div id="audioRoot" class="mt-3"></div>
+          <div class="voice-card transcript-card">
+            <div class="voice-log-header">
+              <div class="card-title">对话内容</div>
+              <button id="clearTranscriptBtn" class="geist-button-outline text-xs px-3">清空</button>
+            </div>
+            <div id="transcript" class="transcript-container">
+              <div class="transcript-empty">开始会话后，对话内容将实时显示在这里。</div>
+            </div>
           </div>
+          <div id="audioRoot" class="hidden"></div>
         </aside>
       </div>
     </div>

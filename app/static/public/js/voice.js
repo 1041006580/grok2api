@@ -21,6 +21,12 @@
   const copyLogBtn = document.getElementById('copyLogBtn');
   const clearLogBtn = document.getElementById('clearLogBtn');
   const visualizer = document.getElementById('visualizer');
+  const transcriptContainer = document.getElementById('transcript');
+  const clearTranscriptBtn = document.getElementById('clearTranscriptBtn');
+
+  // segment id -> DOM element mapping for updating interim transcriptions
+  const segmentElements = new Map();
+  let localParticipantIdentity = null;
 
   function log(message, level = 'info') {
     if (!logContainer) {
@@ -122,6 +128,73 @@
     throw new Error(`当前环境不支持麦克风权限，${secureHint}`);
   }
 
+  // ---- Transcript ----
+
+  function clearTranscript() {
+    if (!transcriptContainer) return;
+    transcriptContainer.innerHTML = '<div class="transcript-empty">开始会话后，对话内容将实时显示在这里。</div>';
+    segmentElements.clear();
+  }
+
+  function hideTranscriptEmpty() {
+    if (!transcriptContainer) return;
+    const empty = transcriptContainer.querySelector('.transcript-empty');
+    if (empty) empty.remove();
+  }
+
+  function scrollTranscript() {
+    if (!transcriptContainer) return;
+    transcriptContainer.scrollTop = transcriptContainer.scrollHeight;
+  }
+
+  function handleTranscription(segments, participant) {
+    if (!transcriptContainer || !segments || !segments.length) return;
+    hideTranscriptEmpty();
+
+    const isLocal = participant && localParticipantIdentity &&
+      participant.identity === localParticipantIdentity;
+    const role = isLocal ? 'user' : 'assistant';
+    const roleLabel = isLocal ? '你' : 'Grok';
+
+    for (const seg of segments) {
+      const id = seg.id;
+      const text = seg.text || '';
+      const isFinal = seg.final;
+
+      let existing = segmentElements.get(id);
+      if (existing) {
+        const bubble = existing.querySelector('.transcript-bubble');
+        if (bubble) {
+          bubble.textContent = text;
+          if (isFinal) {
+            bubble.classList.remove('interim');
+          }
+        }
+      } else {
+        const msg = document.createElement('div');
+        msg.className = `transcript-msg ${role}`;
+        msg.dataset.segmentId = id;
+
+        const label = document.createElement('div');
+        label.className = 'transcript-role';
+        label.textContent = roleLabel;
+
+        const bubble = document.createElement('div');
+        bubble.className = 'transcript-bubble';
+        if (!isFinal) bubble.classList.add('interim');
+        bubble.textContent = text;
+
+        msg.appendChild(label);
+        msg.appendChild(bubble);
+        transcriptContainer.appendChild(msg);
+        segmentElements.set(id, msg);
+      }
+    }
+    scrollTranscript();
+  }
+
+  // ---- Session ----
+
   async function startSession() {
     if (!ensureLiveKit()) {
       return;
@@ -138,6 +211,7 @@
       startBtn.disabled = true;
       updateMeta();
       setStatus('connecting', '正在连接');
+      clearTranscript();
 
       // Request mic permission early — browsers only expose full WebRTC ICE
       // candidates (all network interfaces) after media permission is granted.
@@ -187,6 +261,10 @@
         }
       });
 
+      room.on(RoomEvent.TranscriptionReceived, (segments, participant) => {
+        handleTranscription(segments, participant);
+      });
+
       room.on(RoomEvent.Disconnected, () => {
         log('已断开连接');
         resetUI();
@@ -194,6 +272,7 @@
 
       log('正在连接: ' + url);
       await room.connect(url, token);
+      localParticipantIdentity = room.localParticipant.identity;
       log('已连接到 LiveKit 服务器');
 
       setStatus('connected', '通话中');
@@ -227,6 +306,7 @@
     if (audioRoot) {
       audioRoot.innerHTML = '';
     }
+    localParticipantIdentity = null;
   }
 
   function clearLog() {
@@ -270,6 +350,9 @@
   }
   if (clearLogBtn) {
     clearLogBtn.addEventListener('click', clearLog);
+  }
+  if (clearTranscriptBtn) {
+    clearTranscriptBtn.addEventListener('click', clearTranscript);
   }
 
   speedValue.textContent = Number(speedRange.value).toFixed(1);

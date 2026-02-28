@@ -186,6 +186,78 @@ body {
   width: 100%;
 }
 
+.transcript-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.transcript-container {
+  background: var(--voice-surface-muted);
+  border-radius: 8px;
+  padding: 12px;
+  min-height: 160px;
+  max-height: 400px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.transcript-empty {
+  font-size: 11px;
+  color: var(--accents-4);
+  text-align: center;
+  padding: 24px 0;
+}
+
+.transcript-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 90%;
+}
+
+.transcript-msg.user {
+  align-self: flex-end;
+  align-items: flex-end;
+}
+
+.transcript-msg.assistant {
+  align-self: flex-start;
+  align-items: flex-start;
+}
+
+.transcript-role {
+  font-size: 10px;
+  color: var(--accents-4);
+  font-weight: 500;
+}
+
+.transcript-bubble {
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 8px 12px;
+  border-radius: 12px;
+  word-break: break-word;
+}
+
+.transcript-msg.user .transcript-bubble {
+  background: #111;
+  color: #fff;
+  border-bottom-right-radius: 4px;
+}
+
+.transcript-msg.assistant .transcript-bubble {
+  background: #fff;
+  color: #111;
+  border: 1px solid var(--border);
+  border-bottom-left-radius: 4px;
+}
+
+.transcript-msg .transcript-bubble.interim {
+  opacity: 0.6;
+}
+
 .voice-log-header {
   display: flex;
   align-items: center;
