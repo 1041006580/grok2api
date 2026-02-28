@@ -30,7 +30,8 @@ const NUMERIC_FIELDS = new Set([
   'final_min_bytes',
   'medium_min_bytes',
   'concurrent',
-  'batch_size'
+  'batch_size',
+  'default_image_count'
 ]);
 
 const LOCALE_MAP = {

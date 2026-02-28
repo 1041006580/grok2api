@@ -34,6 +34,10 @@ filter_tags = ["xaiartifact","xai:tool_usage_card","grok:render"]
 base_proxy_url = ""
 # 资源代理地址（代理静态资源如图片/视频）
 asset_proxy_url = ""
+# 反代基础地址（替换 grok.com 域名）
+reverse_base_url = ""
+# 反代资源地址（替换 assets.grok.com 域名）
+reverse_asset_url = ""
 # Cloudflare Clearance Cookie
 cf_clearance = ""
 # curl_cffi 浏览器指纹
@@ -107,6 +111,10 @@ nsfw = true
 medium_min_bytes = 30000
 # 判定为最终图的最小字节数
 final_min_bytes = 100000
+# 默认图片宽高比
+default_aspect_ratio = "2:3"
+# 默认生成图片数量 (1-4)
+default_image_count = 4
 
 # ==================== 视频配置 ====================
 [video]
@@ -116,6 +124,10 @@ concurrent = 100
 timeout = 60
 # 流式空闲超时时间（秒）
 stream_timeout = 60
+# 图生视频默认模式 (normal / fun / spicy)
+default_mode = "normal"
+# 默认视频宽高比
+default_aspect_ratio = "16:9"
 
 # ==================== 语音配置 ====================
 [voice]
