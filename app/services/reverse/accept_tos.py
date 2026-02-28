@@ -10,6 +10,7 @@ from app.core.exceptions import UpstreamException
 from app.services.reverse.utils.headers import build_headers
 from app.services.reverse.utils.retry import retry_on_status
 from app.services.reverse.utils.grpc import GrpcClient, GrpcStatus
+from app.services.reverse.utils.urls import resolve_accounts_url
 
 ACCEPT_TOS_API = "https://accounts.x.ai/auth_mgmt.AuthManagement/SetTosAcceptedVersion"
 
@@ -56,7 +57,7 @@ class AcceptTosReverse:
 
             async def _do_request():
                 response = await session.post(
-                    ACCEPT_TOS_API,
+                    resolve_accounts_url(ACCEPT_TOS_API),
                     headers=headers,
                     data=payload,
                     timeout=timeout,

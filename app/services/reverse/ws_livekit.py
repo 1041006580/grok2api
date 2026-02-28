@@ -14,6 +14,7 @@ from app.services.token.service import TokenService
 from app.services.reverse.utils.headers import build_headers, build_ws_headers
 from app.services.reverse.utils.retry import retry_on_status
 from app.services.reverse.utils.websocket import WebSocketClient, WebSocketConnection
+from app.services.reverse.utils.urls import resolve_api_url, resolve_livekit_url
 
 LIVEKIT_TOKEN_API = "https://grok.com/rest/livekit/tokens"
 LIVEKIT_WS_URL = "wss://livekit.grok.com"
@@ -77,7 +78,7 @@ class LivekitTokenReverse:
 
             async def _do_request():
                 response = await session.post(
-                    LIVEKIT_TOKEN_API,
+                    resolve_api_url(LIVEKIT_TOKEN_API),
                     headers=headers,
                     data=orjson.dumps(payload),
                     timeout=timeout,
@@ -144,7 +145,7 @@ class LivekitWebSocketReverse:
             WebSocketConnection: The LiveKit WebSocket connection.
         """
         # Format URL
-        base = LIVEKIT_WS_URL.rstrip("/")
+        base = resolve_livekit_url(LIVEKIT_WS_URL).rstrip("/")
         if not base.endswith("/rtc"):
             base = f"{base}/rtc"
 
