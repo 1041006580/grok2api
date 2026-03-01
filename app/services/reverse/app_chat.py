@@ -207,8 +207,9 @@ class AppChatReverse:
 
             # Handle other non-upstream exceptions
             logger.error(
-                f"AppChatReverse: Chat failed, {str(e)}",
+                f"AppChatReverse: Chat failed ({type(e).__name__}): {str(e)}",
                 extra={"error_type": type(e).__name__},
+                exc_info=True,
             )
             raise UpstreamException(
                 message=f"AppChatReverse: Chat failed, {str(e)}",

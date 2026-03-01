@@ -94,8 +94,9 @@ class RateLimitsReverse:
 
             # Handle other non-upstream exceptions
             logger.error(
-                f"RateLimitsReverse: Request failed, {str(e)}",
+                f"RateLimitsReverse: Request failed ({type(e).__name__}): {str(e)}",
                 extra={"error_type": type(e).__name__},
+                exc_info=True,
             )
             raise UpstreamException(
                 message=f"RateLimitsReverse: Request failed, {str(e)}",

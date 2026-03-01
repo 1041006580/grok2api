@@ -112,8 +112,9 @@ class MediaPostReverse:
 
             # Handle other non-upstream exceptions
             logger.error(
-                f"MediaPostReverse: Media post create failed, {str(e)}",
+                f"MediaPostReverse: Media post create failed ({type(e).__name__}): {str(e)}",
                 extra={"error_type": type(e).__name__},
+                exc_info=True,
             )
             raise UpstreamException(
                 message=f"MediaPostReverse: Media post create failed, {str(e)}",
