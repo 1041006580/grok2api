@@ -76,11 +76,14 @@ class MediaPostReverse:
                 if response.status_code != 200:
                     content = ""
                     try:
-                        content = await response.text()
+                        content = response.text[:500]
                     except Exception:
-                        pass
+                        try:
+                            content = (await response.atext())[:500]
+                        except Exception:
+                            pass
                     logger.error(
-                        f"MediaPostReverse: Media post create failed, {response.status_code}",
+                        f"MediaPostReverse: Media post create failed, {response.status_code}, body={content}",
                         extra={"error_type": "UpstreamException"},
                     )
                     raise UpstreamException(

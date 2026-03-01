@@ -64,13 +64,18 @@ class RateLimitsReverse:
                 )
 
                 if response.status_code != 200:
+                    body = ""
+                    try:
+                        body = response.text[:500]
+                    except Exception:
+                        pass
                     logger.error(
-                        f"RateLimitsReverse: Request failed, {response.status_code}",
+                        f"RateLimitsReverse: Request failed, {response.status_code}, body={body}",
                         extra={"error_type": "UpstreamException"},
                     )
                     raise UpstreamException(
                         message=f"RateLimitsReverse: Request failed, {response.status_code}",
-                        details={"status": response.status_code},
+                        details={"status": response.status_code, "body": body},
                     )
 
                 return response

@@ -95,13 +95,18 @@ class AssetsDownloadReverse:
                 )
 
                 if response.status_code != 200:
+                    body = ""
+                    try:
+                        body = response.text[:500]
+                    except Exception:
+                        pass
                     logger.error(
-                        f"AssetsDownloadReverse: Download failed, {response.status_code}",
+                        f"AssetsDownloadReverse: Download failed, {response.status_code}, body={body}",
                         extra={"error_type": "UpstreamException"},
                     )
                     raise UpstreamException(
                         message=f"AssetsDownloadReverse: Download failed, {response.status_code}",
-                        details={"status": response.status_code},
+                        details={"status": response.status_code, "body": body},
                     )
 
                 return response

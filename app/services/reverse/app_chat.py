@@ -147,12 +147,15 @@ class AppChatReverse:
                     # Get response content
                     content = ""
                     try:
-                        content = await response.text()
+                        content = response.text[:500]
                     except Exception:
-                        pass
+                        try:
+                            content = (await response.atext())[:500]
+                        except Exception:
+                            pass
 
                     logger.error(
-                        f"AppChatReverse: Chat failed, {response.status_code}",
+                        f"AppChatReverse: Chat failed, {response.status_code}, body={content}",
                         extra={"error_type": "UpstreamException"},
                     )
                     raise UpstreamException(
