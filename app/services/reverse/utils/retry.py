@@ -15,10 +15,12 @@ from app.core.exceptions import UpstreamException
 class RetryContext:
     """Retry context."""
 
-    def __init__(self):
+    def __init__(self, extra_retry_codes=None):
         self.attempt = 0
         self.max_retry = int(get_config("retry.max_retry"))
         self.retry_codes = get_config("retry.retry_status_codes")
+        if extra_retry_codes:
+            self.retry_codes = list(set(self.retry_codes) | set(extra_retry_codes))
         self.last_error = None
         self.last_status = None
         self.total_delay = 0.0
@@ -122,6 +124,7 @@ def extract_retry_after(error: Exception) -> Optional[float]:
 async def retry_on_status(
     func: Callable,
     *args,
+    extra_retry_codes: list = None,
     extract_status: Callable[[Exception], Optional[int]] = None,
     on_retry: Callable[[int, int, Exception, float], Any] = None,
     **kwargs,
@@ -132,6 +135,7 @@ async def retry_on_status(
     Args:
         func: Retry function
         *args: Function arguments
+        extra_retry_codes: Additional status codes to retry on (merged with config)
         extract_status: Function to extract status code from exception
         on_retry: Callback function for retry (attempt, status_code, error, delay).
             Can be sync or async.
@@ -143,7 +147,7 @@ async def retry_on_status(
     Raises:
         Last failed exception
     """
-    ctx = RetryContext()
+    ctx = RetryContext(extra_retry_codes=extra_retry_codes)
 
     # Status code extractor
     if extract_status is None:

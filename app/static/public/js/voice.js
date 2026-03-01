@@ -477,60 +477,7 @@
 
       room.on(RoomEvent.Disconnected, (reason) => {
         log(`已断开连接${reason ? ': ' + reason : ''}`);
-        // Dump ICE connection details on disconnect for debugging
-        try {
-          const eng = room.engine;
-          if (eng && eng.pcManager) {
-            const pcm = eng.pcManager;
-            const pub = pcm.publisher && pcm.publisher.pc;
-            const sub = pcm.subscriber && pcm.subscriber.pc;
-            if (pub) log(`Publisher ICE: ${pub.iceConnectionState}, Signaling: ${pub.signalingState}`);
-            if (sub) log(`Subscriber ICE: ${sub.iceConnectionState}, Signaling: ${sub.signalingState}`);
-          }
-        } catch (e) { /* ignore */ }
         resetUI();
-      });
-
-      // Log connection quality and signal events for debugging
-      room.on(RoomEvent.SignalConnected, () => {
-        log('信令已连接');
-        // Monitor ICE states on the underlying peer connections
-        try {
-          const eng = room.engine;
-          if (eng && eng.pcManager) {
-            const pcm = eng.pcManager;
-            ['publisher', 'subscriber'].forEach((role) => {
-              const transport = pcm[role];
-              if (transport && transport.pc) {
-                const pc = transport.pc;
-                pc.addEventListener('iceconnectionstatechange', () => {
-                  log(`${role} ICE 状态: ${pc.iceConnectionState}`);
-                });
-                pc.addEventListener('icegatheringstatechange', () => {
-                  log(`${role} ICE 收集: ${pc.iceGatheringState}`);
-                });
-                pc.addEventListener('icecandidate', (e) => {
-                  if (e.candidate) {
-                    const c = e.candidate;
-                    log(`${role} ICE 候选: ${c.type || '?'} ${c.protocol || ''} ${c.address ? c.address.replace(/\d+\.\d+\.\d+\./, 'x.x.x.') : 'mdns'}`);
-                  } else {
-                    log(`${role} ICE 候选收集完成`);
-                  }
-                });
-              }
-            });
-          }
-        } catch (e) {
-          log(`ICE 监听设置失败: ${e.message}`, 'warn');
-        }
-      });
-      room.on(RoomEvent.MediaDevicesError, (err) => {
-        log(`媒体设备错误: ${err.message}`, 'error');
-      });
-      room.on(RoomEvent.ConnectionQualityChanged, (quality, participant) => {
-        if (participant && participant.identity === localParticipantIdentity) {
-          log(`连接质量: ${quality}`);
-        }
       });
 
       log('正在连接: ' + url);
@@ -550,14 +497,7 @@
       toast('语音连接成功', 'success');
     } catch (err) {
       const message = err && err.message ? err.message : '连接失败';
-      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
       log(`错误: ${message}`, 'error');
-      if (message.includes('pc connection') || message.includes('ICE')) {
-        log('提示: WebRTC 连接失败，请检查网络环境', 'warn');
-        if (isIOS) {
-          log('iOS 提示: 请确认使用 HTTPS 访问，并允许麦克风权限', 'warn');
-        }
-      }
       toast(message, 'error');
       setStatus('error', '连接错误');
       startBtn.disabled = false;

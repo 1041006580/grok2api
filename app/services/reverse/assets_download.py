@@ -59,7 +59,9 @@ class AssetsDownloadReverse:
             # Guess content type by extension for Accept/Sec-Fetch-Dest
             content_type = _CONTENT_TYPES.get(Path(urllib.parse.urlparse(file_path).path).suffix.lower())
 
-            # Build headers
+            # Build headers — use assets.grok.com origin so Sec-Fetch-Site
+            # computes correctly as "same-site", then strip headers that
+            # browsers do not send on GET navigation requests.
             headers = build_headers(
                 cookie_token=token,
                 content_type=content_type,
@@ -73,6 +75,9 @@ class AssetsDownloadReverse:
             headers["Sec-Fetch-Mode"] = "navigate"
             headers["Sec-Fetch-User"] = "?1"
             headers["Upgrade-Insecure-Requests"] = "1"
+            # Browsers do not send Origin or Content-Type on GET navigation
+            headers.pop("Origin", None)
+            headers.pop("Content-Type", None)
 
             # Curl Config
             timeout = get_config("asset.download_timeout")
@@ -101,7 +106,7 @@ class AssetsDownloadReverse:
 
                 return response
 
-            return await retry_on_status(_do_request)
+            return await retry_on_status(_do_request, extra_retry_codes=[500, 502])
 
         except Exception as e:
             # Handle upstream exception
