@@ -428,7 +428,9 @@
 
       room = new Room({
         adaptiveStream: true,
-        dynacast: true
+        dynacast: true,
+        // Longer timeout for mobile networks with slower ICE negotiation
+        peerConnectionTimeout: 30000
       });
 
       room.on(RoomEvent.ParticipantConnected, (p) => log(`参与者已连接: ${p.identity}`));
@@ -437,11 +439,25 @@
         log(`订阅音轨: ${track.kind}`);
         if (track.kind === Track.Kind.Audio) {
           const element = track.attach();
+          // iOS Safari requires playsinline and may need explicit play()
+          element.setAttribute('playsinline', '');
+          element.setAttribute('autoplay', '');
           if (audioRoot) {
             audioRoot.appendChild(element);
           } else {
             document.body.appendChild(element);
           }
+          // iOS often blocks autoplay — retry on user-gesture context
+          element.play().catch(() => {
+            log('音频自动播放被阻止，点击页面任意位置恢复', 'warn');
+            const resume = () => {
+              element.play().catch(() => {});
+              document.removeEventListener('touchstart', resume);
+              document.removeEventListener('click', resume);
+            };
+            document.addEventListener('touchstart', resume, { once: true });
+            document.addEventListener('click', resume, { once: true });
+          });
         }
       });
 
@@ -459,9 +475,22 @@
         handleDataMessage(text);
       });
 
-      room.on(RoomEvent.Disconnected, () => {
-        log('已断开连接');
+      room.on(RoomEvent.Disconnected, (reason) => {
+        log(`已断开连接${reason ? ': ' + reason : ''}`)
         resetUI();
+      });
+
+      // Log connection quality and signal events for debugging
+      room.on(RoomEvent.SignalConnected, () => {
+        log('信令已连接');
+      });
+      room.on(RoomEvent.MediaDevicesError, (err) => {
+        log(`媒体设备错误: ${err.message}`, 'error');
+      });
+      room.on(RoomEvent.ConnectionQualityChanged, (quality, participant) => {
+        if (participant && participant.identity === localParticipantIdentity) {
+          log(`连接质量: ${quality}`);
+        }
       });
 
       log('正在连接: ' + url);
@@ -481,7 +510,14 @@
       toast('语音连接成功', 'success');
     } catch (err) {
       const message = err && err.message ? err.message : '连接失败';
+      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
       log(`错误: ${message}`, 'error');
+      if (message.includes('pc connection') || message.includes('ICE')) {
+        log('提示: WebRTC 连接失败，请检查网络环境', 'warn');
+        if (isIOS) {
+          log('iOS 提示: 请确认使用 HTTPS 访问，并允许麦克风权限', 'warn');
+        }
+      }
       toast(message, 'error');
       setStatus('error', '连接错误');
       startBtn.disabled = false;
