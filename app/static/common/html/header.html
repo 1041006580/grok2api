@@ -1,8 +1,8 @@
 <nav class="bg-[var(--bg)]/80 backdrop-blur-md fixed top-0 left-0 right-0 z-10">
   <div class="max-w-5xl mx-auto px-6 h-14 flex items-center justify-between">
-    <div class="flex items-center gap-6">
+    <div class="flex items-center gap-6 min-w-0 overflow-x-auto flex-nowrap" style="scrollbar-width:none;-webkit-overflow-scrolling:touch">
       <div class="flex items-center gap-2">
-        <a href="https://github.com/chenyme/grok2api" target="_blank" rel="noopener"
+        <a href="https://github.com/1041006580/grok2api" target="_blank" rel="noopener"
           class="brand-link font-semibold tracking-tight hover:text-black">
           <svg class="github-icon" viewBox="0 0 24 24" aria-hidden="true">
             <path
@@ -10,18 +10,18 @@
           </svg>
           <span>Grok2API</span>
         </a>
-        <a href="https://github.com/chenyme" target="_blank" rel="noopener"
-          class="text-xs text-[var(--accents-4)] hover:text-black">@chenyme</a>
+        <a href="https://github.com/1041006580" target="_blank" rel="noopener"
+          class="text-xs text-[var(--accents-4)] hover:text-black">@1041006580</a>
       </div>
       <div class="h-4 w-px bg-[var(--border)]"></div>
-      <a href="/admin/token" class="nav-link text-sm" data-nav="/admin/token">Token管理</a>
-      <a href="/admin/config" class="nav-link text-sm" data-nav="/admin/config">配置管理</a>
-      <a href="/admin/cache" class="nav-link text-sm" data-nav="/admin/cache">缓存管理</a>
-      <a href="/admin/logs" class="nav-link text-sm" data-nav="/admin/logs">请求日志</a>
+      <a href="/admin/token" class="nav-link text-sm whitespace-nowrap" data-nav="/admin/token">Token管理</a>
+      <a href="/admin/config" class="nav-link text-sm whitespace-nowrap" data-nav="/admin/config">配置管理</a>
+      <a href="/admin/cache" class="nav-link text-sm whitespace-nowrap" data-nav="/admin/cache">缓存管理</a>
+      <a href="/admin/logs" class="nav-link text-sm whitespace-nowrap" data-nav="/admin/logs">请求日志</a>
     </div>
     <div class="nav-actions">
       <button id="storage-mode-btn" type="button" class="nav-action-btn" title="存储模式">-</button>
-      <a href="https://github.com/chenyme/grok2api/issues" target="_blank" rel="noopener"
+      <a href="https://github.com/1041006580/grok2api/issues" target="_blank" rel="noopener"
         class="nav-action-btn">反馈</a>
       <button onclick="logout()" type="button" class="nav-action-btn">退出</button>
     </div>

@@ -10,7 +10,7 @@
   <link href="https://cdn.jsdelivr.net/npm/@fontsource/geist-sans/index.css" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/@fontsource/geist-mono/index.css" rel="stylesheet">
   <link href="/static/common/css/common.css?v=1.5.0" rel="stylesheet">
-  <link href="/static/public/css/voice.css?v=1.5.0" rel="stylesheet">
+  <link href="/static/public/css/voice.css?v=1.6.0" rel="stylesheet">
   <link href="/static/common/css/toast.css" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.7.3/dist/livekit-client.umd.min.js"></script>
 </head>
@@ -19,14 +19,117 @@
   <div id="toast-container" class="toast-container"></div>
   <div id="app-header"></div>
 
-  <main class="space-y-6 flex-1 container mx-auto max-w-5xl px-6 py-8 fade-in">
-    <div class="space-y-6">
-      <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h2 class="text-2xl font-semibold tracking-tight">LiveKit 陪聊</h2>
-          <p class="text-[var(--accents-4)] mt-1 text-sm">LiveKit 语音会话，连接 Grok Voice。</p>
+  <main class="voice-main flex-1 fade-in">
+    <!-- Status / Visualizer -->
+    <div class="voice-status-area">
+      <div class="voice-status-center">
+        <span id="statusText" class="status-text">未连接</span>
+        <div class="meta-tags">
+          <span class="meta-tag" id="statusVoice">-</span>
+          <span class="meta-tag-sep">&middot;</span>
+          <span class="meta-tag" id="statusPersonality">-</span>
+          <span class="meta-tag-sep">&middot;</span>
+          <span class="meta-tag" id="statusSpeed">-</span>
         </div>
-        <div class="voice-actions">
+      </div>
+      <div class="visualizer" id="visualizer"></div>
+    </div>
+
+    <!-- Transcript (main content) -->
+    <div class="voice-transcript-area">
+      <div class="voice-card transcript-card">
+        <div class="voice-log-header">
+          <div class="card-title">对话内容</div>
+          <button id="clearTranscriptBtn" class="geist-button-outline text-xs px-3">清空</button>
+        </div>
+        <div id="transcript" class="transcript-container">
+          <div class="transcript-empty">开始会话后，对话内容将实时显示在这里。</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Log (collapsible) -->
+    <div class="voice-log-area">
+      <details class="voice-card voice-log-details">
+        <summary class="voice-log-summary">
+          <span class="card-title" style="margin-bottom:0">会话日志</span>
+          <div class="flex items-center gap-2">
+            <button id="clearLogBtn" class="geist-button-outline text-xs px-3" onclick="event.stopPropagation()">清空</button>
+            <button id="copyLogBtn" class="geist-button-outline text-xs px-3" onclick="event.stopPropagation()">复制</button>
+          </div>
+        </summary>
+        <div id="log" class="voice-log"></div>
+      </details>
+    </div>
+
+    <!-- Bottom control bar -->
+    <div class="voice-bottom-bar">
+      <!-- Text input (visible during session) -->
+      <div class="voice-text-row hidden" id="textInputRow">
+        <input type="text" id="textInput" class="geist-input voice-text-input" placeholder="输入文字消息..." autocomplete="off">
+        <button id="sendTextBtn" class="geist-button voice-text-send" disabled>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <line x1="22" y1="2" x2="11" y2="13" />
+            <polygon points="22 2 15 22 11 13 2 9 22 2" />
+          </svg>
+        </button>
+      </div>
+      <div class="voice-bottom-inner">
+        <div class="voice-bottom-settings">
+          <div class="voice-bottom-field">
+            <label class="field-label" for="voiceSelect">Voice</label>
+            <select id="voiceSelect" class="geist-input geist-input-sm">
+              <option value="ara" selected>Ara</option>
+              <option value="eve">Eve</option>
+              <option value="leo">Leo</option>
+              <option value="rex">Rex</option>
+              <option value="sal">Sal</option>
+              <option value="gork">Gork</option>
+            </select>
+          </div>
+          <div class="voice-bottom-field">
+            <label class="field-label" for="personalitySelect">Personality</label>
+            <select id="personalitySelect" class="geist-input geist-input-sm">
+              <option value="assistant" selected>Assistant</option>
+              <option value="custom">Custom</option>
+              <option value="therapist">Therapist</option>
+              <option value="storyteller">Storyteller</option>
+              <option value="kids_story_time">Kids Story Time</option>
+              <option value="kids_trivia_game">Kids Trivia Game</option>
+              <option value="meditation">Meditation</option>
+              <option value="doc">Grok "Doc"</option>
+              <option value="unhinged">Unhinged 18+</option>
+              <option value="sexy">Sexy 18+</option>
+              <option value="motivation">Motivation 18+</option>
+              <option value="conspiracy">Conspiracy</option>
+              <option value="romantic">Romantic 18+</option>
+              <option value="argumentative">Argumentative 18+</option>
+            </select>
+          </div>
+          <button id="micToggleBtn" class="voice-mic-toggle" title="麦克风开关">
+            <svg id="micOnIcon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+              <line x1="12" y1="19" x2="12" y2="23" />
+              <line x1="8" y1="23" x2="16" y2="23" />
+            </svg>
+            <svg id="micOffIcon" class="hidden" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round">
+              <line x1="1" y1="1" x2="23" y2="23" />
+              <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6" />
+              <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2c0 .76-.13 1.49-.35 2.17" />
+              <line x1="12" y1="19" x2="12" y2="23" />
+              <line x1="8" y1="23" x2="16" y2="23" />
+            </svg>
+          </button>
+          <div class="voice-bottom-field voice-speed-field">
+            <label class="field-label" for="speedRange">Speed <span class="range-value"><span id="speedValue">1.0</span>x</span></label>
+            <input type="range" id="speedRange" class="range-input" min="0.5" max="2.0" step="0.1" value="1.0">
+          </div>
+        </div>
+        <div class="voice-bottom-actions">
           <button id="startBtn" class="geist-button gap-2">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
               stroke-linecap="round" stroke-linejoin="round">
@@ -43,120 +146,15 @@
           </button>
         </div>
       </div>
-
-      <div class="h-px bg-[var(--border)] my-6"></div>
-
-      <div class="voice-grid">
-        <section class="voice-primary">
-          <div class="voice-card">
-            <div class="card-title">连接设置</div>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label class="field-label" for="voiceSelect">声音 (Voice)</label>
-                <select id="voiceSelect" class="geist-input">
-                  <option value="ara" selected>Ara (Upbeat Female)</option>
-                  <option value="eve">Eve (Soothing Female)</option>
-                  <option value="leo">Leo (British Male)</option>
-                  <option value="rex">Rex (Calm Male)</option>
-                  <option value="sal">Sal (Smooth Male)</option>
-                  <option value="gork">Gork (Lazy Male)</option>
-                </select>
-              </div>
-
-              <div>
-                <label class="field-label" for="personalitySelect">个性 (Personality)</label>
-                <select id="personalitySelect" class="geist-input">
-                  <option value="assistant" selected>Assistant (Default)</option>
-                  <option value="custom">Custom</option>
-                  <option value="therapist">Therapist</option>
-                  <option value="storyteller">Storyteller</option>
-                  <option value="kids_story_time">Kids Story Time</option>
-                  <option value="kids_trivia_game">Kids Trivia Game</option>
-                  <option value="meditation">Meditation</option>
-                  <option value="doc">Grok "Doc"</option>
-                  <option value="unhinged">Unhinged 18+</option>
-                  <option value="sexy">Sexy 18+</option>
-                  <option value="motivation">Motivation 18+</option>
-                  <option value="conspiracy">Conspiracy</option>
-                  <option value="romantic">Romantic 18+</option>
-                  <option value="argumentative">Argumentative 18+</option>
-                </select>
-              </div>
-
-              <div class="md:col-span-2">
-                <div class="flex items-center justify-between">
-                  <label class="field-label" for="speedRange">语速</label>
-                  <span class="range-value"><span id="speedValue">1.0</span>x</span>
-                </div>
-                <input type="range" id="speedRange" class="range-input" min="0.5" max="2.0" step="0.1" value="1.0">
-              </div>
-            </div>
-            <div class="voice-hint mt-3">提示：Voice / Personality 会在建立连接前发送到服务端。</div>
-          </div>
-
-          <div class="voice-card">
-            <div class="voice-log-header">
-              <div class="card-title">会话日志</div>
-              <div class="flex items-center gap-2">
-                <button id="clearLogBtn" class="geist-button-outline text-xs px-3">清空</button>
-                <button id="copyLogBtn" class="geist-button-outline text-xs px-3">复制</button>
-              </div>
-            </div>
-            <div id="log" class="voice-log"></div>
-          </div>
-        </section>
-
-        <aside class="voice-side">
-          <div class="voice-card">
-            <div class="voice-log-header voice-status-header">
-              <div class="card-title">会话状态</div>
-              <span id="statusText" class="status-text">未连接</span>
-            </div>
-
-            <div class="meta-grid">
-              <div class="meta-item">
-                <div class="meta-label">Voice</div>
-                <div id="statusVoice" class="meta-value">-</div>
-              </div>
-              <div class="meta-item">
-                <div class="meta-label">Personality</div>
-                <div id="statusPersonality" class="meta-value">-</div>
-              </div>
-              <div class="meta-item">
-                <div class="meta-label">Speed</div>
-                <div id="statusSpeed" class="meta-value">-</div>
-              </div>
-              <div class="meta-item">
-                <div class="meta-label">LiveKit</div>
-                <div class="meta-value">wss://livekit.grok.com</div>
-              </div>
-            </div>
-
-            <div class="visualizer" id="visualizer"></div>
-          </div>
-
-          <div class="voice-card transcript-card">
-            <div class="voice-log-header">
-              <div class="card-title">对话内容</div>
-              <button id="clearTranscriptBtn" class="geist-button-outline text-xs px-3">清空</button>
-            </div>
-            <div id="transcript" class="transcript-container">
-              <div class="transcript-empty">开始会话后，对话内容将实时显示在这里。</div>
-            </div>
-          </div>
-          <div id="audioRoot" class="hidden"></div>
-        </aside>
-      </div>
     </div>
+    <div id="audioRoot" class="hidden"></div>
   </main>
-
-  <div id="app-footer"></div>
 
   <script src="/static/common/js/admin-auth.js?v=1.5.0"></script>
   <script src="/static/common/js/public-header.js?v=1.5.0"></script>
   <script src="/static/common/js/footer.js?v=1.5.0"></script>
   <script src="/static/common/js/toast.js"></script>
-  <script src="/static/public/js/voice.js?v=1.5.0"></script>
+  <script src="/static/public/js/voice.js?v=1.6.0"></script>
 </body>
 
 </html>

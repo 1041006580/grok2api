@@ -23,10 +23,18 @@
   const visualizer = document.getElementById('visualizer');
   const transcriptContainer = document.getElementById('transcript');
   const clearTranscriptBtn = document.getElementById('clearTranscriptBtn');
+  const textInputRow = document.getElementById('textInputRow');
+  const textInput = document.getElementById('textInput');
+  const sendTextBtn = document.getElementById('sendTextBtn');
+  const micToggleBtn = document.getElementById('micToggleBtn');
+  const micOnIcon = document.getElementById('micOnIcon');
+  const micOffIcon = document.getElementById('micOffIcon');
 
-  // segment id -> DOM element mapping for updating interim transcriptions
+  // item_id -> { element, text } mapping for updating transcript bubbles
   const segmentElements = new Map();
   let localParticipantIdentity = null;
+  // Track the last user speech bubble so the completed transcription can update it
+  let lastUserSpeechEntry = null;
 
   function log(message, level = 'info') {
     if (!logContainer) {
@@ -134,6 +142,7 @@
     if (!transcriptContainer) return;
     transcriptContainer.innerHTML = '<div class="transcript-empty">开始会话后，对话内容将实时显示在这里。</div>';
     segmentElements.clear();
+    lastUserSpeechEntry = null;
   }
 
   function hideTranscriptEmpty() {
@@ -163,13 +172,14 @@
 
       let existing = segmentElements.get(id);
       if (existing) {
-        const bubble = existing.querySelector('.transcript-bubble');
+        const bubble = existing.element.querySelector('.transcript-bubble');
         if (bubble) {
           bubble.textContent = text;
           if (isFinal) {
             bubble.classList.remove('interim');
           }
         }
+        existing.text = text;
       } else {
         const msg = document.createElement('div');
         msg.className = `transcript-msg ${role}`;
@@ -187,10 +197,184 @@
         msg.appendChild(label);
         msg.appendChild(bubble);
         transcriptContainer.appendChild(msg);
-        segmentElements.set(id, msg);
+
+        const entry = { element: msg, text: text };
+        segmentElements.set(id, entry);
+
+        // Track last user speech bubble for later correction by completed transcription
+        if (isLocal) {
+          lastUserSpeechEntry = entry;
+        }
       }
     }
     scrollTranscript();
+  }
+
+  function appendTranscriptBubble(id, role, roleLabel, text, interim) {
+    hideTranscriptEmpty();
+    const msg = document.createElement('div');
+    msg.className = `transcript-msg ${role}`;
+    msg.dataset.segmentId = id;
+
+    const label = document.createElement('div');
+    label.className = 'transcript-role';
+    label.textContent = roleLabel;
+
+    const bubble = document.createElement('div');
+    bubble.className = 'transcript-bubble';
+    if (interim) bubble.classList.add('interim');
+    bubble.textContent = text;
+
+    msg.appendChild(label);
+    msg.appendChild(bubble);
+    transcriptContainer.appendChild(msg);
+    segmentElements.set(id, { element: msg, text: text });
+    scrollTranscript();
+  }
+
+  function handleDataMessage(text) {
+    if (!transcriptContainer || !text) return;
+    try {
+      const data = JSON.parse(text);
+      if (!data || !data.type) return;
+
+      const type = data.type;
+
+      // User speech transcript (final corrected version from Grok)
+      if (type === 'conversation.item.input_audio_transcription.completed') {
+        const transcript = data.transcript || '';
+        if (!transcript) return;
+        const id = data.item_id || ('user-' + Date.now());
+        const existing = segmentElements.get(id);
+        if (existing) {
+          // Update existing entry matched by item_id
+          const bubble = existing.element.querySelector('.transcript-bubble');
+          if (bubble) {
+            bubble.textContent = transcript;
+            bubble.classList.remove('interim');
+          }
+          existing.text = transcript;
+        } else if (lastUserSpeechEntry) {
+          // Update the last user speech bubble from TranscriptionReceived
+          // (IDs differ between LiveKit segments and Grok item_ids)
+          const bubble = lastUserSpeechEntry.element.querySelector('.transcript-bubble');
+          if (bubble) {
+            bubble.textContent = transcript;
+            bubble.classList.remove('interim');
+          }
+          lastUserSpeechEntry.text = transcript;
+          segmentElements.set(id, lastUserSpeechEntry);
+          lastUserSpeechEntry = null;
+        } else {
+          appendTranscriptBubble(id, 'user', '你', transcript, false);
+        }
+        return;
+      }
+
+      // Grok response streaming delta
+      if (type === 'response.audio_transcript.delta') {
+        const delta = data.delta || '';
+        if (!delta) return;
+        const id = data.item_id || ('grok-' + Date.now());
+        const existing = segmentElements.get(id);
+        if (existing) {
+          existing.text += delta;
+          const bubble = existing.element.querySelector('.transcript-bubble');
+          if (bubble) bubble.textContent = existing.text;
+        } else {
+          appendTranscriptBubble(id, 'assistant', 'Grok', delta, true);
+        }
+        scrollTranscript();
+        return;
+      }
+
+      // Grok response complete
+      if (type === 'response.audio_transcript.done') {
+        const transcript = data.transcript || '';
+        const id = data.item_id || ('grok-' + Date.now());
+        const existing = segmentElements.get(id);
+        if (existing) {
+          if (transcript) {
+            existing.text = transcript;
+            const bubble = existing.element.querySelector('.transcript-bubble');
+            if (bubble) bubble.textContent = transcript;
+          }
+          const bubble = existing.element.querySelector('.transcript-bubble');
+          if (bubble) bubble.classList.remove('interim');
+        } else if (transcript) {
+          appendTranscriptBubble(id, 'assistant', 'Grok', transcript, false);
+        }
+        return;
+      }
+    } catch (e) {
+      // Not JSON, ignore
+    }
+  }
+
+  // ---- Text message ----
+
+  function sendTextMessage(text) {
+    if (!text.trim()) return;
+    const msg = text.trim();
+
+    if (!room || room.state !== 'connected') {
+      toast('请先连接语音会话', 'error');
+      return;
+    }
+
+    // Show user message in transcript
+    const userId = 'text-user-' + Date.now();
+    appendTranscriptBubble(userId, 'user', '你', msg, false);
+
+    try {
+      // Send text via LiveKit data channel with topic "grok.chat"
+      // Grok agent will respond with both audio and transcript
+      const payload = new TextEncoder().encode(msg);
+      room.localParticipant.publishData(payload, { topic: 'grok.chat' });
+      log(`文字已发送: ${msg}`);
+    } catch (err) {
+      log(`文字发送失败: ${err.message}`, 'error');
+      toast('文字发送失败', 'error');
+    }
+  }
+
+  function setTextInputVisible(visible) {
+    if (!textInputRow) return;
+    if (visible) {
+      textInputRow.classList.remove('hidden');
+    } else {
+      textInputRow.classList.add('hidden');
+      if (textInput) textInput.value = '';
+    }
+  }
+
+  function updateSendBtn() {
+    if (!sendTextBtn || !textInput) return;
+    sendTextBtn.disabled = !textInput.value.trim();
+  }
+
+  // ---- Microphone toggle ----
+
+  function toggleMic() {
+    if (!room || room.state !== 'connected') return;
+    const enabled = room.localParticipant.isMicrophoneEnabled;
+    room.localParticipant.setMicrophoneEnabled(!enabled);
+    updateMicUI(!enabled);
+  }
+
+  function updateMicUI(enabled) {
+    if (!micToggleBtn) return;
+    if (enabled) {
+      micToggleBtn.classList.remove('muted');
+      micToggleBtn.title = '关闭麦克风';
+      if (micOnIcon) micOnIcon.classList.remove('hidden');
+      if (micOffIcon) micOffIcon.classList.add('hidden');
+    } else {
+      micToggleBtn.classList.add('muted');
+      micToggleBtn.title = '开启麦克风';
+      if (micOnIcon) micOnIcon.classList.add('hidden');
+      if (micOffIcon) micOffIcon.classList.remove('hidden');
+    }
   }
 
   // ---- Session ----
@@ -265,6 +449,16 @@
         handleTranscription(segments, participant);
       });
 
+      room.on(RoomEvent.DataReceived, (payload, participant, kind, topic) => {
+        let text = '';
+        try {
+          text = new TextDecoder().decode(payload);
+        } catch (e) {
+          return;
+        }
+        handleDataMessage(text);
+      });
+
       room.on(RoomEvent.Disconnected, () => {
         log('已断开连接');
         resetUI();
@@ -277,6 +471,7 @@
 
       setStatus('connected', '通话中');
       setButtons(true);
+      setTextInputVisible(true);
 
       log('正在发布麦克风音轨...');
       for (const track of localTracks) {
@@ -303,6 +498,8 @@
   function resetUI() {
     setStatus('', '未连接');
     setButtons(false);
+    setTextInputVisible(false);
+    updateMicUI(true);
     if (audioRoot) {
       audioRoot.innerHTML = '';
     }
@@ -353,6 +550,29 @@
   }
   if (clearTranscriptBtn) {
     clearTranscriptBtn.addEventListener('click', clearTranscript);
+  }
+  if (textInput) {
+    textInput.addEventListener('input', updateSendBtn);
+    textInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey && textInput.value.trim()) {
+        e.preventDefault();
+        sendTextMessage(textInput.value);
+        textInput.value = '';
+        updateSendBtn();
+      }
+    });
+  }
+  if (sendTextBtn) {
+    sendTextBtn.addEventListener('click', () => {
+      if (textInput && textInput.value.trim()) {
+        sendTextMessage(textInput.value);
+        textInput.value = '';
+        updateSendBtn();
+      }
+    });
+  }
+  if (micToggleBtn) {
+    micToggleBtn.addEventListener('click', toggleMic);
   }
 
   speedValue.textContent = Number(speedRange.value).toFixed(1);
