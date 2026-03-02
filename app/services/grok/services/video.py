@@ -351,16 +351,12 @@ class VideoService:
         self,
         token: str,
         prompt: str,
-        aspect_ratio: str = None,
+        aspect_ratio: str = "3:2",
         video_length: int = 6,
         resolution_name: str = "480p",
-        preset: str = None,
+        preset: str = "normal",
     ) -> AsyncGenerator[bytes, None]:
         """Generate video."""
-        if preset is None:
-            preset = get_config("video.default_mode") or "normal"
-        if aspect_ratio is None:
-            aspect_ratio = get_config("video.default_aspect_ratio") or "16:9"
         logger.info(
             f"Video generation: prompt='{prompt[:50]}...', ratio={aspect_ratio}, length={video_length}s, preset={preset}"
         )
@@ -415,17 +411,13 @@ class VideoService:
         token: str,
         prompt: str,
         image_url: str,
-        aspect_ratio: str = None,
+        aspect_ratio: str = "3:2",
         video_length: int = 6,
         resolution: str = "480p",
-        preset: str = None,
+        preset: str = "normal",
         file_attachments: Optional[list] = None,
     ) -> AsyncGenerator[bytes, None]:
         """Generate video from image."""
-        if preset is None:
-            preset = get_config("video.default_mode") or "normal"
-        if aspect_ratio is None:
-            aspect_ratio = get_config("video.default_aspect_ratio") or "16:9"
         logger.info(
             f"Image to video: prompt='{prompt[:50]}...', image={image_url[:80]}"
         )
@@ -507,22 +499,19 @@ class VideoService:
         messages: list,
         stream: bool = None,
         reasoning_effort: str | None = None,
-        aspect_ratio: str = None,
+        aspect_ratio: str = "3:2",
         video_length: int = 6,
         resolution: str = "480p",
-        preset: str = None,
+        preset: str = "normal",
     ):
         """Video generation entrypoint."""
-        if preset is None:
-            preset = get_config("video.default_mode") or "normal"
-        if aspect_ratio is None:
-            aspect_ratio = get_config("video.default_aspect_ratio") or "16:9"
-        # 根据模型自动设置默认值
+        # Auto-set defaults based on model
         is_super = model == "grok-imagine-1.0-video-super"
         if video_length is None or (is_super and video_length == 6):
             video_length = 10 if is_super else 6
         if resolution is None or (is_super and resolution == "480p"):
             resolution = "720p" if is_super else "480p"
+
         # Get token via intelligent routing.
         token_mgr = await get_token_manager()
         await token_mgr.reload_if_stale()
@@ -790,6 +779,8 @@ class VideoStreamProcessor(BaseProcessor):
                             if self.upscale_on_finish:
                                 yield self._sse("正在对视频进行超分辨率\n")
                                 video_url = await self._upscale_video_url(video_url)
+                            video_url = resolve_asset_url(video_url)
+                            thumbnail_url = resolve_asset_url(thumbnail_url) if thumbnail_url else ""
                             dl_service = self._get_dl()
                             rendered = await dl_service.render_video(
                                 video_url, self.token, thumbnail_url
@@ -915,6 +906,8 @@ class VideoCollectProcessor(BaseProcessor):
                         elif video_url:
                             if self.upscale_on_finish:
                                 video_url = await self._upscale_video_url(video_url)
+                            video_url = resolve_asset_url(video_url)
+                            thumbnail_url = resolve_asset_url(thumbnail_url) if thumbnail_url else ""
                             dl_service = self._get_dl()
                             content = await dl_service.render_video(
                                 video_url, self.token, thumbnail_url
