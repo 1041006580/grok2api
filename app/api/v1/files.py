@@ -1,14 +1,19 @@
 """
 文件服务 API 路由
+
+本地缓存优先，未命中时从 assets.grok.com 流式代理。
 """
 
 import aiofiles.os
 from pathlib import Path
-from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import FileResponse, StreamingResponse
 
 from app.core.logger import logger
 from app.core.storage import DATA_DIR
+from app.services.reverse.assets_download import AssetsDownloadReverse
+from app.services.reverse.utils.session import ResettableSession
+from app.services.token import get_token_manager
 
 router = APIRouter(tags=["Files"])
 
@@ -17,45 +22,82 @@ BASE_DIR = DATA_DIR / "tmp"
 IMAGE_DIR = BASE_DIR / "image"
 VIDEO_DIR = BASE_DIR / "video"
 
+# 扩展名 -> Content-Type
+_CONTENT_TYPES = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+    ".mp4": "video/mp4",
+    ".webm": "video/webm",
+}
+
+
+def _guess_content_type(filename: str, fallback: str = "application/octet-stream") -> str:
+    suffix = Path(filename).suffix.lower()
+    return _CONTENT_TYPES.get(suffix, fallback)
+
+
+async def _stream_from_upstream(asset_path: str):
+    """从 assets.grok.com 流式代理资源。"""
+    tm = await get_token_manager()
+    token = tm.get_token("ssoBasic") or tm.get_token("ssoSuper")
+    if not token:
+        raise HTTPException(status_code=503, detail="No available token for proxy")
+
+    session = ResettableSession()
+    try:
+        response = await AssetsDownloadReverse.request(session, token, asset_path)
+    except Exception as e:
+        await session.close()
+        logger.error(f"File proxy failed: {e}")
+        raise HTTPException(status_code=502, detail="Upstream download failed")
+
+    upstream_ct = response.headers.get("content-type", "").split(";")[0].strip()
+    content_type = upstream_ct or _guess_content_type(asset_path)
+
+    async def _iter():
+        try:
+            if hasattr(response, "aiter_content"):
+                async for chunk in response.aiter_content():
+                    if chunk:
+                        yield chunk
+            else:
+                yield response.content
+        finally:
+            await session.close()
+
+    return StreamingResponse(
+        _iter(),
+        media_type=content_type,
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+    )
+
 
 @router.get("/image/{filename:path}")
 async def get_image(filename: str):
-    """
-    获取图片文件
-    """
-    if "/" in filename:
-        filename = filename.replace("/", "-")
-
-    file_path = IMAGE_DIR / filename
+    """获取图片文件（本地缓存优先，否则流式代理）"""
+    flat_name = filename.replace("/", "-") if "/" in filename else filename
+    file_path = IMAGE_DIR / flat_name
 
     if await aiofiles.os.path.exists(file_path):
         if await aiofiles.os.path.isfile(file_path):
-            content_type = "image/jpeg"
-            if file_path.suffix.lower() == ".png":
-                content_type = "image/png"
-            elif file_path.suffix.lower() == ".webp":
-                content_type = "image/webp"
-
-            # 增加缓存头，支持高并发场景下的浏览器/CDN缓存
             return FileResponse(
                 file_path,
-                media_type=content_type,
+                media_type=_guess_content_type(flat_name, "image/jpeg"),
                 headers={"Cache-Control": "public, max-age=31536000, immutable"},
             )
 
-    logger.warning(f"Image not found: {filename}")
-    raise HTTPException(status_code=404, detail="Image not found")
+    # 本地缓存未命中，从上游流式代理
+    asset_path = f"/{filename}" if not filename.startswith("/") else filename
+    return await _stream_from_upstream(asset_path)
 
 
 @router.get("/video/{filename:path}")
 async def get_video(filename: str):
-    """
-    获取视频文件
-    """
-    if "/" in filename:
-        filename = filename.replace("/", "-")
-
-    file_path = VIDEO_DIR / filename
+    """获取视频文件（本地缓存优先，否则流式代理）"""
+    flat_name = filename.replace("/", "-") if "/" in filename else filename
+    file_path = VIDEO_DIR / flat_name
 
     if await aiofiles.os.path.exists(file_path):
         if await aiofiles.os.path.isfile(file_path):
@@ -65,5 +107,6 @@ async def get_video(filename: str):
                 headers={"Cache-Control": "public, max-age=31536000, immutable"},
             )
 
-    logger.warning(f"Video not found: {filename}")
-    raise HTTPException(status_code=404, detail="Video not found")
+    # 本地缓存未命中，从上游流式代理
+    asset_path = f"/{filename}" if not filename.startswith("/") else filename
+    return await _stream_from_upstream(asset_path)
