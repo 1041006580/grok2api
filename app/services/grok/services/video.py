@@ -103,8 +103,20 @@ class VideoService:
                         prompt=prompt_value,
                     )
 
-            post_id = response.json().get("post", {}).get("id", "")
+            try:
+                body = response.json()
+            except Exception as json_err:
+                raw = ""
+                try:
+                    raw = response.text[:500]
+                except Exception:
+                    pass
+                logger.error(f"Create post: failed to parse response JSON: {json_err}, raw={raw}")
+                raise UpstreamException(f"Create post: invalid JSON response")
+
+            post_id = body.get("post", {}).get("id", "") if isinstance(body, dict) else ""
             if not post_id:
+                logger.error(f"Create post: no post ID, body={str(body)[:300]}")
                 raise UpstreamException("No post ID in response")
 
             logger.info(f"Media post created: {post_id} (type={media_type})")

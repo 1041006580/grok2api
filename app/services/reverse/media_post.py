@@ -64,14 +64,26 @@ class MediaPostReverse:
             browser = get_config("proxy.browser")
 
             async def _do_request():
-                response = await session.post(
-                    resolve_api_url(MEDIA_POST_API),
-                    headers=headers,
-                    data=orjson.dumps(payload),
-                    timeout=timeout,
-                    proxies=proxies,
-                    impersonate=browser,
-                )
+                try:
+                    response = await session.post(
+                        resolve_api_url(MEDIA_POST_API),
+                        headers=headers,
+                        data=orjson.dumps(payload),
+                        timeout=timeout,
+                        proxies=proxies,
+                        impersonate=browser,
+                    )
+                except UpstreamException:
+                    raise
+                except Exception as req_err:
+                    logger.error(
+                        f"MediaPostReverse: session.post raised {type(req_err).__name__}: {req_err}",
+                        exc_info=True,
+                    )
+                    raise UpstreamException(
+                        message=f"MediaPostReverse: request error, {type(req_err).__name__}: {req_err}",
+                        details={"status": 502, "error": str(req_err)},
+                    )
 
                 if response.status_code != 200:
                     content = ""
@@ -89,6 +101,34 @@ class MediaPostReverse:
                     raise UpstreamException(
                         message=f"MediaPostReverse: Media post create failed, {response.status_code}",
                         details={"status": response.status_code, "body": content},
+                    )
+
+                # Validate response body is parseable JSON with expected structure
+                try:
+                    body = response.json()
+                except Exception as json_err:
+                    raw = ""
+                    try:
+                        raw = response.text[:500]
+                    except Exception:
+                        pass
+                    logger.error(
+                        f"MediaPostReverse: Failed to parse response JSON: {json_err}, raw={raw}",
+                    )
+                    raise UpstreamException(
+                        message=f"MediaPostReverse: Invalid JSON response",
+                        details={"status": 502, "body": raw},
+                    )
+
+                # Check for upstream error in 200 response body
+                if isinstance(body, dict) and "error" in body and "post" not in body:
+                    error_info = body.get("error", "")
+                    logger.error(
+                        f"MediaPostReverse: Upstream returned error in 200 body: {str(error_info)[:200]}",
+                    )
+                    raise UpstreamException(
+                        message=f"MediaPostReverse: Upstream error in response body",
+                        details={"status": 502, "body": str(error_info)[:500]},
                     )
 
                 return response
