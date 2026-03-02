@@ -73,65 +73,91 @@ class MediaPostReverse:
                         proxies=proxies,
                         impersonate=browser,
                     )
+
+                    # Access status_code safely - curl_cffi may raise KeyError here
+                    try:
+                        status = response.status_code
+                    except Exception as sc_err:
+                        logger.error(
+                            f"MediaPostReverse: response.status_code raised {type(sc_err).__name__}: {sc_err}",
+                            exc_info=True,
+                        )
+                        # Try to dump raw response info for diagnosis
+                        diag = {}
+                        for attr in ("url", "http_version", "content", "headers"):
+                            try:
+                                val = getattr(response, attr, None)
+                                if attr == "content" and val is not None:
+                                    diag[attr] = repr(val[:500])
+                                elif val is not None:
+                                    diag[attr] = str(val)[:200]
+                            except Exception:
+                                diag[attr] = "<error>"
+                        logger.error(f"MediaPostReverse: response diagnosis: {diag}")
+                        raise UpstreamException(
+                            message=f"MediaPostReverse: Failed to read response status: {sc_err}",
+                            details={"status": 502, "error": str(sc_err), "diag": diag},
+                        )
+
+                    if status != 200:
+                        content = ""
+                        try:
+                            content = response.text[:500]
+                        except Exception:
+                            try:
+                                content = (await response.atext())[:500]
+                            except Exception:
+                                pass
+                        logger.error(
+                            f"MediaPostReverse: Media post create failed, {status}, body={content}",
+                            extra={"error_type": "UpstreamException"},
+                        )
+                        raise UpstreamException(
+                            message=f"MediaPostReverse: Media post create failed, {status}",
+                            details={"status": status, "body": content},
+                        )
+
+                    # Validate response body
+                    try:
+                        body = response.json()
+                    except Exception as json_err:
+                        raw = ""
+                        try:
+                            raw = response.text[:500]
+                        except Exception:
+                            pass
+                        logger.error(
+                            f"MediaPostReverse: Failed to parse response JSON: {json_err}, raw={raw}",
+                        )
+                        raise UpstreamException(
+                            message=f"MediaPostReverse: Invalid JSON response",
+                            details={"status": 502, "body": raw},
+                        )
+
+                    # Check for upstream error in 200 response body
+                    if isinstance(body, dict) and "error" in body and "post" not in body:
+                        error_info = body.get("error", "")
+                        logger.error(
+                            f"MediaPostReverse: Upstream returned error in 200 body: {str(error_info)[:200]}",
+                        )
+                        raise UpstreamException(
+                            message=f"MediaPostReverse: Upstream error in response body",
+                            details={"status": 502, "body": str(error_info)[:500]},
+                        )
+
+                    return response
+
                 except UpstreamException:
                     raise
                 except Exception as req_err:
                     logger.error(
-                        f"MediaPostReverse: session.post raised {type(req_err).__name__}: {req_err}",
+                        f"MediaPostReverse: _do_request raised {type(req_err).__name__}: {req_err}",
                         exc_info=True,
                     )
                     raise UpstreamException(
                         message=f"MediaPostReverse: request error, {type(req_err).__name__}: {req_err}",
                         details={"status": 502, "error": str(req_err)},
                     )
-
-                if response.status_code != 200:
-                    content = ""
-                    try:
-                        content = response.text[:500]
-                    except Exception:
-                        try:
-                            content = (await response.atext())[:500]
-                        except Exception:
-                            pass
-                    logger.error(
-                        f"MediaPostReverse: Media post create failed, {response.status_code}, body={content}",
-                        extra={"error_type": "UpstreamException"},
-                    )
-                    raise UpstreamException(
-                        message=f"MediaPostReverse: Media post create failed, {response.status_code}",
-                        details={"status": response.status_code, "body": content},
-                    )
-
-                # Validate response body is parseable JSON with expected structure
-                try:
-                    body = response.json()
-                except Exception as json_err:
-                    raw = ""
-                    try:
-                        raw = response.text[:500]
-                    except Exception:
-                        pass
-                    logger.error(
-                        f"MediaPostReverse: Failed to parse response JSON: {json_err}, raw={raw}",
-                    )
-                    raise UpstreamException(
-                        message=f"MediaPostReverse: Invalid JSON response",
-                        details={"status": 502, "body": raw},
-                    )
-
-                # Check for upstream error in 200 response body
-                if isinstance(body, dict) and "error" in body and "post" not in body:
-                    error_info = body.get("error", "")
-                    logger.error(
-                        f"MediaPostReverse: Upstream returned error in 200 body: {str(error_info)[:200]}",
-                    )
-                    raise UpstreamException(
-                        message=f"MediaPostReverse: Upstream error in response body",
-                        details={"status": 502, "body": str(error_info)[:500]},
-                    )
-
-                return response
 
             return await retry_on_status(_do_request)
 
