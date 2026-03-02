@@ -730,6 +730,7 @@ class VideoStreamProcessor(BaseProcessor):
     ) -> AsyncGenerator[str, None]:
         """Process video stream response."""
         idle_timeout = get_config("video.stream_timeout")
+        last_progress = -1
 
         try:
             async for line in _with_idle_timeout(response, idle_timeout, self.model):
@@ -767,6 +768,7 @@ class VideoStreamProcessor(BaseProcessor):
 
                 if video_resp := resp.get("streamingVideoGenerationResponse"):
                     progress = video_resp.get("progress", 0)
+                    last_progress = progress
 
                     if self.show_think:
                         if not self.think_opened:
@@ -797,8 +799,17 @@ class VideoStreamProcessor(BaseProcessor):
                             yield self._sse(rendered)
 
                             logger.info(f"Video generated: {video_url}")
+                        else:
+                            logger.warning(
+                                f"Video progress 100%% but no videoUrl, response={video_resp}"
+                            )
+                            yield self._sse("视频生成完成但未返回视频链接，请重试。\n")
                     continue
 
+            if last_progress >= 0 and last_progress != 100:
+                logger.warning(
+                    f"Video stream ended at progress {last_progress}%% (expected 100%%)"
+                )
             if self.think_opened:
                 yield self._sse("</think>\n")
             yield self._sse(finish="stop")
@@ -920,6 +931,11 @@ class VideoCollectProcessor(BaseProcessor):
                                 video_url, self.token, thumbnail_url
                             )
                             logger.info(f"Video generated: {video_url}")
+                        else:
+                            logger.warning(
+                                f"Video progress 100%% but no videoUrl, response={video_resp}"
+                            )
+                            content = "视频生成完成但未返回视频链接，请重试。\n"
 
         except asyncio.CancelledError:
             logger.debug(
