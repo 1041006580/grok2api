@@ -121,7 +121,7 @@ class MediaPostReverse:
                             except Exception:
                                 pass
                         logger.error(
-                            f"MediaPostReverse: Media post create failed, {status}, body={content}",
+                            f"MediaPostReverse: Media post create failed, {status}, body={content.replace('{', '{{').replace('}', '}}')}",
                             extra={"error_type": "UpstreamException"},
                         )
                         raise UpstreamException(

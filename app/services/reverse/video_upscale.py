@@ -73,7 +73,7 @@ class VideoUpscaleReverse:
                             except Exception:
                                 pass
                         logger.error(
-                            f"VideoUpscaleReverse: Upscale failed, {response.status_code}, body={content}",
+                            f"VideoUpscaleReverse: Upscale failed, {response.status_code}, body={content.replace('{', '{{').replace('}', '}}')}",
                             extra={"error_type": "UpstreamException"},
                         )
                         raise UpstreamException(

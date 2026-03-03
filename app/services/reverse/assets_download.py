@@ -102,7 +102,7 @@ class AssetsDownloadReverse:
                         except Exception:
                             pass
                         logger.error(
-                            f"AssetsDownloadReverse: Download failed, {response.status_code}, body={body}",
+                            f"AssetsDownloadReverse: Download failed, {response.status_code}, body={body.replace('{', '{{').replace('}', '}}')}",
                             extra={"error_type": "UpstreamException"},
                         )
                         raise UpstreamException(

@@ -83,33 +83,28 @@ class RateLimitsReverse:
 
             async def _do_request():
                 connector = None
-                step = "init"
                 try:
-                    step = "create_connector"
                     if base_proxy:
                         connector = ProxyConnector.from_url(base_proxy)
 
-                    step = "create_session"
                     timeout = aiohttp.ClientTimeout(total=timeout_val)
                     async with aiohttp.ClientSession(
                         connector=connector, timeout=timeout
                     ) as aio_session:
-                        step = "send_request"
                         async with aio_session.post(
                             resolve_api_url(RATE_LIMITS_API),
                             headers=headers,
                             data=orjson.dumps(payload),
                         ) as resp:
-                            step = "read_body"
                             body = await resp.read()
 
-                            step = "check_status"
                             if resp.status != 200:
                                 body_text = body[:500].decode(
                                     "utf-8", errors="replace"
                                 )
+                                safe_body = body_text.replace("{", "{{").replace("}", "}}")
                                 logger.error(
-                                    f"RateLimitsReverse: Request failed, {resp.status}, body={body_text}",
+                                    f"RateLimitsReverse: Request failed, {resp.status}, body={safe_body}",
                                     extra={"error_type": "UpstreamException"},
                                 )
                                 raise UpstreamException(
@@ -120,20 +115,9 @@ class RateLimitsReverse:
                                     },
                                 )
 
-                            step = "build_response"
                             return _SimpleResponse(
                                 resp.status, body, dict(resp.headers)
                             )
-                except KeyError as ke:
-                    import traceback
-                    tb = traceback.format_exc()
-                    logger.error(
-                        f"RateLimitsReverse: KeyError at step '{step}': {ke}\n{tb}",
-                    )
-                    raise UpstreamException(
-                        message=f"RateLimitsReverse: KeyError at step '{step}': {ke}",
-                        details={"status": 429, "error": str(ke), "step": step},
-                    )
                 finally:
                     if connector:
                         await connector.close()

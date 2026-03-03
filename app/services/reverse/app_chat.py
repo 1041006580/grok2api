@@ -190,7 +190,7 @@ class AppChatReverse:
                             content,
                         )
                         logger.error(
-                            f"AppChatReverse: Chat failed, {response.status_code}, body={content}",
+                            f"AppChatReverse: Chat failed, {response.status_code}, body={content.replace('{', '{{').replace('}', '}}')}",
                             extra={"error_type": "UpstreamException"},
                         )
                         raise UpstreamException(
