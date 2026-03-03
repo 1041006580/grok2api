@@ -161,16 +161,26 @@ class AppChatReverse:
             browser = get_config("proxy.browser")
 
             async def _do_request():
-                response = await session.post(
-                    resolve_api_url(CHAT_API),
-                    headers=headers,
-                    data=orjson.dumps(payload),
-                    timeout=timeout,
-                    stream=True,
-                    proxy=proxy,
-                    proxies=proxies,
-                    impersonate=browser,
-                )
+                try:
+                    response = await session.post(
+                        resolve_api_url(CHAT_API),
+                        headers=headers,
+                        data=orjson.dumps(payload),
+                        timeout=timeout,
+                        stream=True,
+                        proxy=proxy,
+                        proxies=proxies,
+                        impersonate=browser,
+                    )
+                except KeyError as conn_err:
+                    # curl_cffi HTTP/2 bug: KeyError on ":status" or "code"
+                    logger.warning(
+                        f"AppChatReverse: curl_cffi KeyError during request: {conn_err}, treating as 429 for retry"
+                    )
+                    raise UpstreamException(
+                        message=f"AppChatReverse: curl_cffi connection error: {conn_err}",
+                        details={"status": 429, "error": str(conn_err)},
+                    )
 
                 if response.status_code != 200:
 
