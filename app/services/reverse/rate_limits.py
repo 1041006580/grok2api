@@ -117,6 +117,16 @@ class RateLimitsReverse:
                             return _SimpleResponse(
                                 resp.status, body, dict(resp.headers)
                             )
+                except KeyError as ke:
+                    # Unexpected KeyError — log full traceback to find the source
+                    logger.error(
+                        f"RateLimitsReverse: Unexpected KeyError in _do_request: {ke}",
+                        exc_info=True,
+                    )
+                    raise UpstreamException(
+                        message=f"RateLimitsReverse: Unexpected KeyError: {ke}",
+                        details={"status": 429, "error": str(ke)},
+                    )
                 finally:
                     if connector:
                         await connector.close()
