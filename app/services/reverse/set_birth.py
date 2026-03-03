@@ -63,14 +63,23 @@ class SetBirthReverse:
             browser = get_config("proxy.browser")
 
             async def _do_request():
-                response = await session.post(
-                    resolve_api_url(SET_BIRTH_API),
-                    headers=headers,
-                    json=payload,
-                    timeout=timeout,
-                    proxies=proxies,
-                    impersonate=browser,
-                )
+                try:
+                    response = await session.post(
+                        resolve_api_url(SET_BIRTH_API),
+                        headers=headers,
+                        json=payload,
+                        timeout=timeout,
+                        proxies=proxies,
+                        impersonate=browser,
+                    )
+                except KeyError as conn_err:
+                    logger.warning(
+                        f"SetBirthReverse: curl_cffi KeyError: {conn_err}, treating as 429 for retry"
+                    )
+                    raise UpstreamException(
+                        message=f"SetBirthReverse: curl_cffi connection error: {conn_err}",
+                        details={"status": 429, "error": str(conn_err)},
+                    )
 
                 if response.status_code not in (200, 204):
                     logger.error(

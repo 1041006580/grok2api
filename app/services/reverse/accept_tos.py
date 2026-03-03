@@ -56,14 +56,23 @@ class AcceptTosReverse:
             browser = get_config("proxy.browser")
 
             async def _do_request():
-                response = await session.post(
-                    resolve_accounts_url(ACCEPT_TOS_API),
-                    headers=headers,
-                    data=payload,
-                    timeout=timeout,
-                    proxies=proxies,
-                    impersonate=browser,
-                )
+                try:
+                    response = await session.post(
+                        resolve_accounts_url(ACCEPT_TOS_API),
+                        headers=headers,
+                        data=payload,
+                        timeout=timeout,
+                        proxies=proxies,
+                        impersonate=browser,
+                    )
+                except KeyError as conn_err:
+                    logger.warning(
+                        f"AcceptTosReverse: curl_cffi KeyError: {conn_err}, treating as 429 for retry"
+                    )
+                    raise UpstreamException(
+                        message=f"AcceptTosReverse: curl_cffi connection error: {conn_err}",
+                        details={"status": 429, "error": str(conn_err)},
+                    )
 
                 if response.status_code != 200:
                     logger.error(

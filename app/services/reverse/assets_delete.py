@@ -53,13 +53,22 @@ class AssetsDeleteReverse:
             browser = get_config("proxy.browser")
 
             async def _do_request():
-                response = await session.delete(
-                    resolve_api_url(f"{DELETE_API}/{asset_id}"),
-                    headers=headers,
-                    proxies=proxies,
-                    timeout=timeout,
-                    impersonate=browser,
-                )
+                try:
+                    response = await session.delete(
+                        resolve_api_url(f"{DELETE_API}/{asset_id}"),
+                        headers=headers,
+                        proxies=proxies,
+                        timeout=timeout,
+                        impersonate=browser,
+                    )
+                except KeyError as conn_err:
+                    logger.warning(
+                        f"AssetsDeleteReverse: curl_cffi KeyError: {conn_err}, treating as 429 for retry"
+                    )
+                    raise UpstreamException(
+                        message=f"AssetsDeleteReverse: curl_cffi connection error: {conn_err}",
+                        details={"status": 429, "error": str(conn_err)},
+                    )
 
                 if response.status_code != 200:
                     logger.error(

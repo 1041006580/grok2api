@@ -84,15 +84,24 @@ class AssetsDownloadReverse:
             browser = get_config("proxy.browser")
 
             async def _do_request():
-                response = await session.get(
-                    url,
-                    headers=headers,
-                    proxies=proxies,
-                    timeout=timeout,
-                    allow_redirects=True,
-                    impersonate=browser,
-                    stream=True,
-                )
+                try:
+                    response = await session.get(
+                        url,
+                        headers=headers,
+                        proxies=proxies,
+                        timeout=timeout,
+                        allow_redirects=True,
+                        impersonate=browser,
+                        stream=True,
+                    )
+                except KeyError as conn_err:
+                    logger.warning(
+                        f"AssetsDownloadReverse: curl_cffi KeyError: {conn_err}, treating as 429 for retry"
+                    )
+                    raise UpstreamException(
+                        message=f"AssetsDownloadReverse: curl_cffi connection error: {conn_err}",
+                        details={"status": 429, "error": str(conn_err)},
+                    )
 
                 if response.status_code != 200:
                     body = ""
