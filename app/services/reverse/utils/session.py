@@ -53,8 +53,19 @@ class ResettableSession:
 
     async def _request(self, method: str, *args: Any, **kwargs: Any):
         await self._maybe_reset()
-        response = await getattr(self._session, method)(*args, **kwargs)
-        if self._reset_on_status and response.status_code in self._reset_on_status:
+        try:
+            response = await getattr(self._session, method)(*args, **kwargs)
+        except KeyError:
+            # curl_cffi HTTP/2 bug: mark session for reset before re-raising
+            self._reset_requested = True
+            raise
+        try:
+            status = response.status_code
+        except KeyError:
+            # curl_cffi HTTP/2 bug on status_code access
+            self._reset_requested = True
+            raise
+        if self._reset_on_status and status in self._reset_on_status:
             self._reset_requested = True
         return response
 
