@@ -8,8 +8,9 @@ import asyncio
 import base64
 import hashlib
 import os
+import time
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 import aiofiles
@@ -22,6 +23,36 @@ from app.services.reverse.assets_download import AssetsDownloadReverse
 from app.services.reverse.utils.session import ResettableSession
 from app.services.reverse.utils.urls import resolve_asset_url
 from app.services.grok.utils.locks import _get_download_semaphore, _file_lock
+
+# Asset path → token cache for file proxy endpoint.
+# Stores (token, timestamp) so the proxy can use the correct token
+# that generated the asset instead of a random pool token.
+_ASSET_TOKEN_CACHE: Dict[str, Tuple[str, float]] = {}
+_ASSET_TOKEN_TTL = 3600  # 1 hour
+
+
+def cache_asset_token(asset_path: str, token: str) -> None:
+    """Cache the token that owns an asset path."""
+    raw = token[4:] if token.startswith("sso=") else token
+    _ASSET_TOKEN_CACHE[asset_path] = (raw, time.time())
+    # Lazy eviction: remove expired entries when cache grows too large
+    if len(_ASSET_TOKEN_CACHE) > 2000:
+        now = time.time()
+        expired = [k for k, (_, ts) in _ASSET_TOKEN_CACHE.items() if now - ts > _ASSET_TOKEN_TTL]
+        for k in expired:
+            _ASSET_TOKEN_CACHE.pop(k, None)
+
+
+def get_cached_asset_token(asset_path: str) -> Optional[str]:
+    """Look up the token that owns an asset path."""
+    entry = _ASSET_TOKEN_CACHE.get(asset_path)
+    if entry is None:
+        return None
+    token, ts = entry
+    if time.time() - ts > _ASSET_TOKEN_TTL:
+        _ASSET_TOKEN_CACHE.pop(asset_path, None)
+        return None
+    return token
 
 
 class DownloadService:
@@ -72,6 +103,8 @@ class DownloadService:
             # Return proxy URL directly — the /v1/files/ endpoint will
             # stream from assets.grok.com on demand (no pre-download).
             final_url = f"{app_url.rstrip('/')}/v1/files/{media_type}{path}"
+            # Cache which token owns this asset so the proxy uses the right one
+            cache_asset_token(path, token)
             if media_type == "image":
                 try:
                     from app.services.image_origin import ORIGIN_GENERATED, get_image_origin_ledger
@@ -329,4 +362,4 @@ class DownloadService:
             self._cleanup_running = False
 
 
-__all__ = ["DownloadService"]
+__all__ = ["DownloadService", "cache_asset_token", "get_cached_asset_token"]

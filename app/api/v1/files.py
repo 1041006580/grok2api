@@ -14,6 +14,7 @@ from app.core.storage import DATA_DIR
 from app.services.reverse.assets_download import AssetsDownloadReverse
 from app.services.reverse.utils.session import ResettableSession
 from app.services.token import get_token_manager
+from app.services.grok.utils.download import get_cached_asset_token
 
 router = APIRouter(tags=["Files"])
 
@@ -40,14 +41,16 @@ def _guess_content_type(filename: str, fallback: str = "application/octet-stream
 
 async def _stream_from_upstream(asset_path: str):
     """从 assets.grok.com 流式代理资源。"""
-    tm = await get_token_manager()
-    await tm.reload_if_stale()
-    token = tm.get_token("ssoBasic") or tm.get_token("ssoSuper")
+    # 优先使用生成该资产时的 token（assets.grok.com 要求资产所有者的 token）
+    token = get_cached_asset_token(asset_path)
     if not token:
-        # 尝试紧急恢复冷却中的 token
-        result = await tm.refresh_cooling_tokens()
-        if result.get("recovered", 0) > 0:
-            token = tm.get_token("ssoBasic") or tm.get_token("ssoSuper")
+        tm = await get_token_manager()
+        await tm.reload_if_stale()
+        token = tm.get_token("ssoBasic") or tm.get_token("ssoSuper")
+        if not token:
+            result = await tm.refresh_cooling_tokens()
+            if result.get("recovered", 0) > 0:
+                token = tm.get_token("ssoBasic") or tm.get_token("ssoSuper")
     if not token:
         raise HTTPException(status_code=503, detail="No available token for proxy")
 
