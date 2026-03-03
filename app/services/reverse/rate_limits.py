@@ -1,16 +1,10 @@
 """
 Reverse interface: rate limits.
-
-Uses aiohttp instead of curl_cffi to avoid persistent HTTP/2 KeyError bug
-in curl_cffi on certain platforms. The rate-limits API is a simple JSON POST
-that does not require browser fingerprinting.
 """
 
-import aiohttp
 import orjson
 from typing import Any
-
-from aiohttp_socks import ProxyConnector
+from curl_cffi.requests import AsyncSession
 
 from app.core.logger import logger
 from app.core.config import get_config
@@ -22,37 +16,17 @@ from app.services.reverse.utils.urls import resolve_api_url
 RATE_LIMITS_API = "https://grok.com/rest/rate-limits"
 
 
-class _SimpleResponse:
-    """Lightweight response wrapper compatible with curl_cffi Response interface."""
-
-    def __init__(self, status_code: int, body: bytes, headers: dict):
-        self.status_code = status_code
-        self._body = body
-        self.headers = headers
-
-    def json(self):
-        return orjson.loads(self._body)
-
-    @property
-    def text(self):
-        return self._body.decode("utf-8", errors="replace")
-
-    @property
-    def content(self):
-        return self._body
-
-
 class RateLimitsReverse:
     """/rest/rate-limits reverse interface."""
 
     @staticmethod
     async def request(
-        session, token: str, model_name: str = "grok-3"
+        session: AsyncSession, token: str, model_name: str = "grok-3"
     ) -> Any:
         """Fetch rate limits from Grok.
 
         Args:
-            session: Unused (kept for interface compatibility).
+            session: AsyncSession, the session to use for the request.
             token: str, the SSO token.
             model_name: str, the model name for rate-limits query.
                 Valid values: "grok-3", "grok-4", "grok-420", etc.
@@ -61,8 +35,9 @@ class RateLimitsReverse:
             Any: The response from the request.
         """
         try:
-            # Get proxy
+            # Get proxies
             base_proxy = get_config("proxy.base_proxy_url")
+            proxies = {"http": base_proxy, "https": base_proxy} if base_proxy else None
 
             # Build headers
             headers = build_headers(
@@ -78,49 +53,46 @@ class RateLimitsReverse:
                 "modelName": model_name,
             }
 
-            # Config
-            timeout_val = float(get_config("usage.timeout") or 30)
+            # Curl Config
+            timeout = get_config("usage.timeout")
+            browser = get_config("proxy.browser")
 
             async def _do_request():
-                connector = None
                 try:
-                    if base_proxy:
-                        connector = ProxyConnector.from_url(base_proxy)
+                    response = await session.post(
+                        resolve_api_url(RATE_LIMITS_API),
+                        headers=headers,
+                        data=orjson.dumps(payload),
+                        timeout=timeout,
+                        proxies=proxies,
+                        impersonate=browser,
+                    )
 
-                    timeout = aiohttp.ClientTimeout(total=timeout_val)
-                    async with aiohttp.ClientSession(
-                        connector=connector, timeout=timeout
-                    ) as aio_session:
-                        async with aio_session.post(
-                            resolve_api_url(RATE_LIMITS_API),
-                            headers=headers,
-                            data=orjson.dumps(payload),
-                        ) as resp:
-                            body = await resp.read()
+                    if response.status_code != 200:
+                        body = ""
+                        try:
+                            body = response.text[:500]
+                        except Exception:
+                            pass
+                        safe_body = body.replace("{", "{{").replace("}", "}}")
+                        logger.error(
+                            f"RateLimitsReverse: Request failed, {response.status_code}, body={safe_body}",
+                            extra={"error_type": "UpstreamException"},
+                        )
+                        raise UpstreamException(
+                            message=f"RateLimitsReverse: Request failed, {response.status_code}",
+                            details={"status": response.status_code, "body": body},
+                        )
 
-                            if resp.status != 200:
-                                body_text = body[:500].decode(
-                                    "utf-8", errors="replace"
-                                )
-                                safe_body = body_text.replace("{", "{{").replace("}", "}}")
-                                logger.error(
-                                    f"RateLimitsReverse: Request failed, {resp.status}, body={safe_body}",
-                                    extra={"error_type": "UpstreamException"},
-                                )
-                                raise UpstreamException(
-                                    message=f"RateLimitsReverse: Request failed, {resp.status}",
-                                    details={
-                                        "status": resp.status,
-                                        "body": body_text,
-                                    },
-                                )
-
-                            return _SimpleResponse(
-                                resp.status, body, dict(resp.headers)
-                            )
-                finally:
-                    if connector:
-                        await connector.close()
+                    return response
+                except KeyError as conn_err:
+                    logger.warning(
+                        f"RateLimitsReverse: curl_cffi KeyError: {conn_err}, treating as 429 for retry"
+                    )
+                    raise UpstreamException(
+                        message=f"RateLimitsReverse: curl_cffi connection error: {conn_err}",
+                        details={"status": 429, "error": str(conn_err)},
+                    )
 
             return await retry_on_status(_do_request)
 
