@@ -3,7 +3,7 @@ Reverse interface: app chat conversations.
 """
 
 import orjson
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 from urllib.parse import urlparse
 from curl_cffi.requests import AsyncSession
 
@@ -199,18 +199,7 @@ class AppChatReverse:
 
                 return response
 
-            def extract_status(e: Exception) -> Optional[int]:
-                if isinstance(e, UpstreamException):
-                    if e.details and "status" in e.details:
-                        status = e.details["status"]
-                    else:
-                        status = getattr(e, "status_code", None)
-                    if status == 429:
-                        return None
-                    return status
-                return None
-
-            response = await retry_on_status(_do_request, extract_status=extract_status)
+            response = await retry_on_status(_do_request)
 
             # Stream response
             async def stream_response():

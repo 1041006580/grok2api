@@ -69,7 +69,8 @@ class DownloadService:
 
         app_url = get_config("app.app_url")
         if app_url:
-            await self.download_file(asset_url, token, media_type)
+            # Return proxy URL directly — the /v1/files/ endpoint will
+            # stream from assets.grok.com on demand (no pre-download).
             final_url = f"{app_url.rstrip('/')}/v1/files/{media_type}{path}"
             if media_type == "image":
                 try:
