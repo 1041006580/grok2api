@@ -67,8 +67,24 @@ class RateLimitsReverse:
                         proxies=proxies,
                         impersonate=browser,
                     )
+
+                    if response.status_code != 200:
+                        body = ""
+                        try:
+                            body = response.text[:500]
+                        except Exception:
+                            pass
+                        logger.error(
+                            f"RateLimitsReverse: Request failed, {response.status_code}, body={body}",
+                            extra={"error_type": "UpstreamException"},
+                        )
+                        raise UpstreamException(
+                            message=f"RateLimitsReverse: Request failed, {response.status_code}",
+                            details={"status": response.status_code, "body": body},
+                        )
+
+                    return response
                 except KeyError as conn_err:
-                    # curl_cffi HTTP/2 bug: KeyError on ":status" or "code"
                     logger.warning(
                         f"RateLimitsReverse: curl_cffi KeyError: {conn_err}, treating as 429 for retry"
                     )
@@ -76,23 +92,6 @@ class RateLimitsReverse:
                         message=f"RateLimitsReverse: curl_cffi connection error: {conn_err}",
                         details={"status": 429, "error": str(conn_err)},
                     )
-
-                if response.status_code != 200:
-                    body = ""
-                    try:
-                        body = response.text[:500]
-                    except Exception:
-                        pass
-                    logger.error(
-                        f"RateLimitsReverse: Request failed, {response.status_code}, body={body}",
-                        extra={"error_type": "UpstreamException"},
-                    )
-                    raise UpstreamException(
-                        message=f"RateLimitsReverse: Request failed, {response.status_code}",
-                        details={"status": response.status_code, "body": body},
-                    )
-
-                return response
 
             return await retry_on_status(_do_request)
 

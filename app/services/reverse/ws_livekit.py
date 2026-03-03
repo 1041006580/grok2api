@@ -86,6 +86,22 @@ class LivekitTokenReverse:
                         proxies=proxies,
                         impersonate=browser,
                     )
+
+                    if response.status_code != 200:
+                        body = ""
+                        try:
+                            body = response.text[:200]
+                        except Exception:
+                            pass
+                        logger.error(
+                            f"LivekitTokenReverse: Request failed, {response.status_code}, body={body}"
+                        )
+                        raise UpstreamException(
+                            message=f"LivekitTokenReverse: Request failed, {response.status_code}",
+                            details={"status": response.status_code, "body": body},
+                        )
+
+                    return response
                 except KeyError as conn_err:
                     logger.warning(
                         f"LivekitTokenReverse: curl_cffi KeyError: {conn_err}, treating as 429 for retry"
@@ -94,18 +110,6 @@ class LivekitTokenReverse:
                         message=f"LivekitTokenReverse: curl_cffi connection error: {conn_err}",
                         details={"status": 429, "error": str(conn_err)},
                     )
-
-                if response.status_code != 200:
-                    body = response.text[:200]
-                    logger.error(
-                        f"LivekitTokenReverse: Request failed, {response.status_code}, body={body}"
-                    )
-                    raise UpstreamException(
-                        message=f"LivekitTokenReverse: Request failed, {response.status_code}",
-                        details={"status": response.status_code, "body": response.text},
-                    )
-
-                return response
 
             response = await retry_on_status(_do_request)
             return response

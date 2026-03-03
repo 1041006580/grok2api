@@ -87,6 +87,8 @@ class MediaPostReverse:
                     # Access status_code safely - curl_cffi may raise KeyError here
                     try:
                         status = response.status_code
+                    except KeyError:
+                        raise  # Let outer KeyError handler deal with it
                     except Exception as sc_err:
                         logger.error(
                             f"MediaPostReverse: response.status_code raised {type(sc_err).__name__}: {sc_err}",
@@ -130,6 +132,8 @@ class MediaPostReverse:
                     # Validate response body
                     try:
                         body = response.json()
+                    except KeyError:
+                        raise  # Let outer KeyError handler deal with it
                     except Exception as json_err:
                         raw = ""
                         try:
@@ -157,6 +161,14 @@ class MediaPostReverse:
 
                     return response
 
+                except KeyError as conn_err:
+                    logger.warning(
+                        f"MediaPostReverse: curl_cffi KeyError: {conn_err}, treating as 429 for retry"
+                    )
+                    raise UpstreamException(
+                        message=f"MediaPostReverse: curl_cffi connection error: {conn_err}",
+                        details={"status": 429, "error": str(conn_err)},
+                    )
                 except UpstreamException:
                     raise
                 except Exception as req_err:

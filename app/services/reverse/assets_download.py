@@ -94,6 +94,23 @@ class AssetsDownloadReverse:
                         impersonate=browser,
                         stream=True,
                     )
+
+                    if response.status_code != 200:
+                        body = ""
+                        try:
+                            body = response.text[:500]
+                        except Exception:
+                            pass
+                        logger.error(
+                            f"AssetsDownloadReverse: Download failed, {response.status_code}, body={body}",
+                            extra={"error_type": "UpstreamException"},
+                        )
+                        raise UpstreamException(
+                            message=f"AssetsDownloadReverse: Download failed, {response.status_code}",
+                            details={"status": response.status_code, "body": body},
+                        )
+
+                    return response
                 except KeyError as conn_err:
                     logger.warning(
                         f"AssetsDownloadReverse: curl_cffi KeyError: {conn_err}, treating as 429 for retry"
@@ -102,23 +119,6 @@ class AssetsDownloadReverse:
                         message=f"AssetsDownloadReverse: curl_cffi connection error: {conn_err}",
                         details={"status": 429, "error": str(conn_err)},
                     )
-
-                if response.status_code != 200:
-                    body = ""
-                    try:
-                        body = response.text[:500]
-                    except Exception:
-                        pass
-                    logger.error(
-                        f"AssetsDownloadReverse: Download failed, {response.status_code}, body={body}",
-                        extra={"error_type": "UpstreamException"},
-                    )
-                    raise UpstreamException(
-                        message=f"AssetsDownloadReverse: Download failed, {response.status_code}",
-                        details={"status": response.status_code, "body": body},
-                    )
-
-                return response
 
             return await retry_on_status(_do_request, extra_retry_codes=[500, 502])
 

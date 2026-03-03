@@ -61,6 +61,18 @@ class AssetsDeleteReverse:
                         timeout=timeout,
                         impersonate=browser,
                     )
+
+                    if response.status_code != 200:
+                        logger.error(
+                            f"AssetsDeleteReverse: Delete failed, {response.status_code}",
+                            extra={"error_type": "UpstreamException"},
+                        )
+                        raise UpstreamException(
+                            message=f"AssetsDeleteReverse: Delete failed, {response.status_code}",
+                            details={"status": response.status_code},
+                        )
+
+                    return response
                 except KeyError as conn_err:
                     logger.warning(
                         f"AssetsDeleteReverse: curl_cffi KeyError: {conn_err}, treating as 429 for retry"
@@ -69,18 +81,6 @@ class AssetsDeleteReverse:
                         message=f"AssetsDeleteReverse: curl_cffi connection error: {conn_err}",
                         details={"status": 429, "error": str(conn_err)},
                     )
-
-                if response.status_code != 200:
-                    logger.error(
-                        f"AssetsDeleteReverse: Delete failed, {response.status_code}",
-                        extra={"error_type": "UpstreamException"},
-                    )
-                    raise UpstreamException(
-                        message=f"AssetsDeleteReverse: Delete failed, {response.status_code}",
-                        details={"status": response.status_code},
-                    )
-
-                return response
 
             return await retry_on_status(_do_request)
 

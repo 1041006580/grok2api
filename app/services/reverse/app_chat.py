@@ -172,6 +172,33 @@ class AppChatReverse:
                         proxies=proxies,
                         impersonate=browser,
                     )
+
+                    if response.status_code != 200:
+
+                        # Get response content
+                        content = ""
+                        try:
+                            content = response.text[:500]
+                        except Exception:
+                            try:
+                                content = (await response.atext())[:500]
+                            except Exception:
+                                pass
+
+                        logger.debug(
+                            "AppChatReverse: Chat failed response body: %s",
+                            content,
+                        )
+                        logger.error(
+                            f"AppChatReverse: Chat failed, {response.status_code}, body={content}",
+                            extra={"error_type": "UpstreamException"},
+                        )
+                        raise UpstreamException(
+                            message=f"AppChatReverse: Chat failed, {response.status_code}",
+                            details={"status": response.status_code, "body": content},
+                        )
+
+                    return response
                 except KeyError as conn_err:
                     # curl_cffi HTTP/2 bug: KeyError on ":status" or "code"
                     logger.warning(
@@ -181,33 +208,6 @@ class AppChatReverse:
                         message=f"AppChatReverse: curl_cffi connection error: {conn_err}",
                         details={"status": 429, "error": str(conn_err)},
                     )
-
-                if response.status_code != 200:
-
-                    # Get response content
-                    content = ""
-                    try:
-                        content = response.text[:500]
-                    except Exception:
-                        try:
-                            content = (await response.atext())[:500]
-                        except Exception:
-                            pass
-
-                    logger.debug(
-                        "AppChatReverse: Chat failed response body: %s",
-                        content,
-                    )
-                    logger.error(
-                        f"AppChatReverse: Chat failed, {response.status_code}, body={content}",
-                        extra={"error_type": "UpstreamException"},
-                    )
-                    raise UpstreamException(
-                        message=f"AppChatReverse: Chat failed, {response.status_code}",
-                        details={"status": response.status_code, "body": content},
-                    )
-
-                return response
 
             response = await retry_on_status(_do_request)
 

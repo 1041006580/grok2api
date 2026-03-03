@@ -62,6 +62,26 @@ class VideoUpscaleReverse:
                         proxies=proxies,
                         impersonate=browser,
                     )
+
+                    if response.status_code != 200:
+                        content = ""
+                        try:
+                            content = response.text[:500]
+                        except Exception:
+                            try:
+                                content = (await response.atext())[:500]
+                            except Exception:
+                                pass
+                        logger.error(
+                            f"VideoUpscaleReverse: Upscale failed, {response.status_code}, body={content}",
+                            extra={"error_type": "UpstreamException"},
+                        )
+                        raise UpstreamException(
+                            message=f"VideoUpscaleReverse: Upscale failed, {response.status_code}",
+                            details={"status": response.status_code, "body": content},
+                        )
+
+                    return response
                 except KeyError as conn_err:
                     logger.warning(
                         f"VideoUpscaleReverse: curl_cffi KeyError: {conn_err}, treating as 429 for retry"
@@ -70,26 +90,6 @@ class VideoUpscaleReverse:
                         message=f"VideoUpscaleReverse: curl_cffi connection error: {conn_err}",
                         details={"status": 429, "error": str(conn_err)},
                     )
-
-                if response.status_code != 200:
-                    content = ""
-                    try:
-                        content = response.text[:500]
-                    except Exception:
-                        try:
-                            content = (await response.atext())[:500]
-                        except Exception:
-                            pass
-                    logger.error(
-                        f"VideoUpscaleReverse: Upscale failed, {response.status_code}, body={content}",
-                        extra={"error_type": "UpstreamException"},
-                    )
-                    raise UpstreamException(
-                        message=f"VideoUpscaleReverse: Upscale failed, {response.status_code}",
-                        details={"status": response.status_code, "body": content},
-                    )
-
-                return response
 
             return await retry_on_status(_do_request)
 
