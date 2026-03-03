@@ -31,10 +31,21 @@ _ASSET_TOKEN_CACHE: Dict[str, Tuple[str, float]] = {}
 _ASSET_TOKEN_TTL = 3600  # 1 hour
 
 
+def _normalize_asset_path(asset_path: str) -> str:
+    """Normalize asset path to ensure cache key consistency."""
+    path = asset_path.strip()
+    if not path.startswith("/"):
+        path = f"/{path}"
+    # Collapse double slashes
+    while "//" in path:
+        path = path.replace("//", "/")
+    return path
+
+
 def cache_asset_token(asset_path: str, token: str) -> None:
     """Cache the token that owns an asset path."""
     raw = token[4:] if token.startswith("sso=") else token
-    _ASSET_TOKEN_CACHE[asset_path] = (raw, time.time())
+    _ASSET_TOKEN_CACHE[_normalize_asset_path(asset_path)] = (raw, time.time())
     # Lazy eviction: remove expired entries when cache grows too large
     if len(_ASSET_TOKEN_CACHE) > 2000:
         now = time.time()
@@ -45,7 +56,7 @@ def cache_asset_token(asset_path: str, token: str) -> None:
 
 def get_cached_asset_token(asset_path: str) -> Optional[str]:
     """Look up the token that owns an asset path."""
-    entry = _ASSET_TOKEN_CACHE.get(asset_path)
+    entry = _ASSET_TOKEN_CACHE.get(_normalize_asset_path(asset_path))
     if entry is None:
         return None
     token, ts = entry

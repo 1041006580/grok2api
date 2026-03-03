@@ -6,7 +6,7 @@
 
 import aiofiles.os
 from pathlib import Path
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 
 from app.core.logger import logger
@@ -43,7 +43,10 @@ async def _stream_from_upstream(asset_path: str):
     """从 assets.grok.com 流式代理资源。"""
     # 优先使用生成该资产时的 token（assets.grok.com 要求资产所有者的 token）
     token = get_cached_asset_token(asset_path)
-    if not token:
+    if token:
+        logger.debug(f"File proxy: cache hit for {asset_path}")
+    else:
+        logger.debug(f"File proxy: cache miss for {asset_path}, falling back to pool")
         tm = await get_token_manager()
         await tm.reload_if_stale()
         token = tm.get_token("ssoBasic") or tm.get_token("ssoSuper")
