@@ -8,7 +8,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from app.core.auth import verify_public_key
+from app.core.auth import (
+    verify_public_key,
+    get_public_api_key,
+    is_public_enabled,
+    _match_public_key,
+)
 from app.core.logger import logger
 from app.services.grok.services.video import VideoService
 from app.services.grok.services.model import ModelService
@@ -193,6 +198,25 @@ async def public_video_start(data: VideoStartRequest):
 
 @router.get("/video/sse")
 async def public_video_sse(request: Request, task_id: str = Query("")):
+    public_key = get_public_api_key()
+    public_enabled = is_public_enabled()
+    if not public_key:
+        if not public_enabled:
+            raise HTTPException(status_code=401, detail="Public access is disabled")
+    else:
+        query_key = str(request.query_params.get("public_key") or "").strip()
+        auth_header = str(request.headers.get("authorization") or "").strip()
+        auth_token = ""
+        if auth_header.lower().startswith("bearer "):
+            auth_token = auth_header[7:].strip()
+        elif auth_header:
+            auth_token = auth_header
+        if not (
+            _match_public_key(query_key, public_key)
+            or _match_public_key(auth_token, public_key)
+        ):
+            raise HTTPException(status_code=401, detail="Invalid authentication token")
+
     session = await _get_session(task_id)
     if not session:
         raise HTTPException(status_code=404, detail="Task not found")

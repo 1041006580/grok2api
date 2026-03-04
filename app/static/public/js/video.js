@@ -44,6 +44,70 @@
     }
   }
 
+  function parseErrorMessage(source, fallback) {
+    const defaultText = fallback || '请求失败';
+    if (!source) return defaultText;
+
+    if (typeof source === 'string') {
+      const text = source.trim();
+      if (!text) return defaultText;
+      try {
+        return parseErrorMessage(JSON.parse(text), defaultText);
+      } catch (e) {
+        return text;
+      }
+    }
+
+    if (typeof source !== 'object') {
+      return defaultText;
+    }
+
+    const candidates = [
+      source.detail,
+      source.message,
+      source.error && source.error.message,
+      source.error && source.error.detail,
+      typeof source.error === 'string' ? source.error : ''
+    ];
+
+    for (const value of candidates) {
+      if (typeof value === 'string' && value.trim()) {
+        return value.trim();
+      }
+    }
+    return defaultText;
+  }
+
+  function parseErrorCode(source) {
+    if (!source || typeof source !== 'object') return '';
+    if (typeof source.code === 'string' && source.code.trim()) {
+      return source.code.trim();
+    }
+    if (source.error && typeof source.error === 'object' && typeof source.error.code === 'string' && source.error.code.trim()) {
+      return source.error.code.trim();
+    }
+    return '';
+  }
+
+  function buildErrorMessage(source, fallback) {
+    const message = parseErrorMessage(source, fallback);
+    let parsed = null;
+    if (typeof source === 'string') {
+      try {
+        parsed = JSON.parse(source);
+      } catch (e) {
+        parsed = null;
+      }
+    } else if (source && typeof source === 'object') {
+      parsed = source;
+    }
+    const code = parseErrorCode(parsed);
+    if (code && !message.includes(code)) {
+      return `${message} (${code})`;
+    }
+    return message;
+  }
+
   function setStatus(state, text) {
     if (!statusText) return;
     statusText.textContent = text;
@@ -284,9 +348,15 @@
     });
     if (!res.ok) {
       const text = await res.text();
-      throw new Error(text || 'Failed to create task');
+      const detail = buildErrorMessage(text, res.statusText || '创建任务请求失败');
+      throw new Error(`HTTP ${res.status}: ${detail}`);
     }
-    const data = await res.json();
+    let data = null;
+    try {
+      data = await res.json();
+    } catch (e) {
+      throw new Error('服务端返回格式错误，无法解析任务ID');
+    }
     return data && data.task_id ? String(data.task_id) : '';
   }
 
@@ -412,7 +482,16 @@
     }
 
     if (!collectingContent) {
-      const maybeVideo = text.includes('<video') || text.includes('<a ') || text.includes('[video](') || text.includes('[![video]') || text.includes('/video/');
+      const maybeVideo =
+        text.includes('<video') ||
+        text.includes('<a ') ||
+        text.includes('[video](') ||
+        text.includes('[![video]') ||
+        text.includes('/video/') ||
+        text.includes('http://') ||
+        text.includes('https://') ||
+        text.includes('.mp4') ||
+        text.includes('generated_video');
       if (maybeVideo) {
         collectingContent = true;
       }
@@ -420,6 +499,9 @@
 
     if (collectingContent) {
       contentBuffer += text;
+      if (contentBuffer.length > 12000) {
+        contentBuffer = contentBuffer.slice(-12000);
+      }
       const info = extractVideoInfo(contentBuffer);
       if (info) {
         if (info.html) {
@@ -476,19 +558,31 @@
     startBtn.disabled = true;
     updateMeta();
     resetOutput(true);
-    initPreviewSlot();
     setStatus('connecting', '连接中');
 
     let taskId = '';
     try {
       taskId = await createVideoTask(authHeader);
+      if (!taskId) {
+        throw new Error('empty_task_id');
+      }
     } catch (e) {
       setStatus('error', '创建任务失败');
+      setIndeterminate(false);
       startBtn.disabled = false;
       isRunning = false;
+      const message = e && e.message ? String(e.message) : '未知错误';
+      if (message !== 'invalid_reference') {
+        if (message === 'empty_task_id') {
+          toast('创建任务失败：服务端未返回 task_id', 'error');
+        } else {
+          toast(`创建任务失败：${message}`, 'error');
+        }
+      }
       return;
     }
 
+    initPreviewSlot();
     currentTaskId = taskId;
     startAt = Date.now();
     setStatus('connected', '生成中');
@@ -519,7 +613,8 @@
         return;
       }
       if (payload && payload.error) {
-        toast(payload.error, 'error');
+        const detail = buildErrorMessage(payload, '生成失败');
+        toast(`生成失败：${detail}`, 'error');
         setStatus('error', '生成失败');
         finishRun(true);
         return;
@@ -536,6 +631,7 @@
 
     es.onerror = () => {
       if (!isRunning) return;
+      toast('连接错误：生成流中断，请重试', 'error');
       setStatus('error', '连接错误');
       finishRun(true);
     };
@@ -550,6 +646,8 @@
     isRunning = false;
     currentTaskId = '';
     stopElapsedTimer();
+    setIndeterminate(false);
+    startAt = 0;
     setButtons(false);
     setStatus('', '未连接');
   }
@@ -558,17 +656,19 @@
     if (!isRunning) return;
     closeSource();
     isRunning = false;
+    currentTaskId = '';
     setButtons(false);
     stopElapsedTimer();
+    setIndeterminate(false);
     if (!hasError) {
       setStatus('connected', '完成');
-      setIndeterminate(false);
       updateProgress(100);
     }
     if (durationValue && startAt) {
       const seconds = Math.max(0, Math.round((Date.now() - startAt) / 1000));
       durationValue.textContent = `耗时 ${seconds}s`;
     }
+    startAt = 0;
   }
 
   if (startBtn) {
