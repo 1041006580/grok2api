@@ -7,19 +7,18 @@ import base64
 import math
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, AsyncGenerator, AsyncIterable, Dict, List, Optional, Union
 
 import orjson
 
 from app.core.config import get_config
 from app.core.logger import logger
-from app.core.storage import DATA_DIR
 from app.core.exceptions import AppException, ErrorType, UpstreamException
 from app.services.grok.utils.process import BaseProcessor
 from app.services.grok.utils.retry import pick_token, rate_limited
 from app.services.grok.utils.response import make_response_id, make_chat_chunk, wrap_image_content
 from app.services.grok.utils.stream import wrap_stream_with_usage
+from app.services.media_storage import get_media_storage
 from app.services.token import EffortType
 from app.services.reverse.ws_imagine import ImagineWebSocketReverse
 
@@ -407,14 +406,6 @@ class ImageWSBaseProcessor(BaseProcessor):
             self.response_field = "base64"
         else:
             self.response_field = "b64_json"
-        self._image_dir: Optional[Path] = None
-
-    def _ensure_image_dir(self) -> Path:
-        if self._image_dir is None:
-            base_dir = DATA_DIR / "tmp" / "image"
-            base_dir.mkdir(parents=True, exist_ok=True)
-            self._image_dir = base_dir
-        return self._image_dir
 
     def _strip_base64(self, blob: str) -> str:
         if not blob:
@@ -450,6 +441,16 @@ class ImageWSBaseProcessor(BaseProcessor):
             ext = "jpg" if is_final else "png"
         return f"{image_id}.{ext}"
 
+    def _guess_mime(self, filename: str) -> str:
+        lower = filename.lower()
+        if lower.endswith(".png"):
+            return "image/png"
+        if lower.endswith(".webp"):
+            return "image/webp"
+        if lower.endswith(".gif"):
+            return "image/gif"
+        return "image/jpeg"
+
     def _build_file_url(self, filename: str) -> str:
         app_url = get_config("app.app_url")
         if app_url:
@@ -462,16 +463,15 @@ class ImageWSBaseProcessor(BaseProcessor):
         data = self._strip_base64(blob)
         if not data:
             return ""
-        image_dir = self._ensure_image_dir()
         ext = ext or self._guess_ext(blob)
         filename = self._filename(image_id, is_final, ext=ext)
-        filepath = image_dir / filename
-
-        def _write_file():
-            with open(filepath, "wb") as f:
-                f.write(base64.b64decode(data))
-
-        await asyncio.to_thread(_write_file)
+        content = await asyncio.to_thread(base64.b64decode, data)
+        await get_media_storage().write_bytes(
+            "image",
+            filename,
+            content,
+            content_type=self._guess_mime(filename),
+        )
         return self._build_file_url(filename)
 
     def _pick_best(self, existing: Optional[Dict], incoming: Dict) -> Dict:

@@ -4,6 +4,7 @@ Upload service.
 Upload service for assets.grok.com.
 """
 
+import asyncio
 import base64
 import hashlib
 import mimetypes
@@ -12,15 +13,13 @@ from pathlib import Path
 from typing import AsyncIterator, Optional, Tuple
 from urllib.parse import urlparse
 
-import aiofiles
-
 from app.core.config import get_config
 from app.core.exceptions import AppException, UpstreamException, ValidationException
 from app.core.logger import logger
-from app.core.storage import DATA_DIR
 from app.services.reverse.assets_upload import AssetsUploadReverse
 from app.services.reverse.utils.session import ResettableSession
 from app.services.grok.utils.locks import _get_upload_semaphore, _file_lock
+from app.services.media_storage import get_media_storage
 
 
 class UploadService:
@@ -82,14 +81,13 @@ class UploadService:
             parts.append(base64.b64encode(remain).decode())
         return "".join(parts)
 
-    async def _read_local_file(self, local_type: str, name: str) -> Tuple[str, str, str]:
-        base_dir = DATA_DIR / "tmp"
-        if local_type == "video":
-            local_dir = base_dir / "video"
+    async def _read_cached_file(self, local_type: str, name: str) -> Tuple[str, str, str]:
+        media_type = "video" if local_type == "video" else "image"
+        safe_name = name.replace("/", "-")
+        if media_type == "video":
             mime = "video/mp4"
         else:
-            local_dir = base_dir / "image"
-            suffix = Path(name).suffix.lower()
+            suffix = Path(safe_name).suffix.lower()
             if suffix == ".png":
                 mime = "image/png"
             elif suffix == ".webp":
@@ -99,25 +97,14 @@ class UploadService:
             else:
                 mime = "image/jpeg"
 
-        local_path = local_dir / name
-        lock_name = f"ul_local_{hashlib.sha1(str(local_path).encode()).hexdigest()[:16]}"
+        lock_name = f"ul_cached_{hashlib.sha1((media_type + safe_name).encode()).hexdigest()[:16]}"
         lock_timeout = max(1, int(get_config("asset.upload_timeout")))
         async with _file_lock(lock_name, timeout=lock_timeout):
-            if not local_path.exists():
-                raise ValidationException(f"Local file not found: {local_path}")
-            if not local_path.is_file():
-                raise ValidationException(f"Invalid local file: {local_path}")
-
-            async def _iter_file() -> AsyncIterator[bytes]:
-                async with aiofiles.open(local_path, "rb") as f:
-                    while True:
-                        chunk = await f.read(self._chunk_size)
-                        if not chunk:
-                            break
-                        yield chunk
-
-            b64 = await self._encode_b64_stream(_iter_file())
-        filename = name or "file"
+            content = await get_media_storage().read_bytes(media_type, safe_name)
+            if content is None:
+                raise ValidationException(f"Cached file not found: {media_type}/{safe_name}")
+            b64 = await asyncio.to_thread(lambda: base64.b64encode(content).decode())
+        filename = safe_name or "file"
         return filename, b64, mime
 
     async def parse_b64(self, url: str) -> Tuple[str, str, str]:
@@ -136,7 +123,12 @@ class UploadService:
                     if len(parts) >= 4:
                         local_type = parts[2]
                         name = parts[3].replace("/", "-")
-                        return await self._read_local_file(local_type, name)
+                        try:
+                            return await self._read_cached_file(local_type, name)
+                        except ValidationException as e:
+                            logger.debug(
+                                f"Cached file read miss, fallback to URL fetch: {e}"
+                            )
 
             lock_name = f"ul_url_{hashlib.sha1(url.encode()).hexdigest()[:16]}"
             timeout = float(get_config("asset.upload_timeout"))

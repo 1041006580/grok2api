@@ -80,6 +80,15 @@ docker compose up -d
 | `SERVER_WORKERS` | Uvicorn worker 数量 | `1` | `2` |
 | `SERVER_STORAGE_TYPE` | 存储类型（`local`/`redis`/`mysql`/`pgsql`） | `local` | `pgsql` |
 | `SERVER_STORAGE_URL` | 存储连接串（local 时可为空） | `""` | `postgresql+asyncpg://user:password@host:5432/db` |
+| `MEDIA_STORAGE_TYPE` | 媒体缓存存储（`local`/`r2`） | `local` | `r2` |
+| `MEDIA_CACHE_MAX_MB` | `/v1/files` 回源自动缓存的文件大小上限（MB） | `20` | `50` |
+| `R2_ENDPOINT` | R2 S3 Endpoint | `""` | `https://<accountid>.r2.cloudflarestorage.com` |
+| `R2_ACCOUNT_ID` | 可选：R2 账号 ID（未设置 `R2_ENDPOINT` 时用于自动拼接 Endpoint） | `""` | `xxxxxxxxxxxxxxxx` |
+| `R2_BUCKET` | R2 Bucket 名称 | `""` | `grok2api-media` |
+| `R2_ACCESS_KEY_ID` | R2 API Access Key ID | `""` | `xxxxxxxx` |
+| `R2_SECRET_ACCESS_KEY` | R2 API Secret Access Key | `""` | `xxxxxxxx` |
+| `R2_REGION` | R2 Region | `auto` | `auto` |
+| `R2_KEY_PREFIX` | R2 对象前缀 | `tmp` | `tmp` |
 
 > MySQL 示例：`mysql+aiomysql://user:password@host:3306/db`（若填 `mysql://` 会自动转为 `mysql+aiomysql://`）
 

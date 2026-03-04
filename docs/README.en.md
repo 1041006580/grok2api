@@ -80,6 +80,15 @@ docker compose up -d
 | `SERVER_WORKERS` | Uvicorn worker count | `1` | `2` |
 | `SERVER_STORAGE_TYPE` | Storage type (`local`/`redis`/`mysql`/`pgsql`) | `local` | `pgsql` |
 | `SERVER_STORAGE_URL` | Storage DSN (optional for local) | `""` | `postgresql+asyncpg://user:password@host:5432/db` |
+| `MEDIA_STORAGE_TYPE` | Media cache storage (`local`/`r2`) | `local` | `r2` |
+| `MEDIA_CACHE_MAX_MB` | Max file size (MB) to cache while proxying `/v1/files` | `20` | `50` |
+| `R2_ENDPOINT` | R2 S3 endpoint | `""` | `https://<accountid>.r2.cloudflarestorage.com` |
+| `R2_ACCOUNT_ID` | Optional: R2 account id used to build endpoint when `R2_ENDPOINT` is empty | `""` | `xxxxxxxxxxxxxxxx` |
+| `R2_BUCKET` | R2 bucket name | `""` | `grok2api-media` |
+| `R2_ACCESS_KEY_ID` | R2 API access key id | `""` | `xxxxxxxx` |
+| `R2_SECRET_ACCESS_KEY` | R2 API secret access key | `""` | `xxxxxxxx` |
+| `R2_REGION` | R2 region | `auto` | `auto` |
+| `R2_KEY_PREFIX` | R2 object key prefix | `tmp` | `tmp` |
 
 > MySQL example: `mysql+aiomysql://user:password@host:3306/db` (if you provide `mysql://`, it will be converted to `mysql+aiomysql://`).
 

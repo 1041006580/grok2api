@@ -200,3 +200,23 @@ concurrent = 100
 batch_size = 50
 # Usage 请求超时时间（秒）
 timeout = 60
+
+# ==================== Media storage ====================
+[media]
+# media storage backend: local | r2
+storage_type = "local"
+# max object size (MB) to cache during /v1/files upstream proxying
+cache_max_mb = 20
+# R2 S3 endpoint, e.g. https://<accountid>.r2.cloudflarestorage.com
+r2_endpoint = ""
+# Optional: if endpoint not set, build from account id
+r2_account_id = ""
+# R2 bucket name
+r2_bucket = ""
+# R2 API token credentials
+r2_access_key_id = ""
+r2_secret_access_key = ""
+# R2 region (Cloudflare recommends: auto)
+r2_region = "auto"
+# object key prefix in bucket
+r2_key_prefix = "tmp"
