@@ -19,26 +19,28 @@ from app.core.storage import DATA_DIR
 
 
 def _config_str(config_key: str, env_key: str, default: str = "") -> str:
+    env_value = os.getenv(env_key, "").strip()
+    if env_value:
+        return env_value
     value = get_config(config_key)
     if isinstance(value, str) and value.strip():
         return value.strip()
-    env_value = os.getenv(env_key, "").strip()
-    return env_value or default
+    return default
 
 
 def _config_int(config_key: str, env_key: str, default: int) -> int:
+    env_value = os.getenv(env_key, "").strip()
+    if env_value:
+        try:
+            return int(env_value)
+        except ValueError:
+            pass
     value = get_config(config_key)
     if isinstance(value, (int, float)):
         return int(value)
     if isinstance(value, str) and value.strip():
         try:
             return int(value.strip())
-        except ValueError:
-            pass
-    env_value = os.getenv(env_key, "").strip()
-    if env_value:
-        try:
-            return int(env_value)
         except ValueError:
             pass
     return default
@@ -217,4 +219,3 @@ def get_media_storage() -> BaseMediaStorage:
 
     _storage_type = current_type
     return _storage
-
