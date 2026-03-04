@@ -16,8 +16,8 @@ async def cache_stats(request: Request):
 
     try:
         cache_service = CacheService()
-        image_stats = cache_service.get_stats("image")
-        video_stats = cache_service.get_stats("video")
+        image_stats = await cache_service.get_stats("image")
+        video_stats = await cache_service.get_stats("video")
 
         mgr = await get_token_manager()
         pools = mgr.pools
@@ -159,6 +159,7 @@ async def cache_stats(request: Request):
         response = {
             "local_image": image_stats,
             "local_video": video_stats,
+            "media_storage_type": cache_service.storage_type,
             "online": online_stats,
             "online_accounts": accounts,
             "online_scope": scope or "none",
@@ -176,14 +177,14 @@ async def list_local(
     page: int = 1,
     page_size: int = 1000,
 ):
-    """列出本地缓存文件"""
+    """列出缓存文件"""
     from app.services.grok.utils.cache import CacheService
 
     try:
         if type_:
             cache_type = type_
         cache_service = CacheService()
-        result = cache_service.list_files(cache_type, page, page_size)
+        result = await cache_service.list_files(cache_type, page, page_size)
         return {"status": "success", **result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -191,14 +192,14 @@ async def list_local(
 
 @router.post("/cache/clear", dependencies=[Depends(verify_app_key)])
 async def clear_local(data: dict):
-    """清理本地缓存"""
+    """清理缓存"""
     from app.services.grok.utils.cache import CacheService
 
     cache_type = data.get("type", "image")
 
     try:
         cache_service = CacheService()
-        result = cache_service.clear(cache_type)
+        result = await cache_service.clear(cache_type)
         return {"status": "success", "result": result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -206,7 +207,7 @@ async def clear_local(data: dict):
 
 @router.post("/cache/item/delete", dependencies=[Depends(verify_app_key)])
 async def delete_local_item(data: dict):
-    """删除单个本地缓存文件"""
+    """删除单个缓存文件"""
     from app.services.grok.utils.cache import CacheService
 
     cache_type = data.get("type", "image")
@@ -215,7 +216,7 @@ async def delete_local_item(data: dict):
         raise HTTPException(status_code=400, detail="Missing file name")
     try:
         cache_service = CacheService()
-        result = cache_service.delete_file(cache_type, name)
+        result = await cache_service.delete_file(cache_type, name)
         return {"status": "success", "result": result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -384,8 +385,8 @@ async def load_cache_async(data: dict):
     async def _run():
         try:
             cache_service = CacheService()
-            image_stats = cache_service.get_stats("image")
-            video_stats = cache_service.get_stats("video")
+            image_stats = await cache_service.get_stats("image")
+            video_stats = await cache_service.get_stats("video")
 
             async def _on_item(item: str, res: dict):
                 ok = bool(res.get("data", {}).get("ok"))
@@ -422,6 +423,7 @@ async def load_cache_async(data: dict):
             result = {
                 "local_image": image_stats,
                 "local_video": video_stats,
+                "media_storage_type": cache_service.storage_type,
                 "online": online_stats,
                 "online_accounts": accounts,
                 "online_scope": scope or "none",
