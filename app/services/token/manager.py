@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Dict, List, Optional, Set
 
 from app.core.logger import logger
+from app.core.mask import mask_token_for_log
 from app.services.token.models import (
     TokenInfo,
     EffortType,
@@ -221,7 +222,7 @@ class TokenManager:
         self._schedule_save()
         extra = f" ({reason})" if reason else ""
         logger.warning(
-            f"Token {token.token[:10]}... moved pool {from_pool} -> {to_pool}{extra}"
+            f"Token {mask_token_for_log(token.token)} moved pool {from_pool} -> {to_pool}{extra}"
         )
         return to_pool
 
@@ -418,12 +419,12 @@ class TokenManager:
                 if idx == 0:
                     logger.info(
                         f"Video token routing: resolution={resolution}, length={video_length}s -> "
-                        f"pool={pool_name} (token={token_info.token[:10]}...)"
+                        f"pool={pool_name} (token={mask_token_for_log(token_info.token)})"
                     )
                 else:
                     logger.info(
                         f"Video token routing: fallback from {ordered_pools[0]} -> {pool_name} "
-                        f"(token={token_info.token[:10]}...)"
+                        f"(token={mask_token_for_log(token_info.token)})"
                     )
                 return token_info
 
@@ -472,14 +473,14 @@ class TokenManager:
                 old_status = token.status
                 consumed = token.consume(effort)
                 logger.debug(
-                    f"Token {raw_token[:10]}...: consumed {consumed} quota, use_count={token.use_count}"
+                    f"Token {mask_token_for_log(raw_token)}: consumed {consumed} quota, use_count={token.use_count}"
                 )
                 change_kind = "state" if token.status != old_status else "usage"
                 self._track_token_change(token, pool.name, change_kind)
                 self._schedule_save()
                 return True
 
-        logger.warning(f"Token {raw_token[:10]}...: not found for consumption")
+        logger.warning(f"Token {mask_token_for_log(raw_token)}: not found for consumption")
         return False
 
     async def sync_usage(
@@ -515,7 +516,7 @@ class TokenManager:
                 break
 
         if not target_token:
-            logger.warning(f"Token {raw_token[:10]}...: not found for sync")
+            logger.warning(f"Token {mask_token_for_log(raw_token)}: not found for sync")
             return False
 
         # 尝试 API 同步
@@ -561,7 +562,7 @@ class TokenManager:
 
                 consumed = max(0, old_quota - new_quota)
                 logger.info(
-                    f"Token {raw_token[:10]}...: synced quota "
+                    f"Token {mask_token_for_log(raw_token)}: synced quota "
                     f"{old_quota} -> {new_quota} (consumed: {consumed}, use_count: {target_token.use_count})"
                 )
 
@@ -583,16 +584,16 @@ class TokenManager:
                 if status == 401:
                     await self.record_fail(token_str, status, "rate_limits_auth_failed")
             logger.warning(
-                f"Token {raw_token[:10]}...: API sync failed, fallback to local ({e})"
+                f"Token {mask_token_for_log(raw_token)}: API sync failed, fallback to local ({e})"
             )
 
         # 降级：本地预估扣费
         if consume_on_fail:
-            logger.debug(f"Token {raw_token[:10]}...: using local consumption")
+            logger.debug(f"Token {mask_token_for_log(raw_token)}: using local consumption")
             return await self.consume(token_str, fallback_effort)
         else:
             logger.debug(
-                f"Token {raw_token[:10]}...: sync failed, skipping local consumption"
+                f"Token {mask_token_for_log(raw_token)}: sync failed, skipping local consumption"
             )
             return False
 
@@ -626,18 +627,18 @@ class TokenManager:
 
                     token.record_fail(status_code, reason, threshold=threshold)
                     logger.warning(
-                        f"Token {raw_token[:10]}...: recorded {status_code} failure "
+                        f"Token {mask_token_for_log(raw_token)}: recorded {status_code} failure "
                         f"({token.fail_count}/{threshold}) - {reason}"
                     )
                     self._track_token_change(token, pool.name, "state")
                     self._schedule_save()
                 else:
                     logger.info(
-                        f"Token {raw_token[:10]}...: non-auth error ({status_code}) - {reason} (not counted)"
+                        f"Token {mask_token_for_log(raw_token)}: non-auth error ({status_code}) - {reason} (not counted)"
                     )
                 return True
 
-        logger.warning(f"Token {raw_token[:10]}...: not found for failure record")
+        logger.warning(f"Token {mask_token_for_log(raw_token)}: not found for failure record")
         return False
 
     async def mark_rate_limited(self, token_str: str) -> bool:
@@ -662,14 +663,14 @@ class TokenManager:
                 token.quota = 0
                 token.status = TokenStatus.COOLING
                 logger.warning(
-                    f"Token {raw_token[:10]}...: marked as rate limited "
+                    f"Token {mask_token_for_log(raw_token)}: marked as rate limited "
                     f"(quota {old_quota} -> 0, status -> cooling)"
                 )
                 self._track_token_change(token, pool.name, "state")
                 self._schedule_save()
                 return True
 
-        logger.warning(f"Token {raw_token[:10]}...: not found for rate limit marking")
+        logger.warning(f"Token {mask_token_for_log(raw_token)}: not found for rate limit marking")
         return False
 
     # ========== 管理功能 ==========
@@ -734,7 +735,7 @@ class TokenManager:
                     info.tags.append(tag)
                     self._track_token_change(info, pool.name, "state")
                     self._schedule_save()
-                    logger.debug(f"Token {raw_token[:10]}...: added tag '{tag}'")
+                    logger.debug(f"Token {mask_token_for_log(raw_token)}: added tag '{tag}'")
                 return True
         return False
 
@@ -757,7 +758,7 @@ class TokenManager:
                     info.tags.remove(tag)
                     self._track_token_change(info, pool.name, "state")
                     self._schedule_save()
-                    logger.debug(f"Token {raw_token[:10]}...: removed tag '{tag}'")
+                    logger.debug(f"Token {mask_token_for_log(raw_token)}: removed tag '{tag}'")
                 return True
         return False
 
@@ -813,10 +814,10 @@ class TokenManager:
                 token.reset(default_quota)
                 self._track_token_change(token, pool.name, "state")
                 await self._save(force=True)
-                logger.info(f"Token {raw_token[:10]}...: reset completed")
+                logger.info(f"Token {mask_token_for_log(raw_token)}: reset completed")
                 return True
 
-        logger.warning(f"Token {raw_token[:10]}...: not found for reset")
+        logger.warning(f"Token {mask_token_for_log(raw_token)}: not found for reset")
         return False
 
     def get_stats(self) -> Dict[str, dict]:
@@ -929,7 +930,7 @@ class TokenManager:
                                     )
 
                             logger.info(
-                                f"Token {token_info.token[:10]}...: refreshed "
+                                f"Token {mask_token_for_log(token_info.token)}: refreshed "
                                 f"{old_quota} -> {new_quota}, status: {old_status} -> {token_info.status}"
                             )
 
@@ -947,7 +948,7 @@ class TokenManager:
                         if "401" in error_str or "Unauthorized" in error_str:
                             if retry < 2:
                                 logger.warning(
-                                    f"Token {token_info.token[:10]}...: 401 error, "
+                                    f"Token {mask_token_for_log(token_info.token)}: 401 error, "
                                     f"retry {retry + 1}/2..."
                                 )
                                 await asyncio.sleep(0.5)
@@ -955,14 +956,14 @@ class TokenManager:
                             else:
                                 # 重试 2 次后仍然 401，标记为 expired
                                 logger.error(
-                                    f"Token {token_info.token[:10]}...: 401 after 2 retries, "
+                                    f"Token {mask_token_for_log(token_info.token)}: 401 after 2 retries, "
                                     f"marking as expired"
                                 )
                                 token_info.status = TokenStatus.EXPIRED
                                 return {"recovered": False, "expired": True}
                         else:
                             logger.warning(
-                                f"Token {token_info.token[:10]}...: refresh failed ({e})"
+                                f"Token {mask_token_for_log(token_info.token)}: refresh failed ({e})"
                             )
                             return {"recovered": False, "expired": False}
 

@@ -6,6 +6,7 @@ import asyncio
 from typing import Callable, Awaitable, Dict, Any, Optional, List
 
 from app.core.logger import logger
+from app.core.mask import mask_token_for_log
 from app.core.config import get_config
 from app.services.reverse.rate_limits import RateLimitsReverse
 from app.services.reverse.utils.session import ResettableSession
@@ -56,7 +57,7 @@ class UsageService:
                     if remaining is not None:
                         data["remainingTokens"] = remaining
                 logger.info(
-                    f"Usage sync success: remaining={remaining}, token={token[:10]}..."
+                    f"Usage sync success: remaining={remaining}, token={mask_token_for_log(token)}"
                 )
                 return data
 

@@ -12,6 +12,7 @@ import orjson
 from curl_cffi.requests.errors import RequestsError
 
 from app.core.logger import logger
+from app.core.mask import mask_token_for_log
 from app.core.config import get_config
 from app.core.exceptions import (
     UpstreamException,
@@ -627,7 +628,7 @@ class VideoService:
                 if rate_limited(e):
                     await token_mgr.mark_rate_limited(token)
                     logger.warning(
-                        f"Token {token[:10]}... rate limited (429), "
+                        f"Token {mask_token_for_log(token)} rate limited (429), "
                         f"trying next token (attempt {attempt + 1}/{max_token_retries})"
                     )
                     continue

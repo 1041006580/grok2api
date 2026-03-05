@@ -13,6 +13,7 @@ import orjson
 
 from app.core.config import get_config
 from app.core.logger import logger
+from app.core.mask import mask_token_for_log
 from app.core.exceptions import AppException, ErrorType, UpstreamException
 from app.services.grok.utils.process import BaseProcessor
 from app.services.grok.utils.retry import pick_token, rate_limited
@@ -109,7 +110,7 @@ class ImageGenerationService:
                                 raise
                             await token_mgr.mark_rate_limited(current_token)
                             logger.warning(
-                                f"Token {current_token[:10]}... rate limited (429), "
+                                f"Token {mask_token_for_log(current_token)} rate limited (429), "
                                 f"trying next token (attempt {attempt + 1}/{max_token_retries})"
                             )
                             continue
@@ -163,7 +164,7 @@ class ImageGenerationService:
                 if rate_limited(e):
                     await token_mgr.mark_rate_limited(current_token)
                     logger.warning(
-                        f"Token {current_token[:10]}... rate limited (429), "
+                        f"Token {mask_token_for_log(current_token)} rate limited (429), "
                         f"trying next token (attempt {attempt + 1}/{max_token_retries})"
                     )
                     continue

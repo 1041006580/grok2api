@@ -11,6 +11,7 @@ import orjson
 from curl_cffi.requests.errors import RequestsError
 
 from app.core.logger import logger
+from app.core.mask import mask_token_for_log
 from app.core.config import get_config
 from app.core.exceptions import (
     AppException,
@@ -470,7 +471,7 @@ class ChatService:
                     # 配额不足，标记 token 为 cooling 并换 token 重试
                     await token_mgr.mark_rate_limited(token)
                     logger.warning(
-                        f"Token {token[:10]}... rate limited (429), "
+                        f"Token {mask_token_for_log(token)} rate limited (429), "
                         f"trying next token (attempt {attempt + 1}/{max_token_retries})"
                     )
                     continue
@@ -484,7 +485,7 @@ class ChatService:
                     if not has_alternative_token:
                         raise
                     logger.warning(
-                        f"Transient upstream error for token {token[:10]}..., "
+                        f"Transient upstream error for token {mask_token_for_log(token)}, "
                         f"trying next token (attempt {attempt + 1}/{max_token_retries}): {e}"
                     )
                     continue
