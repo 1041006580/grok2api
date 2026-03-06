@@ -277,7 +277,8 @@ class Config:
             self._config = merged
         except Exception as e:
             logger.error(f"Error loading config: {e}")
-            self._config = {}
+            if not self._config:
+                self._config = {}
 
     def get(self, key: str, default: Any = None) -> Any:
         """

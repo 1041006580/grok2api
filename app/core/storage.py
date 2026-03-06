@@ -166,14 +166,20 @@ class LocalStorage(BaseStorage):
     """
 
     def __init__(self):
-        self._lock = asyncio.Lock()
+        self._locks: dict[str, asyncio.Lock] = {}
+
+    def _get_lock(self, name: str) -> asyncio.Lock:
+        if name not in self._locks:
+            self._locks[name] = asyncio.Lock()
+        return self._locks[name]
 
     @asynccontextmanager
     async def acquire_lock(self, name: str, timeout: int = 10):
+        lock = self._get_lock(name)
         if fcntl is None:
             try:
                 async with asyncio.timeout(timeout):
-                    async with self._lock:
+                    async with lock:
                         yield
             except asyncio.TimeoutError:
                 logger.warning(f"LocalStorage: 获取锁 '{name}' 超时 ({timeout}s)")
@@ -186,9 +192,9 @@ class LocalStorage(BaseStorage):
         locked = False
         start = time.monotonic()
 
-        async with self._lock:
+        async with lock:
             try:
-                fd = open(lock_path, "a+")
+                fd = await asyncio.to_thread(open, lock_path, "a+")
                 while True:
                     try:
                         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -374,9 +380,11 @@ class RedisStorage(BaseStorage):
                     composite_key = f"{section}.{key}"
                     mapping[composite_key] = json_dumps(val)
 
-            await self.redis.delete(self.config_key)
-            if mapping:
-                await self.redis.hset(self.config_key, mapping=mapping)
+            async with self.redis.pipeline(transaction=True) as pipe:
+                pipe.delete(self.config_key)
+                if mapping:
+                    pipe.hset(self.config_key, mapping=mapping)
+                await pipe.execute()
         except Exception as e:
             logger.error(f"RedisStorage: 保存配置失败: {e}")
             raise
@@ -574,11 +582,18 @@ class SQLStorage(BaseStorage):
         )
         self.async_session = async_sessionmaker(self.engine, expire_on_commit=False)
         self._initialized = False
+        self._init_lock = asyncio.Lock()
 
     async def _ensure_schema(self):
         """确保数据库表存在"""
         if self._initialized:
             return
+        async with self._init_lock:
+            if self._initialized:
+                return
+            await self._do_ensure_schema()
+
+    async def _do_ensure_schema(self):
         try:
             async with self.engine.begin() as conn:
                 from sqlalchemy import text

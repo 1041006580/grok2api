@@ -446,7 +446,7 @@ class TokenManager:
 
     def get_pool_name_for_token(self, token_str: str) -> Optional[str]:
         """Return pool name for the given token string."""
-        raw_token = token_str.replace("sso=", "")
+        raw_token = token_str.removeprefix("sso=")
         for pool_name, pool in self.pools.items():
             if pool.get(raw_token):
                 return pool_name
@@ -465,7 +465,7 @@ class TokenManager:
         Returns:
             是否成功
         """
-        raw_token = token_str.replace("sso=", "")
+        raw_token = token_str.removeprefix("sso=")
 
         for pool in self.pools.values():
             token = pool.get(raw_token)
@@ -504,7 +504,7 @@ class TokenManager:
         Returns:
             是否成功
         """
-        raw_token = token_str.replace("sso=", "")
+        raw_token = token_str.removeprefix("sso=")
 
         # 查找 Token 对象
         target_token: Optional[TokenInfo] = None
@@ -611,7 +611,7 @@ class TokenManager:
         Returns:
             是否成功
         """
-        raw_token = token_str.replace("sso=", "")
+        raw_token = token_str.removeprefix("sso=")
 
         for pool in self.pools.values():
             token = pool.get(raw_token)
@@ -772,9 +772,10 @@ class TokenManager:
         Returns:
             是否成功
         """
+        raw_token = token.removeprefix("sso=")
         for pool_name, pool in self.pools.items():
-            if pool.remove(token):
-                self._track_token_delete(token)
+            if pool.remove(raw_token):
+                self._track_token_delete(raw_token)
                 await self._save(force=True)
                 logger.info(f"Pool '{pool_name}': token removed")
                 return True
@@ -805,7 +806,7 @@ class TokenManager:
         Returns:
             是否成功
         """
-        raw_token = token_str.replace("sso=", "")
+        raw_token = token_str.removeprefix("sso=")
 
         for pool in self.pools.values():
             token = pool.get(raw_token)

@@ -82,4 +82,4 @@ class ResponseLoggerMiddleware(BaseHTTPMiddleware):
                     "error": str(e),
                 },
             )
-            raise e
+            raise

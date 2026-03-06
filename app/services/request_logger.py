@@ -3,7 +3,7 @@
 import time
 import asyncio
 import orjson
-from typing import List, Dict, Deque
+from typing import List, Dict, Deque, Optional
 from collections import deque
 from pathlib import Path
 
@@ -28,6 +28,7 @@ class RequestLogger:
         self._logs: Deque[Dict] = deque(maxlen=max_len)
         self._lock = asyncio.Lock()
         self._loaded = False
+        self._save_task: Optional[asyncio.Task] = None
 
         self._initialized = True
 
@@ -105,10 +106,15 @@ class RequestLogger:
             async with self._lock:
                 self._logs.appendleft(log)
 
-            asyncio.create_task(self._save_data())
+            self._schedule_save()
 
         except Exception as e:
             logger.error(f"[Logger] 记录日志失败: {e}")
+
+    def _schedule_save(self):
+        if self._save_task and not self._save_task.done():
+            return
+        self._save_task = asyncio.create_task(self._save_data())
 
     async def get_logs(self, limit: int = 1000) -> List[Dict]:
         """获取日志"""

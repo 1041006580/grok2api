@@ -846,7 +846,7 @@ async def chat_completions(request: ChatCompletionRequest, http_request: Request
                     preset=v_conf.preset,
                 )
             except Exception as e:
-                if request.stream is not False:
+                if request.stream:
                     return _streaming_error_response(e)
                 raise
         else:
@@ -863,7 +863,7 @@ async def chat_completions(request: ChatCompletionRequest, http_request: Request
                     parallel_tool_calls=request.parallel_tool_calls,
                 )
             except Exception as e:
-                if request.stream is not False:
+                if request.stream:
                     return _streaming_error_response(e)
                 raise
 

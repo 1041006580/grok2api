@@ -61,7 +61,7 @@ def get_cached_asset_token(asset_path: str) -> Optional[str]:
         return None
     token, ts = entry
     if time.time() - ts > _ASSET_TOKEN_TTL:
-        _ASSET_TOKEN_CACHE.pop(asset_path, None)
+        _ASSET_TOKEN_CACHE.pop(_normalize_asset_path(asset_path), None)
         return None
     return token
 

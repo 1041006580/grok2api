@@ -18,7 +18,7 @@ T = TypeVar("T")
 def _is_http2_error(e: Exception) -> bool:
     """检查是否为 HTTP/2 流错误"""
     err_str = str(e).lower()
-    return "http/2" in err_str or "curl: (92)" in err_str or "stream" in err_str
+    return "http/2" in err_str or "curl: (92)" in err_str or "stream reset" in err_str or "stream error" in err_str
 
 
 def _normalize_line(line: Any) -> Optional[str]:

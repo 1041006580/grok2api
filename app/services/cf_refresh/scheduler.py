@@ -85,7 +85,7 @@ def start():
     global _task
     if _task is not None:
         return
-    _task = asyncio.get_event_loop().create_task(_scheduler_loop())
+    _task = asyncio.get_running_loop().create_task(_scheduler_loop())
     logger.info("cf_refresh background task started")
 
 

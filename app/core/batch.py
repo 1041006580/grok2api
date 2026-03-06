@@ -6,6 +6,7 @@ Batch utilities.
 """
 
 import asyncio
+import contextlib
 import time
 import uuid
 from typing import Any, Awaitable, Callable, Dict, List, Optional, TypeVar
@@ -117,6 +118,14 @@ class BatchTask:
         if q in self._queues:
             self._queues.remove(q)
 
+    @contextlib.contextmanager
+    def subscribe(self):
+        q = self.attach()
+        try:
+            yield q
+        finally:
+            self.detach(q)
+
     def _publish(self, event: Dict[str, Any]) -> None:
         for q in list(self._queues):
             try:
@@ -204,9 +213,10 @@ class BatchTask:
 _TASKS: Dict[str, BatchTask] = {}
 
 
-def create_task(total: int) -> BatchTask:
+def create_task(total: int, expire_after: int = 300) -> BatchTask:
     task = BatchTask(total)
     _TASKS[task.id] = task
+    asyncio.ensure_future(expire_task(task.id, expire_after))
     return task
 
 

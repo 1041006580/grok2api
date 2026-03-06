@@ -200,14 +200,16 @@ class AppChatReverse:
 
                     return response
                 except KeyError as conn_err:
-                    # curl_cffi HTTP/2 bug: KeyError on ":status" or "code"
-                    logger.warning(
-                        f"AppChatReverse: curl_cffi KeyError during request: {conn_err}, treating as 429 for retry"
-                    )
-                    raise UpstreamException(
-                        message=f"AppChatReverse: curl_cffi connection error: {conn_err}",
-                        details={"status": 429, "error": str(conn_err)},
-                    )
+                    key = str(conn_err).strip("'\"")
+                    if key in (":status", "code"):
+                        logger.warning(
+                            f"AppChatReverse: curl_cffi KeyError during request: {conn_err}, treating as 429 for retry"
+                        )
+                        raise UpstreamException(
+                            message=f"AppChatReverse: curl_cffi connection error: {conn_err}",
+                            details={"status": 429, "error": str(conn_err)},
+                        )
+                    raise
 
             response = await retry_on_status(_do_request)
 

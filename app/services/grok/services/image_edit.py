@@ -547,18 +547,35 @@ class ImageCollectProcessor(BaseProcessor):
 
         except asyncio.CancelledError:
             logger.debug("Image collect cancelled by client")
+            raise
         except StreamIdleTimeoutError as e:
             logger.warning(f"Image collect idle timeout: {e}")
+            raise UpstreamException(
+                message=f"Image collect idle timeout after {e.idle_seconds}s",
+                status_code=504,
+                details={"error": str(e), "type": "stream_idle_timeout"},
+            )
         except RequestsError as e:
             if _is_http2_error(e):
                 logger.warning(f"HTTP/2 stream error in image collect: {e}")
+                raise UpstreamException(
+                    message="Upstream connection closed unexpectedly",
+                    status_code=502,
+                    details={"error": str(e), "type": "http2_stream_error"},
+                )
             else:
                 logger.error(f"Image collect request error: {e}")
+                raise UpstreamException(
+                    message=f"Upstream request failed: {e}",
+                    status_code=502,
+                    details={"error": str(e)},
+                )
         except Exception as e:
             logger.error(
                 f"Image collect processing error: {e}",
                 extra={"error_type": type(e).__name__},
             )
+            raise
         finally:
             await self.close()
 

@@ -843,6 +843,7 @@ class VideoStreamProcessor(BaseProcessor):
                 f"Video stream processing error: {e}",
                 extra={"model": self.model, "error_type": type(e).__name__},
             )
+            raise
         finally:
             await self.close()
 
@@ -935,9 +936,15 @@ class VideoCollectProcessor(BaseProcessor):
             logger.debug(
                 "Video collect cancelled by client", extra={"model": self.model}
             )
+            raise
         except StreamIdleTimeoutError as e:
             logger.warning(
                 f"Video collect idle timeout: {e}", extra={"model": self.model}
+            )
+            raise UpstreamException(
+                message=f"Video collect idle timeout after {e.idle_seconds}s",
+                status_code=504,
+                details={"error": str(e), "type": "stream_idle_timeout"},
             )
         except RequestsError as e:
             if _is_http2_error(e):
@@ -945,15 +952,26 @@ class VideoCollectProcessor(BaseProcessor):
                     f"HTTP/2 stream error in video collect: {e}",
                     extra={"model": self.model},
                 )
+                raise UpstreamException(
+                    message="Upstream connection closed unexpectedly",
+                    status_code=502,
+                    details={"error": str(e), "type": "http2_stream_error"},
+                )
             else:
                 logger.error(
                     f"Video collect request error: {e}", extra={"model": self.model}
+                )
+                raise UpstreamException(
+                    message=f"Upstream request failed: {e}",
+                    status_code=502,
+                    details={"error": str(e)},
                 )
         except Exception as e:
             logger.error(
                 f"Video collect processing error: {e}",
                 extra={"model": self.model, "error_type": type(e).__name__},
             )
+            raise
         finally:
             await self.close()
 

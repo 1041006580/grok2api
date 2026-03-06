@@ -95,6 +95,8 @@ class ResettableSession:
         await self.close()
 
     def __getattr__(self, name: str) -> Any:
+        if self._session is None:
+            raise RuntimeError("Session has been closed")
         return getattr(self._session, name)
 
 

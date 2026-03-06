@@ -91,11 +91,15 @@ def _make_json_sink(output):
 
 def _file_json_sink(message):
     """写入日志文件"""
-    record = message.record
-    json_str = _format_json(record)
-    log_file = LOG_DIR / f"app_{record['time'].strftime('%Y-%m-%d')}.log"
-    with open(log_file, "a", encoding="utf-8") as f:
-        f.write(json_str + "\n")
+    try:
+        record = message.record
+        json_str = _format_json(record)
+        log_file = LOG_DIR / f"app_{record['time'].strftime('%Y-%m-%d')}.log"
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(json_str + "\n")
+    except Exception:
+        pass
 
 
 def setup_logging(

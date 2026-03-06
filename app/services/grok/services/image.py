@@ -397,16 +397,17 @@ class ImageWSBaseProcessor(BaseProcessor):
     """WebSocket image processor base."""
 
     def __init__(self, model: str, token: str = "", response_format: str = "b64_json"):
+        if response_format == "url":
+            field = "url"
+        elif response_format in ("base64", "b64_json"):
+            field = "b64_json"
+        else:
+            field = "b64_json"
         if response_format == "base64":
             response_format = "b64_json"
         super().__init__(model, token)
         self.response_format = response_format
-        if response_format == "url":
-            self.response_field = "url"
-        elif response_format == "base64":
-            self.response_field = "base64"
-        else:
-            self.response_field = "b64_json"
+        self.response_field = field
 
     def _strip_base64(self, blob: str) -> str:
         if not blob:

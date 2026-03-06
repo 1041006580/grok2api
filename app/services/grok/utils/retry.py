@@ -24,11 +24,11 @@ async def pick_token(
         if token:
             break
 
-    if not token and not tried:
+    if not token:
         result = await token_mgr.refresh_cooling_tokens()
         if result.get("recovered", 0) > 0:
             for pool_name in ModelService.pool_candidates_for_model(model_id):
-                token = token_mgr.get_token(pool_name, prefer_tags=prefer_tags)
+                token = token_mgr.get_token(pool_name, exclude=tried, prefer_tags=prefer_tags)
                 if token:
                     break
 

@@ -85,6 +85,8 @@ def _validate_common_request(
         )
 
     # 验证 n 参数范围
+    if not request.n:
+        request.n = 1
     if request.n < 1 or request.n > 10:
         raise ValidationException(
             message="n must be between 1 and 10", param="n", code="invalid_n"
@@ -151,7 +153,7 @@ def validate_generation_request(request: ImageGenerationRequest):
 
 def resolve_response_format(response_format: Optional[str]) -> str:
     """解析响应格式"""
-    fmt = response_format or get_config("app.image_format")
+    fmt = response_format or get_config("app.image_format") or "url"
     if isinstance(fmt, str):
         fmt = fmt.lower()
     if fmt in ("b64_json", "base64", "url"):

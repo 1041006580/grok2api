@@ -25,20 +25,22 @@ class TokenRefreshScheduler:
             try:
                 storage = get_storage()
                 lock_acquired = False
-                lock = None
+                redis_lock = None
+                lock_ctx = None
 
                 if isinstance(storage, RedisStorage):
-                    # Redis: non-blocking lock to avoid multi-worker duplication
                     lock_key = "grok2api:lock:token_refresh"
-                    lock = storage.redis.lock(
+                    redis_lock = storage.redis.lock(
                         lock_key, timeout=self.interval_seconds + 60, blocking_timeout=0
                     )
-                    lock_acquired = await lock.acquire(blocking=False)
+                    lock_acquired = await redis_lock.acquire(blocking=False)
                 else:
                     try:
-                        async with storage.acquire_lock("token_refresh", timeout=1):
-                            lock_acquired = True
-                    except StorageError:
+                        lock_ctx = storage.acquire_lock("token_refresh", timeout=1)
+                        await lock_ctx.__aenter__()
+                        lock_acquired = True
+                    except (StorageError, Exception):
+                        lock_ctx = None
                         lock_acquired = False
 
                 if not lock_acquired:
@@ -59,9 +61,14 @@ class TokenRefreshScheduler:
                         f"expired={result['expired']}"
                     )
                 finally:
-                    if lock is not None and lock_acquired:
+                    if redis_lock is not None and lock_acquired:
                         try:
-                            await lock.release()
+                            await redis_lock.release()
+                        except Exception:
+                            pass
+                    if lock_ctx is not None:
+                        try:
+                            await lock_ctx.__aexit__(None, None, None)
                         except Exception:
                             pass
 
