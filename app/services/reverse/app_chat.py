@@ -150,6 +150,10 @@ class AppChatReverse:
                 tool_overrides=tool_overrides,
                 model_config_override=model_config_override,
             )
+            logger.debug(
+                "AppChatReverse payload: {}",
+                orjson.dumps(payload).decode(),
+            )
 
             # Curl Config
             timeout = float(get_config("chat.timeout") or 0)
@@ -186,7 +190,7 @@ class AppChatReverse:
                                 pass
 
                         logger.debug(
-                            "AppChatReverse: Chat failed response body: %s",
+                            "AppChatReverse: Chat failed response body: {}",
                             content,
                         )
                         logger.error(

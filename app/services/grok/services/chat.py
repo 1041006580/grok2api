@@ -23,7 +23,12 @@ from app.core.exceptions import (
 from app.services.grok.services.model import ModelService
 from app.services.grok.utils.upload import UploadService
 from app.services.grok.utils import process as proc_base
-from app.services.grok.utils.retry import pick_token, rate_limited, transient_upstream
+from app.services.grok.utils.retry import (
+    pick_token,
+    rate_limited,
+    should_cool_token_on_rate_limit,
+    transient_upstream,
+)
 from app.services.reverse.app_chat import AppChatReverse
 from app.services.reverse.utils.session import ResettableSession
 from app.services.grok.utils.stream import wrap_stream_with_usage
@@ -468,12 +473,19 @@ class ChatService:
                 last_error = e
 
                 if rate_limited(e):
-                    # 配额不足，标记 token 为 cooling 并换 token 重试
-                    await token_mgr.mark_rate_limited(token)
-                    logger.warning(
-                        f"Token {mask_token_for_log(token)} rate limited (429), "
-                        f"trying next token (attempt {attempt + 1}/{max_token_retries})"
-                    )
+                    if should_cool_token_on_rate_limit(model, e):
+                        # 配额不足，标记 token 为 cooling 并换 token 重试
+                        await token_mgr.mark_rate_limited(token)
+                        logger.warning(
+                            f"Token {mask_token_for_log(token)} rate limited (429), "
+                            f"trying next token (attempt {attempt + 1}/{max_token_retries})"
+                        )
+                    else:
+                        logger.warning(
+                            f"Model {model} hit model-specific 429 for token "
+                            f"{mask_token_for_log(token)}, skipping cooling and trying next "
+                            f"token (attempt {attempt + 1}/{max_token_retries})"
+                        )
                     continue
 
                 if transient_upstream(e):

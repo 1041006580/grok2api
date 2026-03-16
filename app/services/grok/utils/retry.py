@@ -43,6 +43,18 @@ def rate_limited(error: Exception) -> bool:
     return status == 429 or code == "rate_limit_exceeded"
 
 
+def should_cool_token_on_rate_limit(model_id: str, error: Exception) -> bool:
+    """Whether a 429 for this model should move the token into COOLING."""
+    if not rate_limited(error):
+        return False
+
+    model = ModelService.get(model_id)
+    if model and model.grok_model == "grok-420":
+        return False
+
+    return True
+
+
 def transient_upstream(error: Exception) -> bool:
     """Whether error is likely transient and safe to retry with another token."""
     if not isinstance(error, UpstreamException):
@@ -63,4 +75,9 @@ def transient_upstream(error: Exception) -> bool:
     return any(marker in err for marker in timeout_markers)
 
 
-__all__ = ["pick_token", "rate_limited", "transient_upstream"]
+__all__ = [
+    "pick_token",
+    "rate_limited",
+    "should_cool_token_on_rate_limit",
+    "transient_upstream",
+]
