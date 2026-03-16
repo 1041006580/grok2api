@@ -28,12 +28,13 @@ def _get_usage_semaphore() -> asyncio.Semaphore:
 class UsageService:
     """用量查询服务"""
 
-    async def get(self, token: str) -> Dict:
+    async def get(self, token: str, model_name: str = "grok-3") -> Dict:
         """
         获取速率限制信息
 
         Args:
             token: 认证 Token
+            model_name: rate-limits 使用的模型名
 
         Returns:
             响应数据
@@ -49,7 +50,9 @@ class UsageService:
                 else:
                     session_ctx = ResettableSession()
                 async with session_ctx as session:
-                    response = await RateLimitsReverse.request(session, token)
+                    response = await RateLimitsReverse.request(
+                        session, token, model_name=model_name
+                    )
                 data = response.json()
                 remaining = data.get("remainingTokens")
                 if remaining is None:
@@ -57,7 +60,7 @@ class UsageService:
                     if remaining is not None:
                         data["remainingTokens"] = remaining
                 logger.info(
-                    f"Usage sync success: remaining={remaining}, token={mask_token_for_log(token)}"
+                    f"Usage sync success: model={model_name}, remaining={remaining}, token={mask_token_for_log(token)}"
                 )
                 return data
 

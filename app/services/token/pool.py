@@ -32,7 +32,7 @@ class TokenPool:
         """
         选择一个可用 Token
         策略:
-        1. 选择 active 状态且有配额的 token
+        1. 选择 active 状态的 token
         2. 优先选择剩余额度最多的
         3. 如果额度相同，随机选择（避免并发冲突）
 
@@ -44,7 +44,7 @@ class TokenPool:
         available = [
             t
             for t in self._tokens.values()
-            if t.status == TokenStatus.ACTIVE and t.quota > 0
+            if t.status == TokenStatus.ACTIVE
             and (not exclude or t.token not in exclude)
         ]
 

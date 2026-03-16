@@ -262,6 +262,14 @@ class ModelService:
         return model.grok_model, model.model_mode
 
     @classmethod
+    def rate_limit_model_name(cls, model_id: str) -> str:
+        """Resolve the modelName used for /rest/rate-limits."""
+        model = cls.get(model_id)
+        if not model:
+            raise ValidationException(f"Invalid model ID: {model_id}")
+        return model.grok_model
+
+    @classmethod
     def pool_for_model(cls, model_id: str) -> str:
         """根据模型选择 Token 池"""
         model = cls.get(model_id)

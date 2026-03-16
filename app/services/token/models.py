@@ -72,8 +72,8 @@ class TokenInfo(BaseModel):
     last_asset_clear_at: Optional[int] = None
 
     def is_available(self) -> bool:
-        """检查是否可用（状态正常且配额 > 0）"""
-        return self.status == TokenStatus.ACTIVE and self.quota > 0
+        """检查是否可用（仅由显式状态控制）"""
+        return self.status == TokenStatus.ACTIVE
 
     def consume(self, effort: EffortType = EffortType.LOW) -> int:
         """
@@ -95,12 +95,6 @@ class TokenInfo(BaseModel):
         # 注意：不在这里清零 fail_count，只有 record_success() 才清零
         # 这样可以避免失败后调用 consume 导致失败计数被重置
 
-        if self.quota == 0:
-            self.status = TokenStatus.COOLING
-        elif self.status == TokenStatus.COOLING:
-            # 只从 COOLING 恢复，不从 EXPIRED 恢复
-            self.status = TokenStatus.ACTIVE
-
         return actual_cost
 
     def update_quota(self, new_quota: int):
@@ -112,9 +106,7 @@ class TokenInfo(BaseModel):
         """
         self.quota = max(0, new_quota)
 
-        if self.quota == 0:
-            self.status = TokenStatus.COOLING
-        elif self.quota > 0 and self.status in [
+        if self.quota > 0 and self.status in [
             TokenStatus.COOLING,
             TokenStatus.EXPIRED,
         ]:
@@ -156,11 +148,6 @@ class TokenInfo(BaseModel):
         if is_usage:
             self.use_count += 1
             self.last_used_at = int(datetime.now().timestamp() * 1000)
-
-        if self.quota == 0:
-            self.status = TokenStatus.COOLING
-        else:
-            self.status = TokenStatus.ACTIVE
 
     def need_refresh(self, interval_hours: int = 8) -> bool:
         """检查是否需要刷新配额"""

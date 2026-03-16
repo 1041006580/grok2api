@@ -844,7 +844,7 @@ class TokenManager:
             return []
         return pool.list()
 
-    async def refresh_cooling_tokens(self) -> Dict[str, int]:
+    async def refresh_cooling_tokens(self, model_id: Optional[str] = None) -> Dict[str, int]:
         """
         批量刷新 cooling 状态的 Token 配额
 
@@ -880,6 +880,17 @@ class TokenManager:
         refreshed = 0
         recovered = 0
         expired = 0
+        rate_limit_model_name = "grok-3"
+        if model_id:
+            try:
+                from app.services.grok.services.model import ModelService
+
+                rate_limit_model_name = ModelService.rate_limit_model_name(model_id)
+            except Exception as e:
+                logger.warning(
+                    f"Refresh check: failed to resolve rate-limit model for {model_id}, "
+                    f"falling back to grok-3 ({e})"
+                )
 
         async def _refresh_one(item: tuple[str, TokenInfo]) -> dict:
             """刷新单个 token"""
@@ -892,7 +903,9 @@ class TokenManager:
                 # 重试逻辑：最多 2 次重试
                 for retry in range(3):  # 0, 1, 2
                     try:
-                        result = await usage_service.get(token_str)
+                        result = await usage_service.get(
+                            token_str, model_name=rate_limit_model_name
+                        )
 
                         if result and "remainingTokens" in result:
                             new_quota = result.get("remainingTokens")
