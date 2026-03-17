@@ -164,6 +164,18 @@ class ModelService:
             is_video=False,
         ),
         ModelInfo(
+            model_id="grok-4-1-non-thinking-companion",
+            grok_model="grok-4-1-non-thinking-companion",
+            model_mode="MODEL_MODE_UNKNOWN",
+            tier=Tier.BASIC,
+            cost=Cost.LOW,
+            display_name="GROK-4.1-NON-THINKING-COMPANION",
+            description="Companion model",
+            is_image=False,
+            is_image_edit=False,
+            is_video=False,
+        ),
+        ModelInfo(
             model_id="grok-4.20-beta",
             grok_model="grok-420",
             model_mode="MODEL_MODE_GROK_420",
