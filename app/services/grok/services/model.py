@@ -164,7 +164,7 @@ class ModelService:
             is_video=False,
         ),
         ModelInfo(
-            model_id="grok-4-1-non-thinking-companion",
+            model_id="grok-4.1-non-thinking-companion",
             grok_model="grok-4-1-non-thinking-companion",
             model_mode="MODEL_MODE_UNKNOWN",
             tier=Tier.BASIC,
