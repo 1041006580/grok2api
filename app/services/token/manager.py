@@ -18,6 +18,7 @@ from app.services.token.models import (
 from app.core.storage import get_storage, LocalStorage
 from app.core.config import get_config
 from app.core.exceptions import UpstreamException
+from app.services.grok.utils.retry import explicit_auth_failure
 from app.services.token.pool import TokenPool
 from app.services.grok.batch_services.usage import UsageService
 
@@ -581,8 +582,16 @@ class TokenManager:
                     status = e.details["status"]
                 else:
                     status = getattr(e, "status_code", None)
-                if status == 401:
+                if explicit_auth_failure(e):
                     await self.record_fail(token_str, status, "rate_limits_auth_failed")
+                    logger.warning(
+                        f"Token {mask_token_for_log(raw_token)}: confirmed auth failure during sync, skipping fallback"
+                    )
+                    return False
+                if status == 401:
+                    logger.warning(
+                        f"Token {mask_token_for_log(raw_token)}: unconfirmed 401 during sync, keeping token state and using fallback if allowed"
+                    )
             logger.warning(
                 f"Token {mask_token_for_log(raw_token)}: API sync failed, fallback to local ({e})"
             )
@@ -956,10 +965,15 @@ class TokenManager:
                         return {"recovered": False, "expired": False}
 
                     except Exception as e:
+                        status = None
+                        if isinstance(e, UpstreamException):
+                            if e.details and "status" in e.details:
+                                status = e.details["status"]
+                            else:
+                                status = getattr(e, "status_code", None)
                         error_str = str(e)
 
-                        # 检查是否为 401 错误
-                        if "401" in error_str or "Unauthorized" in error_str:
+                        if status == 401 or "401" in error_str or "Unauthorized" in error_str:
                             if retry < 2:
                                 logger.warning(
                                     f"Token {mask_token_for_log(token_info.token)}: 401 error, "
@@ -967,14 +981,18 @@ class TokenManager:
                                 )
                                 await asyncio.sleep(0.5)
                                 continue
-                            else:
-                                # 重试 2 次后仍然 401，标记为 expired
+                            if explicit_auth_failure(e):
                                 logger.error(
-                                    f"Token {mask_token_for_log(token_info.token)}: 401 after 2 retries, "
+                                    f"Token {mask_token_for_log(token_info.token)}: confirmed expired after refresh, "
                                     f"marking as expired"
                                 )
                                 token_info.status = TokenStatus.EXPIRED
                                 return {"recovered": False, "expired": True}
+                            logger.warning(
+                                f"Token {mask_token_for_log(token_info.token)}: 401 during refresh but not confirmed expired, "
+                                f"keeping current status"
+                            )
+                            return {"recovered": False, "expired": False}
                         else:
                             logger.warning(
                                 f"Token {mask_token_for_log(token_info.token)}: refresh failed ({e})"

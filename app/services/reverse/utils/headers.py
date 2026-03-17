@@ -10,6 +10,48 @@ from app.core.logger import logger
 from app.core.config import get_config
 from app.services.reverse.utils.statsig import StatsigGenerator
 
+_HEADER_CHAR_REPLACEMENTS = str.maketrans(
+    {
+        "\u2010": "-",
+        "\u2011": "-",
+        "\u2012": "-",
+        "\u2013": "-",
+        "\u2014": "-",
+        "\u2212": "-",
+        "\u2018": "'",
+        "\u2019": "'",
+        "\u201c": '"',
+        "\u201d": '"',
+        "\u00a0": " ",
+        "\u2007": " ",
+        "\u202f": " ",
+        "\u200b": "",
+        "\u200c": "",
+        "\u200d": "",
+        "\ufeff": "",
+    }
+)
+
+
+def _sanitize_header_value(
+    value: Optional[str],
+    *,
+    field_name: str,
+    remove_all_spaces: bool = False,
+) -> str:
+    raw = "" if value is None else str(value)
+    normalized = raw.translate(_HEADER_CHAR_REPLACEMENTS)
+    if remove_all_spaces:
+        normalized = re.sub(r"\s+", "", normalized)
+    else:
+        normalized = normalized.strip()
+    normalized = normalized.encode("latin-1", errors="ignore").decode("latin-1")
+    if normalized != raw:
+        logger.warning(
+            f"Sanitized header field '{field_name}' (len {len(raw)} -> {len(normalized)})"
+        )
+    return normalized
+
 
 def build_sso_cookie(sso_token: str) -> str:
     """
@@ -23,15 +65,40 @@ def build_sso_cookie(sso_token: str) -> str:
     """
     # Format
     sso_token = sso_token[4:] if sso_token.startswith("sso=") else sso_token
+    sso_token = _sanitize_header_value(
+        sso_token, field_name="sso_token", remove_all_spaces=True
+    )
 
     # SSO Cookie
     cookie = f"sso={sso_token}; sso-rw={sso_token}"
 
     # CF Cookies
-    cf_cookies = get_config("proxy.cf_cookies") or ""
-    if not cf_cookies:
-        cf_clearance = get_config("proxy.cf_clearance")
-        if cf_clearance:
+    cf_cookies = _sanitize_header_value(
+        get_config("proxy.cf_cookies") or "", field_name="proxy.cf_cookies"
+    )
+    cf_clearance = _sanitize_header_value(
+        get_config("proxy.cf_clearance") or "",
+        field_name="proxy.cf_clearance",
+        remove_all_spaces=True,
+    )
+    cf_refresh_enabled = bool(get_config("proxy.enabled"))
+
+    if cf_refresh_enabled:
+        if not cf_cookies and cf_clearance:
+            cf_cookies = f"cf_clearance={cf_clearance}"
+    elif cf_clearance:
+        if cf_cookies:
+            if re.search(r"(?:^|;\s*)cf_clearance=", cf_cookies):
+                cf_cookies = re.sub(
+                    r"(^|;\s*)cf_clearance=[^;]*",
+                    r"\1cf_clearance=" + cf_clearance,
+                    cf_cookies,
+                    count=1,
+                )
+            else:
+                cf_cookies = cf_cookies.rstrip("; ")
+                cf_cookies = f"{cf_cookies}; cf_clearance={cf_clearance}"
+        else:
             cf_cookies = f"cf_clearance={cf_clearance}"
     if cf_cookies:
         if cookie and not cookie.endswith(";"):
@@ -142,9 +209,12 @@ def build_ws_headers(token: Optional[str] = None, origin: Optional[str] = None, 
     Returns:
         Dict[str, str]: The headers dictionary.
     """
-    user_agent = get_config("proxy.user_agent")
+    user_agent = _sanitize_header_value(
+        get_config("proxy.user_agent"), field_name="proxy.user_agent"
+    )
+    safe_origin = _sanitize_header_value(origin or "https://grok.com", field_name="origin")
     headers = {
-        "Origin": origin or "https://grok.com",
+        "Origin": safe_origin,
         "User-Agent": user_agent,
         "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
         "Cache-Control": "no-cache",
@@ -177,14 +247,20 @@ def build_headers(cookie_token: str, content_type: Optional[str] = None, origin:
     Returns:
         Dict[str, str]: The headers dictionary.
     """
-    user_agent = get_config("proxy.user_agent")
+    user_agent = _sanitize_header_value(
+        get_config("proxy.user_agent"), field_name="proxy.user_agent"
+    )
+    safe_origin = _sanitize_header_value(origin or "https://grok.com", field_name="origin")
+    safe_referer = _sanitize_header_value(
+        referer or "https://grok.com/", field_name="referer"
+    )
     headers = {
         "Accept-Encoding": "gzip, deflate, br, zstd",
         "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
         "Baggage": "sentry-environment=production,sentry-release=d6add6fb0460641fd482d767a335ef72b9b6abb8,sentry-public_key=b311e0f2690c81f25e2c4cf6d4f7ce1c",
-        "Origin": origin or "https://grok.com",
+        "Origin": safe_origin,
         "Priority": "u=1, i",
-        "Referer": referer or "https://grok.com/",
+        "Referer": safe_referer,
         "Sec-Fetch-Mode": "cors",
         "User-Agent": user_agent,
     }

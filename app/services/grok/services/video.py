@@ -3,6 +3,7 @@ Grok video generation service.
 """
 
 import asyncio
+import math
 import uuid
 import re
 from typing import Any, AsyncGenerator, AsyncIterable, Dict, Optional
@@ -71,6 +72,54 @@ def _new_session() -> ResettableSession:
     if browser:
         return ResettableSession(impersonate=browser)
     return ResettableSession()
+
+
+def _extract_video_url(content: str) -> str:
+    if not isinstance(content, str) or not content.strip():
+        return ""
+
+    md_match = re.search(r"\[video\]\(([^)\s]+)\)", content)
+    if md_match:
+        return md_match.group(1).strip()
+
+    html_match = re.search(r"""<source[^>]+src=["']([^"']+)["']""", content)
+    if html_match:
+        return html_match.group(1).strip()
+
+    url_match = re.search(r"""https?://[^\s"'<>]+""", content)
+    if url_match:
+        return url_match.group(0).strip().rstrip(".,)")
+
+    return ""
+
+
+def _extract_post_id(video_url: str) -> Optional[str]:
+    if not video_url:
+        return None
+    match = re.search(r"/generated/([0-9a-zA-Z-]{6,64})/", video_url)
+    if match:
+        return match.group(1)
+    match = re.search(r"/([0-9a-zA-Z-]{6,64})/generated_video", video_url)
+    if match:
+        return match.group(1)
+    return None
+
+
+def _round_length_for_video(model: str, target_length: int) -> int:
+    model_info = ModelService.get(model)
+    if model_info and model_info.tier.value == "super" and target_length > 15:
+        return 10
+    return 6
+
+
+def _build_extension_start_times(target_length: int, round_length: int) -> list[float]:
+    starts: list[float] = []
+    current_total = round_length
+    while current_total < target_length:
+        next_total = min(target_length, current_total + round_length)
+        starts.append(float(next_total - round_length))
+        current_total = next_total
+    return starts
 
 
 class VideoService:
@@ -494,6 +543,79 @@ class VideoService:
 
         return _stream()
 
+    async def generate_extension(
+        self,
+        token: str,
+        prompt: str,
+        parent_post_id: str,
+        original_post_id: str,
+        start_time: float,
+        aspect_ratio: str = "3:2",
+        video_length: int = 6,
+        resolution_name: str = "480p",
+        preset: str = "normal",
+    ) -> AsyncGenerator[bytes, None]:
+        """Extend a previously generated video."""
+        logger.info(
+            f"Video extension: prompt='{prompt[:50]}...', parent={parent_post_id}, original={original_post_id}, "
+            f"start_time={start_time}, ratio={aspect_ratio}, length={video_length}s"
+        )
+        mode_map = {
+            "fun": "--mode=extremely-crazy",
+            "normal": "--mode=normal",
+            "spicy": "--mode=extremely-spicy-or-crazy",
+        }
+        mode_flag = mode_map.get(preset, "--mode=custom")
+        message = f"{prompt} {mode_flag}"
+        model_config_override = {
+            "modelMap": {
+                "videoGenModelConfig": {
+                    "isVideoExtension": True,
+                    "videoExtensionStartTime": float(start_time),
+                    "extendPostId": parent_post_id,
+                    "stitchWithExtendPostId": True,
+                    "originalPrompt": prompt,
+                    "originalPostId": original_post_id,
+                    "originalRefType": "ORIGINAL_REF_TYPE_VIDEO_EXTENSION",
+                    "mode": "custom",
+                    "aspectRatio": aspect_ratio,
+                    "videoLength": video_length,
+                    "resolutionName": resolution_name,
+                    "parentPostId": parent_post_id,
+                    "isVideoEdit": False,
+                }
+            }
+        }
+
+        async def _stream():
+            session = _new_session()
+            try:
+                async with _get_video_semaphore():
+                    stream_response = await AppChatReverse.request(
+                        session,
+                        token,
+                        message=message,
+                        model="grok-3",
+                        tool_overrides={"videoGen": True},
+                        model_config_override=model_config_override,
+                    )
+                    logger.info(
+                        f"Video extension started: parent_post_id={parent_post_id}, start_time={start_time}"
+                    )
+                    async for line in stream_response:
+                        yield line
+            except Exception as e:
+                try:
+                    await session.close()
+                except Exception:
+                    pass
+                logger.error(f"Video extension error: {e}")
+                if isinstance(e, AppException):
+                    raise
+                raise UpstreamException(f"Video extension error: {str(e)}")
+
+        return _stream()
+
     @staticmethod
     async def completions(
         model: str,
@@ -525,6 +647,7 @@ class VideoService:
         else:
             show_think = reasoning_effort != "none"
         is_stream = stream if stream is not None else get_config("app.stream")
+        target_length = int(video_length or 6)
 
         # Extract content.
         from app.services.grok.services.chat import MessageExtractor
@@ -556,6 +679,8 @@ class VideoService:
                 token = token[4:]
             pool_name = token_mgr.get_pool_name_for_token(token)
             should_upscale = resolution == "720p" and pool_name == BASIC_POOL_NAME
+            round_length = _round_length_for_video(model, target_length)
+            use_auto_extension = (not is_stream) and target_length > 15
 
             try:
                 # Resolve image source with origin tracking.
@@ -568,30 +693,115 @@ class VideoService:
 
                 # Generate video.
                 service = VideoService()
-                if image_url:
+                if use_auto_extension:
                     logger.info(
-                        f"Video image source resolved: source_type={source_type}, "
-                        f"has_file_attachments={bool(origin_file_attachments)}"
+                        f"Video auto extension enabled: target_length={target_length}s, round_length={round_length}s"
                     )
-                    response = await service.generate_from_image(
-                        token,
-                        prompt,
-                        image_url,
-                        aspect_ratio,
-                        video_length,
-                        resolution,
-                        preset,
-                        file_attachments=origin_file_attachments,
+                    if image_url:
+                        logger.info(
+                            f"Video image source resolved: source_type={source_type}, "
+                            f"has_file_attachments={bool(origin_file_attachments)}"
+                        )
+                        first_response = await service.generate_from_image(
+                            token,
+                            prompt,
+                            image_url,
+                            aspect_ratio,
+                            round_length,
+                            resolution,
+                            preset,
+                            file_attachments=origin_file_attachments,
+                        )
+                    else:
+                        first_response = await service.generate(
+                            token,
+                            prompt,
+                            aspect_ratio,
+                            round_length,
+                            resolution,
+                            preset,
+                        )
+
+                    first_result = await VideoCollectProcessor(
+                        model, token, upscale_on_finish=False
+                    ).process(first_response)
+                    current_result = first_result
+                    current_content = (
+                        (first_result.get("choices") or [{}])[0]
+                        .get("message", {})
+                        .get("content", "")
                     )
+                    current_video_url = _extract_video_url(current_content)
+                    original_post_id = _extract_post_id(current_video_url)
+                    last_post_id = original_post_id
+
+                    if not last_post_id:
+                        raise UpstreamException(
+                            message="Video auto extension failed: missing first round post id",
+                            details={"status": 502, "type": "missing_post_id"},
+                        )
+
+                    extension_starts = _build_extension_start_times(
+                        target_length, round_length
+                    )
+
+                    for index, start_time in enumerate(extension_starts, start=1):
+                        is_last = index == len(extension_starts)
+                        extension_response = await service.generate_extension(
+                            token,
+                            prompt,
+                            parent_post_id=last_post_id,
+                            original_post_id=original_post_id,
+                            start_time=start_time,
+                            aspect_ratio=aspect_ratio,
+                            video_length=round_length,
+                            resolution_name=resolution,
+                            preset=preset,
+                        )
+                        current_result = await VideoCollectProcessor(
+                            model, token, upscale_on_finish=is_last and should_upscale
+                        ).process(extension_response)
+                        current_content = (
+                            (current_result.get("choices") or [{}])[0]
+                            .get("message", {})
+                            .get("content", "")
+                        )
+                        current_video_url = _extract_video_url(current_content)
+                        next_post_id = _extract_post_id(current_video_url)
+                        if not next_post_id and not is_last:
+                            raise UpstreamException(
+                                message="Video auto extension failed: missing round post id",
+                                details={"status": 502, "type": "missing_post_id", "round": index + 1},
+                            )
+                        if next_post_id:
+                            last_post_id = next_post_id
+
+                    result = current_result
                 else:
-                    response = await service.generate(
-                        token,
-                        prompt,
-                        aspect_ratio,
-                        video_length,
-                        resolution,
-                        preset,
-                    )
+                    if image_url:
+                        logger.info(
+                            f"Video image source resolved: source_type={source_type}, "
+                            f"has_file_attachments={bool(origin_file_attachments)}"
+                        )
+                        response = await service.generate_from_image(
+                            token,
+                            prompt,
+                            image_url,
+                            aspect_ratio,
+                            video_length,
+                            resolution,
+                            preset,
+                            file_attachments=origin_file_attachments,
+                        )
+                    else:
+                        response = await service.generate(
+                            token,
+                            prompt,
+                            aspect_ratio,
+                            video_length,
+                            resolution,
+                            preset,
+                        )
 
                 # Process response.
                 if is_stream:
@@ -605,9 +815,10 @@ class VideoService:
                         processor.process(response), token_mgr, token, model
                     )
 
-                result = await VideoCollectProcessor(
-                    model, token, upscale_on_finish=should_upscale
-                ).process(response)
+                if not use_auto_extension:
+                    result = await VideoCollectProcessor(
+                        model, token, upscale_on_finish=should_upscale
+                    ).process(response)
                 try:
                     model_info = ModelService.get(model)
                     effort = (

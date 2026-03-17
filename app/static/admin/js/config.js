@@ -51,6 +51,7 @@ const LOCALE_MAP = {
     "stream": { title: "流式响应", desc: "是否默认启用流式输出。" },
     "thinking": { title: "思维链", desc: "是否默认启用思维链输出。" },
     "dynamic_statsig": { title: "动态指纹", desc: "是否默认启用动态生成 Statsig 指纹。" },
+    "custom_instruction": { title: "自定义指令", desc: "附加到 Grok 对话请求中的自定义人格/指令文本。" },
     "filter_tags": { title: "过滤标签", desc: "设置自动过滤 Grok 响应中的特殊标签。" }
   },
 
@@ -59,6 +60,8 @@ const LOCALE_MAP = {
     "label": "代理配置",
     "base_proxy_url": { title: "基础代理 URL", desc: "代理请求到 Grok 官网的基础服务地址。" },
     "asset_proxy_url": { title: "资源代理 URL", desc: "代理请求到 Grok 官网的静态资源（图片/视频）地址。" },
+    "cf_cookies": { title: "CF Cookies", desc: "完整 Cloudflare Cookies 字符串。启用自动刷新时由系统自动管理。" },
+    "skip_proxy_ssl_verify": { title: "跳过代理 SSL 校验", desc: "当代理使用自签名 HTTPS 证书时启用。默认关闭。" },
     "reverse_base_url": { title: "反代基础地址", desc: "替换 grok.com 域名的反代地址（如 https://my-proxy.example.com）。" },
     "reverse_asset_url": { title: "反代资源地址", desc: "替换 assets.grok.com 域名的反代地址（如 https://my-assets-proxy.example.com）。" },
     "enabled": { title: "启用 CF 自动刷新", desc: "启用后将通过 FlareSolverr 自动获取 cf_clearance。" },
@@ -187,7 +190,7 @@ const SECTION_DESCRIPTIONS = {
 };
 
 // CF 自动刷新联动禁用字段（全部在 proxy section 内）
-const CF_MANAGED_PROXY_KEYS = ['cf_clearance', 'browser', 'user_agent'];
+const CF_MANAGED_PROXY_KEYS = ['cf_cookies', 'cf_clearance', 'browser', 'user_agent'];
 const CF_REFRESH_SUB_KEYS = ['flaresolverr_url', 'refresh_interval', 'timeout'];
 
 const SECTION_ORDER = new Map(Object.keys(LOCALE_MAP).map((key, index) => [key, index]));
@@ -364,7 +367,7 @@ function renderConfig(data) {
     const keyOrder = localeSection ? new Map(Object.keys(localeSection).map((k, i) => [k, i])) : null;
 
     const allKeys = sortByOrder(Object.keys(items), keyOrder);
-    const visibleKeys = allKeys.filter(key => !(section === 'proxy' && key === 'cf_cookies'));
+    const visibleKeys = allKeys;
 
     if (visibleKeys.length > 0) {
       const card = document.createElement('div');

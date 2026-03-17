@@ -75,7 +75,44 @@ def transient_upstream(error: Exception) -> bool:
     return any(marker in err for marker in timeout_markers)
 
 
+def explicit_auth_failure(error: Exception) -> bool:
+    """Whether a 401 clearly indicates token authentication failure."""
+    if not isinstance(error, UpstreamException):
+        return False
+
+    details = error.details or {}
+    status = details.get("status")
+    if status != 401:
+        return False
+
+    body = str(details.get("body") or details.get("error") or "").lower()
+    if not body:
+        return False
+
+    # Cloudflare / HTML challenge pages should not expire tokens.
+    cloudflare_markers = (
+        "challenge-platform",
+        "cloudflare",
+        "<html",
+        "<!doctype html",
+    )
+    if any(marker in body for marker in cloudflare_markers):
+        return False
+
+    auth_error_markers = (
+        "unauthorized",
+        "not logged in",
+        "unauthenticated",
+        "bad-credentials",
+        "invalid_api_key",
+        "invalid token",
+        "auth_failed",
+    )
+    return any(marker in body for marker in auth_error_markers)
+
+
 __all__ = [
+    "explicit_auth_failure",
     "pick_token",
     "rate_limited",
     "should_cool_token_on_rate_limit",

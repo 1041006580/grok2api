@@ -24,6 +24,8 @@ stream = true
 thinking = true
 # 是否动态生成 Statsig 指纹
 dynamic_statsig = true
+# 自定义指令
+custom_instruction = ""
 # 过滤的特殊标签列表
 filter_tags = ["xaiartifact","xai:tool_usage_card","grok:render"]
 
@@ -34,6 +36,10 @@ filter_tags = ["xaiartifact","xai:tool_usage_card","grok:render"]
 base_proxy_url = ""
 # 资源代理地址（代理静态资源如图片/视频）
 asset_proxy_url = ""
+# 完整 CF Cookies（自动刷新写入或手动设置）
+cf_cookies = ""
+# 跳过代理 SSL 证书验证（代理使用自签名证书时启用）
+skip_proxy_ssl_verify = false
 # 反代基础地址（替换 grok.com 域名）
 reverse_base_url = ""
 # 反代资源地址（替换 assets.grok.com 域名）

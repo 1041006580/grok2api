@@ -3,13 +3,14 @@ Reverse interface: app chat conversations.
 """
 
 import orjson
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 from curl_cffi.requests import AsyncSession
 
 from app.core.logger import logger
 from app.core.config import get_config
 from app.core.exceptions import UpstreamException
+from app.services.grok.utils.retry import explicit_auth_failure
 from app.services.token.service import TokenService
 from app.services.reverse.utils.headers import build_headers
 from app.services.reverse.utils.retry import retry_on_status
@@ -33,6 +34,17 @@ def _normalize_chat_proxy(proxy_url: str) -> str:
 
 class AppChatReverse:
     """/rest/app-chat/conversations/new reverse interface."""
+
+    @staticmethod
+    def _resolve_custom_personality() -> Optional[str]:
+        """Resolve optional custom personality from app config."""
+        value = get_config("app.custom_instruction", "")
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            value = str(value)
+        value = value.strip()
+        return value or None
 
     @staticmethod
     def build_payload(
@@ -82,6 +94,10 @@ class AppChatReverse:
             "temporary": get_config("app.temporary"),
             "toolOverrides": tool_overrides or {},
         }
+
+        custom_personality = AppChatReverse._resolve_custom_personality()
+        if custom_personality is not None:
+            payload["customPersonality"] = custom_personality
 
         if model_config_override:
             payload["responseMetadata"]["modelConfigOverride"] = model_config_override
@@ -235,7 +251,7 @@ class AppChatReverse:
                     status = e.details["status"]
                 else:
                     status = getattr(e, "status_code", None)
-                if status == 401:
+                if explicit_auth_failure(e):
                     try:
                         await TokenService.record_fail(
                             token, status, "app_chat_auth_failed"

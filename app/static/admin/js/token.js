@@ -279,7 +279,7 @@ function renderTable() {
     let statusClass = 'badge-gray';
     if (item.status === 'active') statusClass = 'badge-green';
     else if (item.status === 'cooling') statusClass = 'badge-orange';
-    else statusClass = 'badge-red';
+    else if (item.status === 'expired') statusClass = 'badge-red';
     tdStatus.className = 'text-center';
     let statusHtml = `<span class="badge ${statusClass}">${item.status}</span>`;
     if (item.tags && item.tags.includes('nsfw')) {
@@ -300,10 +300,21 @@ function renderTable() {
     // Actions (Center)
     const tdActions = document.createElement('td');
     tdActions.className = 'text-center';
+    const isDisabled = item.status === 'disabled';
+    const toggleTitle = isDisabled ? '启用' : '禁用';
+    const toggleIcon = isDisabled
+      ? '<polyline points="20 6 9 17 4 12"></polyline>'
+      : '<line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>';
+    const toggleClass = isDisabled
+      ? 'p-1 text-gray-400 hover:text-green-600 rounded'
+      : 'p-1 text-gray-400 hover:text-orange-600 rounded';
     tdActions.innerHTML = `
                 <div class="flex items-center justify-center gap-2">
                      <button onclick="refreshStatus('${item.token}')" class="p-1 text-gray-400 hover:text-black rounded" title="刷新状态">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+                     </button>
+                     <button onclick="toggleTokenEnabled(${originalIndex})" class="${toggleClass}" title="${toggleTitle}">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${toggleIcon}</svg>
                      </button>
                      <button onclick="openEditModal(${originalIndex})" class="p-1 text-gray-400 hover:text-black rounded" title="编辑">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
@@ -508,8 +519,64 @@ async function deleteToken(index) {
   syncToServer().then(loadData);
 }
 
+async function toggleTokenEnabled(index) {
+  const item = flatTokens[index];
+  if (!item) return;
+
+  const toDisabled = item.status !== 'disabled';
+  const actionLabel = toDisabled ? '禁用' : '启用';
+  const ok = await confirmAction(`确定要${actionLabel}此 Token 吗？`, { okText: actionLabel });
+  if (!ok) return;
+
+  item.status = toDisabled ? 'disabled' : 'active';
+  await syncToServer();
+  await loadData();
+  showToast(`Token 已${actionLabel}`, 'success');
+}
+
 function batchDelete() {
   startBatchDelete();
+}
+
+async function batchSetStatus(targetStatus) {
+  if (isBatchProcessing) {
+    showToast('当前有任务进行中', 'info');
+    return;
+  }
+
+  const selected = getSelectedTokens();
+  if (selected.length === 0) {
+    showToast('未选择 Token', 'error');
+    return;
+  }
+
+  const targets = selected.filter(item => item.status !== targetStatus);
+  const isDisable = targetStatus === 'disabled';
+  const actionLabel = isDisable ? '禁用' : '启用';
+
+  if (targets.length === 0) {
+    showToast(`没有可${actionLabel}的 Token`, 'info');
+    return;
+  }
+
+  const ok = await confirmAction(`确定要${actionLabel}选中的 ${targets.length} 个 Token 吗？`, { okText: actionLabel });
+  if (!ok) return;
+
+  targets.forEach(item => {
+    item.status = targetStatus;
+  });
+
+  await syncToServer();
+  await loadData();
+  showToast(`${actionLabel}完成`, 'success');
+}
+
+async function batchDisableTokens() {
+  await batchSetStatus('disabled');
+}
+
+async function batchEnableTokens() {
+  await batchSetStatus('active');
 }
 
 // Reconstruct object structure and save
@@ -817,10 +884,14 @@ function setActionButtonsState(selectedCount = null) {
   const disabled = isBatchProcessing;
   const exportBtn = byId('btn-batch-export');
   const updateBtn = byId('btn-batch-update');
+  const disableBtn = byId('btn-batch-disable');
+  const enableBtn = byId('btn-batch-enable');
   const nsfwBtn = byId('btn-batch-nsfw');
   const deleteBtn = byId('btn-batch-delete');
   if (exportBtn) exportBtn.disabled = disabled || count === 0;
   if (updateBtn) updateBtn.disabled = disabled || count === 0;
+  if (disableBtn) disableBtn.disabled = disabled || count === 0;
+  if (enableBtn) enableBtn.disabled = disabled || count === 0;
   if (nsfwBtn) nsfwBtn.disabled = disabled || count === 0;
   if (deleteBtn) deleteBtn.disabled = disabled || count === 0;
 }

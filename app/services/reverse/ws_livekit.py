@@ -10,6 +10,7 @@ from curl_cffi.requests import AsyncSession
 from app.core.logger import logger
 from app.core.config import get_config
 from app.core.exceptions import UpstreamException
+from app.services.grok.utils.retry import explicit_auth_failure
 from app.services.token.service import TokenService
 from app.services.reverse.utils.headers import build_headers, build_ws_headers
 from app.services.reverse.utils.retry import retry_on_status
@@ -122,7 +123,7 @@ class LivekitTokenReverse:
                     status = e.details["status"]
                 else:
                     status = getattr(e, "status_code", None)
-                if status == 401:
+                if explicit_auth_failure(e):
                     try:
                         await TokenService.record_fail(
                             token, status, "livekit_token_auth_failed"
