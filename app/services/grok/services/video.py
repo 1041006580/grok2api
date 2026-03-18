@@ -123,6 +123,22 @@ def _build_extension_start_times(target_length: int, round_length: int) -> list[
     return starts
 
 
+def _video_meta_from_result(result: Dict[str, Any]) -> Dict[str, str]:
+    if not isinstance(result, dict):
+        return {}
+    meta = result.get("_video_meta")
+    if isinstance(meta, dict):
+        return meta
+    extracted = {}
+    if isinstance(result.get("raw_video_url"), str):
+        extracted["raw_video_url"] = result["raw_video_url"]
+    if isinstance(result.get("raw_thumbnail_url"), str):
+        extracted["raw_thumbnail_url"] = result["raw_thumbnail_url"]
+    if isinstance(result.get("post_id"), str):
+        extracted["post_id"] = result["post_id"]
+    return extracted
+
+
 class VideoService:
     """Video generation service."""
 
@@ -727,13 +743,14 @@ class VideoService:
                         model, token, upscale_on_finish=False
                     ).process(first_response)
                     current_result = first_result
+                    first_meta = _video_meta_from_result(current_result)
                     current_content = (
                         (first_result.get("choices") or [{}])[0]
                         .get("message", {})
                         .get("content", "")
                     )
-                    current_video_url = _extract_video_url(current_content)
-                    original_post_id = _extract_post_id(current_video_url)
+                    current_video_url = first_meta.get("raw_video_url") or _extract_video_url(current_content)
+                    original_post_id = first_meta.get("post_id") or _extract_post_id(current_video_url)
                     last_post_id = original_post_id
 
                     if not last_post_id:
@@ -762,13 +779,14 @@ class VideoService:
                         current_result = await VideoCollectProcessor(
                             model, token, upscale_on_finish=is_last and should_upscale
                         ).process(extension_response)
+                        current_meta = _video_meta_from_result(current_result)
                         current_content = (
                             (current_result.get("choices") or [{}])[0]
                             .get("message", {})
                             .get("content", "")
                         )
-                        current_video_url = _extract_video_url(current_content)
-                        next_post_id = _extract_post_id(current_video_url)
+                        current_video_url = current_meta.get("raw_video_url") or _extract_video_url(current_content)
+                        next_post_id = current_meta.get("post_id") or _extract_post_id(current_video_url)
                         if not next_post_id and not is_last:
                             raise UpstreamException(
                                 message="Video auto extension failed: missing round post id",
@@ -820,6 +838,9 @@ class VideoService:
                     result = await VideoCollectProcessor(
                         model, token, upscale_on_finish=should_upscale
                     ).process(response)
+                if isinstance(result, dict) and "_video_meta" in result:
+                    result = dict(result)
+                    result.pop("_video_meta", None)
                 try:
                     model_info = ModelService.get(model)
                     effort = (
@@ -1104,6 +1125,9 @@ class VideoCollectProcessor(BaseProcessor):
         """Process and collect video response."""
         response_id = ""
         content = ""
+        raw_video_url = ""
+        raw_thumbnail_url = ""
+        post_id = ""
         idle_timeout = get_config("video.stream_timeout")
 
         try:
@@ -1124,6 +1148,9 @@ class VideoCollectProcessor(BaseProcessor):
                         video_url = video_resp.get("videoUrl", "")
                         thumbnail_url = video_resp.get("thumbnailImageUrl", "")
                         is_moderated = video_resp.get("moderated", False)
+                        raw_video_url = video_url or ""
+                        raw_thumbnail_url = thumbnail_url or ""
+                        post_id = _extract_post_id(raw_video_url) or ""
 
                         if not video_url and is_moderated:
                             logger.warning("Video moderated by upstream, no videoUrl returned")
@@ -1192,6 +1219,11 @@ class VideoCollectProcessor(BaseProcessor):
             "object": "chat.completion",
             "created": self.created,
             "model": self.model,
+            "_video_meta": {
+                "raw_video_url": raw_video_url,
+                "raw_thumbnail_url": raw_thumbnail_url,
+                "post_id": post_id,
+            },
             "choices": [
                 {
                     "index": 0,
