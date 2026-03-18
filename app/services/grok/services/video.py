@@ -37,7 +37,7 @@ from app.services.reverse.media_post import MediaPostReverse
 from app.services.reverse.video_upscale import VideoUpscaleReverse
 from app.services.reverse.utils.session import ResettableSession
 from app.services.reverse.utils.urls import resolve_asset_url
-from app.services.token.manager import BASIC_POOL_NAME
+from app.services.token.manager import BASIC_POOL_NAME, SUPER_POOL_NAME
 from app.services.image_origin import (
     ORIGIN_GENERATED,
     ORIGIN_UNKNOWN,
@@ -105,10 +105,11 @@ def _extract_post_id(video_url: str) -> Optional[str]:
     return None
 
 
-def _round_length_for_video(model: str, target_length: int) -> int:
-    model_info = ModelService.get(model)
-    if model_info and model_info.tier.value == "super" and target_length > 15:
-        return 10
+def _round_length_for_video(pool_name: Optional[str], target_length: int) -> int:
+    if pool_name == BASIC_POOL_NAME:
+        return 6
+    if pool_name == SUPER_POOL_NAME:
+        return 10 if target_length <= 10 else 15
     return 6
 
 
@@ -677,10 +678,10 @@ class VideoService:
             token = token_info.token
             if token.startswith("sso="):
                 token = token[4:]
-            pool_name = token_mgr.get_pool_name_for_token(token)
+            pool_name = token_mgr.get_pool_name_for_token(token) or BASIC_POOL_NAME
             should_upscale = resolution == "720p" and pool_name == BASIC_POOL_NAME
-            round_length = _round_length_for_video(model, target_length)
-            use_auto_extension = (not is_stream) and target_length > 15
+            round_length = _round_length_for_video(pool_name, target_length)
+            use_auto_extension = (not is_stream) and target_length > round_length
 
             try:
                 # Resolve image source with origin tracking.

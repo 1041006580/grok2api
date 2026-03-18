@@ -287,14 +287,21 @@ class VideosApiTests(unittest.IsolatedAsyncioTestCase):
 
 
 class VideoAutoExtensionTests(unittest.IsolatedAsyncioTestCase):
-    async def test_video_completions_auto_extends_long_non_stream_video(self):
+    async def _run_video_completion_case(
+        self,
+        *,
+        pool_name: str,
+        target_length: int,
+        tier_value: str,
+        expected_extension_calls: int,
+    ):
         from app.services.grok.services.video import VideoService
 
         class DummyCost:
             value = "low"
 
         class DummyTier:
-            value = "basic"
+            value = tier_value
 
         class DummyModelInfo:
             cost = DummyCost()
@@ -303,7 +310,7 @@ class VideoAutoExtensionTests(unittest.IsolatedAsyncioTestCase):
         token_info = TokenInfo(token="token-1", quota=10)
         fake_mgr = SimpleNamespace(
             get_token_for_video=lambda **kwargs: token_info,
-            get_pool_name_for_token=lambda token: "ssoBasic",
+            get_pool_name_for_token=lambda token: pool_name,
             consume=AsyncMock(return_value=True),
             mark_rate_limited=AsyncMock(return_value=True),
             reload_if_stale=AsyncMock(return_value=None),
@@ -340,7 +347,7 @@ class VideoAutoExtensionTests(unittest.IsolatedAsyncioTestCase):
         ]
 
         with patch("app.services.grok.services.video.get_token_manager", new=AsyncMock(return_value=fake_mgr)):
-            with patch("app.services.grok.services.video.ModelService.pool_candidates_for_model", return_value=["ssoBasic"]):
+            with patch("app.services.grok.services.video.ModelService.pool_candidates_for_model", return_value=["ssoBasic", "ssoSuper"]):
                 with patch("app.services.grok.services.video.ModelService.get", return_value=DummyModelInfo()):
                     with patch("app.services.grok.services.video.get_config", side_effect=lambda key, default=None: {"retry.max_retry": 3, "app.stream": False, "app.thinking": True}.get(key, default)):
                         with patch.object(VideoService, "generate", new=AsyncMock(return_value="round-1-stream")) as mock_generate:
@@ -348,19 +355,52 @@ class VideoAutoExtensionTests(unittest.IsolatedAsyncioTestCase):
                                 with patch("app.services.grok.services.video.VideoCollectProcessor.process", new=AsyncMock(side_effect=collect_results)):
                                     result = await VideoService.completions(
                                         model="grok-imagine-1.0-video",
-                                        messages=[{"role": "user", "content": "make a long clip"}],
+                                        messages=[{"role": "user", "content": "make a clip"}],
                                         stream=False,
                                         aspect_ratio="3:2",
-                                        video_length=18,
+                                        video_length=target_length,
                                         resolution="480p",
                                         preset="custom",
                                     )
 
         self.assertEqual(mock_generate.await_count, 1)
-        self.assertEqual(mock_extend.await_count, 2)
+        self.assertEqual(mock_extend.await_count, expected_extension_calls)
+        return result
+
+    async def test_video_completions_auto_extends_long_non_stream_video(self):
+        result = await self._run_video_completion_case(
+            pool_name="ssoBasic",
+            target_length=18,
+            tier_value="basic",
+            expected_extension_calls=2,
+        )
         self.assertEqual(
             result["choices"][0]["message"]["content"],
             "https://assets.grok.com/generated/round-three/generated_video.mp4",
+        )
+
+    async def test_basic_token_extends_for_10_seconds(self):
+        await self._run_video_completion_case(
+            pool_name="ssoBasic",
+            target_length=10,
+            tier_value="basic",
+            expected_extension_calls=1,
+        )
+
+    async def test_basic_token_extends_for_15_seconds(self):
+        await self._run_video_completion_case(
+            pool_name="ssoBasic",
+            target_length=15,
+            tier_value="basic",
+            expected_extension_calls=2,
+        )
+
+    async def test_super_token_does_not_extend_for_15_seconds(self):
+        await self._run_video_completion_case(
+            pool_name="ssoSuper",
+            target_length=15,
+            tier_value="super",
+            expected_extension_calls=0,
         )
 
 
