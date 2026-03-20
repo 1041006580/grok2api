@@ -1,3 +1,6 @@
+import asyncio
+from unittest.mock import AsyncMock
+
 from app.core.config import Config
 
 
@@ -21,3 +24,30 @@ def test_config_defaults_expose_current_local_sections():
     assert "proxy" in cfg._defaults
     assert "token" in cfg._defaults
     assert "video" in cfg._defaults
+
+
+def test_config_ensure_loaded_is_available_and_idempotent():
+    cfg = Config()
+    cfg._loaded = False
+
+    async def fake_load():
+        cfg._loaded = True
+
+    cfg.load = AsyncMock(side_effect=fake_load)
+
+    asyncio.run(cfg.ensure_loaded())
+    asyncio.run(cfg.ensure_loaded())
+
+    cfg.load.assert_awaited_once()
+
+
+def test_function_auth_aliases_exist():
+    from app.core.auth import (
+        get_function_api_key,
+        is_function_enabled,
+        verify_function_key,
+    )
+
+    assert callable(get_function_api_key)
+    assert callable(is_function_enabled)
+    assert callable(verify_function_key)

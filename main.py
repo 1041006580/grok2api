@@ -26,9 +26,10 @@ if env_file.exists():
 from fastapi import FastAPI  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from fastapi import Depends  # noqa: E402
+from fastapi.responses import RedirectResponse  # noqa: E402
 
 from app.core.auth import verify_api_key  # noqa: E402
-from app.core.config import get_config  # noqa: E402
+from app.core.config import config, get_config  # noqa: E402
 from app.core.logger import logger, setup_logging  # noqa: E402
 from app.core.exceptions import register_exception_handlers  # noqa: E402
 from app.core.response_middleware import ResponseLoggerMiddleware  # noqa: E402
@@ -40,7 +41,7 @@ from app.api.v1.models import router as models_router  # noqa: E402
 from app.api.v1.response import router as responses_router  # noqa: E402
 from app.services.token import get_scheduler  # noqa: E402
 from app.api.v1.admin import router as admin_router
-from app.api.v1.function import router as public_router
+from app.api.v1.function import router as function_router
 from app.api.pages import router as pages_router
 from fastapi.staticfiles import StaticFiles
 
@@ -130,6 +131,11 @@ def create_app() -> FastAPI:
     # 请求日志和 ID 中间件
     app.add_middleware(ResponseLoggerMiddleware)
 
+    @app.middleware("http")
+    async def ensure_config_loaded(request, call_next):
+        await config.ensure_loaded()
+        return await call_next(request)
+
     # 注册异常处理器
     register_exception_handlers(app)
 
@@ -158,8 +164,17 @@ def create_app() -> FastAPI:
 
     # 注册管理与公共路由
     app.include_router(admin_router, prefix="/v1/admin")
-    app.include_router(public_router, prefix="/v1/public")
+    app.include_router(function_router, prefix="/v1/public")
+    app.include_router(function_router, prefix="/v1/function")
     app.include_router(pages_router)
+
+    @app.get("/favicon.ico", include_in_schema=False)
+    def favicon():
+        return RedirectResponse(url="/static/common/img/favicon/favicon.ico")
+
+    @app.get("/health")
+    def health():
+        return {"status": "ok"}
 
     return app
 

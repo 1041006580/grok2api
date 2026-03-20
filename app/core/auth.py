@@ -13,6 +13,8 @@ DEFAULT_API_KEY = ""
 DEFAULT_APP_KEY = "grok2api"
 DEFAULT_PUBLIC_KEY = ""
 DEFAULT_PUBLIC_ENABLED = False
+DEFAULT_FUNCTION_KEY = ""
+DEFAULT_FUNCTION_ENABLED = False
 
 # 定义 Bearer Scheme
 security = HTTPBearer(
@@ -68,11 +70,36 @@ def get_public_api_key() -> str:
     public_key = get_config("app.public_key", DEFAULT_PUBLIC_KEY)
     return public_key or ""
 
+
+def get_function_api_key() -> str:
+    """
+    获取 Function API Key。
+
+    若未配置 function_key，则兼容回退到 public_key。
+    """
+    function_key = get_config("app.function_key", None)
+    if function_key is None:
+        function_key = get_config("app.public_key", DEFAULT_PUBLIC_KEY)
+    return function_key or ""
+
+
 def is_public_enabled() -> bool:
     """
     是否开启 public 功能入口。
     """
     return bool(get_config("app.public_enabled", DEFAULT_PUBLIC_ENABLED))
+
+
+def is_function_enabled() -> bool:
+    """
+    是否开启 function 功能入口。
+
+    若未配置 function_enabled，则兼容回退到 public_enabled。
+    """
+    function_enabled = get_config("app.function_enabled", None)
+    if function_enabled is None:
+        function_enabled = get_config("app.public_enabled", DEFAULT_PUBLIC_ENABLED)
+    return bool(function_enabled)
 
 
 def _hash_public_key(key: str) -> str:
@@ -189,6 +216,43 @@ async def verify_public_key(
         )
 
     if _match_public_key(auth.credentials, public_key):
+        return auth.credentials
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid authentication token",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
+async def verify_function_key(
+    auth: Optional[HTTPAuthorizationCredentials] = Security(security),
+) -> Optional[str]:
+    """
+    验证 Function Key（function 接口使用）。
+
+    默认复用当前 public 鉴权语义；若单独配置了 function_*，则优先使用。
+    """
+    function_key = get_function_api_key()
+    function_enabled = is_function_enabled()
+
+    if not function_key:
+        if function_enabled:
+            return None
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Function access is disabled",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    if not auth:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing authentication token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    if _match_public_key(auth.credentials, function_key):
         return auth.credentials
 
     raise HTTPException(
