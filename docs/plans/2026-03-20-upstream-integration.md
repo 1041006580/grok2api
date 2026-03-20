@@ -10,6 +10,15 @@
 
 ---
 
+## Current Local Contract Baseline
+
+- The current local video creation route is `/v1/videos`
+- The current file proxy routes are `/v1/files/image/{filename:path}` and `/v1/files/video/{filename:path}`
+- Configuration access is based on `app.core.config.config` and `get_config()`, not a `settings` object
+- `public_api` and the existing public pages are the runtime baseline; `function` naming is an upstream-alignment layer that must preserve current local behavior
+
+---
+
 ### Task 1: Establish the Verification Harness
 
 **Files:**
@@ -37,7 +46,9 @@ def test_route_surface_contains_core_endpoints():
     paths = {route.path for route in app.routes}
     assert "/v1/chat/completions" in paths
     assert "/v1/images/generations" in paths
-    assert "/v1/files/{file_path:path}" in paths
+    assert "/v1/videos" in paths
+    assert "/v1/files/image/{filename:path}" in paths
+    assert "/v1/files/video/{filename:path}" in paths
     assert "/admin" in paths
 ```
 
@@ -186,10 +197,15 @@ Add regression tests that assert local default values and the presence of newly 
 
 ```python
 def test_local_defaults_and_new_fields_coexist():
-    from app.core.config import settings
-    assert settings.app.stream is True
-    assert hasattr(settings, "proxy")
-    assert hasattr(settings, "token")
+    from app.core.config import Config
+
+    cfg = Config()
+    cfg._ensure_defaults()
+    cfg._config = cfg._defaults.copy()
+
+    assert cfg.get("app.stream") is True
+    assert "proxy" in cfg._defaults
+    assert "token" in cfg._defaults
 ```
 
 **Step 2: Run the tests to verify they fail**
@@ -237,7 +253,7 @@ Add route and handler-contract tests for the local public/admin/API surface.
 def test_video_and_admin_routes_still_exist():
     from main import create_app
     paths = {route.path for route in create_app().routes}
-    assert "/v1/video/generations" in paths
+    assert "/v1/videos" in paths
     assert "/admin" in paths
 ```
 

@@ -4,7 +4,7 @@
 
 当前本地仓库与 `upstream/main` 已经明显分叉：
 
-- 本地相对 `upstream/main` 领先 `46` 个提交
+- 本地相对 `upstream/main` 领先 `48` 个提交
 - 本地相对 `upstream/main` 落后 `66` 个提交
 - 两边共同基线为 `d76b5e4`
 - 在隔离 worktree 中试合并 `upstream/main` 时，产生了 `42` 个冲突
@@ -21,6 +21,30 @@
 - `app/api/v1/public_api -> app/api/v1/function`
 
 这说明问题不是“补几个提交”，而是“本地长期定制 + 上游结构重构”的叠加集成。
+
+## 已统一的本地合同基线
+
+为避免后续测试把错误接口当成基线，执行计划统一以下当前本地真实合同：
+
+- 核心视频创建接口为 `/v1/videos`
+- 文件代理接口为 `/v1/files/image/{filename:path}` 与 `/v1/files/video/{filename:path}`
+- 配置访问以 `app.core.config.config` 单例和 `get_config()` 为基准，不使用不存在的 `settings` 对象
+- `public_api` 与 `public` 页面仍是当前行为基线；引入 `function` 命名时必须通过兼容层保持旧行为可用
+
+## 已观测的冲突分组
+
+基于暂停式试合并得到的首轮冲突分组如下：
+
+- `app/services/reverse/`: `15`
+- `_public/static/admin/`: `6`
+- `app/api/v1/`: `5`
+- `_public/static/common/`: `3`
+- `app/services/token/`: `3`
+- `_public/static/function/`: `2`
+- `app/services/grok/`: `2`
+- 单文件冲突：`.gitignore`、`app/api/pages/`、`app/core/config.py`、`config.defaults.toml`、`docker-compose.yml`、`uv.lock`
+
+以上分组已在 Task 2 中按当前执行基线重新验证，结果保持一致。
 
 ## 用户确认的设计约束
 
