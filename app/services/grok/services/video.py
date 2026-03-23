@@ -648,7 +648,7 @@ class VideoService:
         # Auto-set defaults based on model
         is_super = model == "grok-imagine-1.0-video-super"
         if video_length is None or (is_super and video_length == 6):
-            video_length = 10 if is_super else 6
+            video_length = 15 if is_super else 6
         if resolution is None or (is_super and resolution == "480p"):
             resolution = "720p" if is_super else "480p"
 

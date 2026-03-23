@@ -489,6 +489,50 @@ class VideoAutoExtensionTests(unittest.IsolatedAsyncioTestCase):
             expected_extension_calls=0,
         )
 
+    async def test_video_super_defaults_to_15_seconds(self):
+        from app.services.grok.services.video import VideoService
+
+        class DummyCost:
+            value = "high"
+
+        class DummyTier:
+            value = "super"
+
+        class DummyModelInfo:
+            cost = DummyCost()
+            tier = DummyTier()
+
+        token_info = TokenInfo(token="token-1", quota=10)
+        fake_mgr = SimpleNamespace(
+            get_token_for_video=lambda **kwargs: token_info,
+            get_pool_name_for_token=lambda token: "ssoSuper",
+            consume=AsyncMock(return_value=True),
+            mark_rate_limited=AsyncMock(return_value=True),
+            reload_if_stale=AsyncMock(return_value=None),
+        )
+
+        with patch("app.services.grok.services.video.get_token_manager", new=AsyncMock(return_value=fake_mgr)):
+            with patch("app.services.grok.services.video.ModelService.pool_candidates_for_model", return_value=["ssoSuper"]):
+                with patch("app.services.grok.services.video.ModelService.get", return_value=DummyModelInfo()):
+                    with patch("app.services.grok.services.video.get_config", side_effect=lambda key, default=None: {"retry.max_retry": 3, "app.stream": False, "app.thinking": True}.get(key, default)):
+                        with patch.object(VideoService, "generate", new=AsyncMock(return_value="round-1-stream")) as mock_generate:
+                            with patch("app.services.grok.services.video.VideoCollectProcessor.process", new=AsyncMock(return_value={
+                                "choices": [{"message": {"content": "https://assets.grok.com/generated/final/generated_video.mp4"}}]
+                            })):
+                                await VideoService.completions(
+                                    model="grok-imagine-1.0-video-super",
+                                    messages=[{"role": "user", "content": "make a super clip"}],
+                                    stream=False,
+                                    aspect_ratio="16:9",
+                                    video_length=6,
+                                    resolution="480p",
+                                    preset="custom",
+                                )
+
+        called = mock_generate.await_args
+        self.assertIsNotNone(called)
+        self.assertEqual(called.args[3], 15)
+
     async def test_video_auto_extension_uses_raw_video_metadata_for_post_id(self):
         from app.services.grok.services.video import VideoService
 
