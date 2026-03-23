@@ -77,7 +77,7 @@ def main() -> None:
     if args.tokens:
         _assert_paths(
             {
-                "/v1/admin/token",
+                "/v1/admin/tokens",
                 "/v1/admin/config",
             },
             "tokens",
@@ -89,9 +89,9 @@ def main() -> None:
     if args.static:
         _assert_files(
             [
-                ROOT / "app" / "static" / "admin" / "pages" / "login.html",
-                ROOT / "app" / "static" / "admin" / "pages" / "token.html",
-                ROOT / "app" / "static" / "public" / "pages" / "video.html",
+                ROOT / "_public" / "static" / "admin" / "pages" / "login.html",
+                ROOT / "_public" / "static" / "admin" / "pages" / "token.html",
+                ROOT / "_public" / "static" / "function" / "pages" / "video.html",
             ],
             "static",
         )
