@@ -3,6 +3,7 @@ import unittest
 from unittest.mock import AsyncMock, patch
 import orjson
 from types import SimpleNamespace
+import json
 
 from app.services.reverse.app_chat import AppChatReverse
 from app.services.reverse.utils.headers import build_sso_cookie
@@ -108,6 +109,7 @@ class ProxyConfigTests(unittest.TestCase):
         config_text = (ROOT / "config.defaults.toml").read_text(encoding="utf-8")
         self.assertIn('cf_cookies = ""', config_text)
         self.assertIn('skip_proxy_ssl_verify = false', config_text)
+        self.assertIn('cf_refresh_target_url = ""', config_text)
 
     def test_build_sso_cookie_prefers_cf_cookies_when_present(self):
         def fake_get_config(key, default=None):
@@ -214,6 +216,60 @@ class ResettableSessionTests(unittest.TestCase):
         curl_options = created_kwargs.get("curl_options")
         self.assertIsInstance(curl_options, dict)
         self.assertTrue(curl_options)
+
+
+class CfRefreshTargetUrlTests(unittest.IsolatedAsyncioTestCase):
+    def test_admin_config_script_mentions_cf_refresh_target_url(self):
+        js = (ROOT / "app/static/admin/js/config.js").read_text(encoding="utf-8")
+        self.assertIn('"cf_refresh_target_url"', js)
+
+    def test_cf_refresh_target_url_defaults_to_grok(self):
+        from app.services.cf_refresh.config import get_target_url
+
+        with patch("app.services.cf_refresh.config._get", side_effect=lambda key, default=None: ""):
+            self.assertEqual(get_target_url(), "https://grok.com")
+
+    async def test_solver_uses_explicit_cf_refresh_target_url(self):
+        from app.services.cf_refresh.solver import solve_cf_challenge
+
+        captured_payload = {}
+
+        class DummyResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return json.dumps(
+                    {
+                        "status": "ok",
+                        "solution": {
+                            "cookies": [{"name": "cf_clearance", "value": "abc"}],
+                            "userAgent": "Mozilla/5.0 Chrome/142.0.0.0",
+                        },
+                    }
+                ).encode("utf-8")
+
+        def fake_urlopen(req, timeout=None):
+            captured_payload.update(json.loads(req.data.decode("utf-8")))
+            return DummyResponse()
+
+        async def passthrough(func):
+            return func()
+
+        with patch("app.services.cf_refresh.solver.get_flaresolverr_url", return_value="http://flaresolverr:8191"):
+            with patch("app.services.cf_refresh.solver.get_timeout", return_value=60):
+                with patch("app.services.cf_refresh.solver.get_proxy", return_value=""):
+                    with patch("app.services.cf_refresh.solver.GROK_URL", "https://grok.com"):
+                        with patch("app.services.cf_refresh.solver.get_target_url", return_value="https://proxy.example.com/grok"):
+                            with patch("app.services.cf_refresh.solver.urllib_request.urlopen", side_effect=fake_urlopen):
+                                with patch("app.services.cf_refresh.solver.asyncio.to_thread", side_effect=passthrough):
+                                    result = await solve_cf_challenge()
+
+        self.assertEqual(captured_payload["url"], "https://proxy.example.com/grok")
+        self.assertEqual(result["cf_clearance"], "abc")
 
 
 class VideosApiTests(unittest.IsolatedAsyncioTestCase):

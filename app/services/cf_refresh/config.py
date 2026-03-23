@@ -13,6 +13,10 @@ def get_flaresolverr_url() -> str:
     return _get("flaresolverr_url", "") or ""
 
 
+def get_target_url() -> str:
+    return _get("cf_refresh_target_url", "") or GROK_URL
+
+
 def _get_int(key: str, default: int, min_value: int) -> int:
     raw = _get(key, default)
     try:

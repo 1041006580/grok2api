@@ -66,6 +66,7 @@ const LOCALE_MAP = {
     "reverse_asset_url": { title: "反代资源地址", desc: "替换 assets.grok.com 域名的反代地址（如 https://my-assets-proxy.example.com）。" },
     "enabled": { title: "启用 CF 自动刷新", desc: "启用后将通过 FlareSolverr 自动获取 cf_clearance。" },
     "flaresolverr_url": { title: "FlareSolverr 地址", desc: "FlareSolverr 服务的 HTTP 地址（如 http://flaresolverr:8191）。" },
+    "cf_refresh_target_url": { title: "CF 刷新目标地址", desc: "仅用于 FlareSolverr 刷新 cf_clearance 的目标 URL。留空时默认使用 https://grok.com。" },
     "refresh_interval": { title: "刷新间隔（秒）", desc: "自动刷新 cf_clearance 的时间间隔，建议不低于 300 秒。" },
     "timeout": { title: "挑战超时（秒）", desc: "等待 FlareSolverr 解决 CF 挑战的最大时间。" },
     "cf_clearance": { title: "CF Clearance", desc: "Cloudflare Clearance Cookie，用于绕过反爬虫验证。启用自动刷新时由系统自动管理。" },
@@ -191,7 +192,7 @@ const SECTION_DESCRIPTIONS = {
 
 // CF 自动刷新联动禁用字段（全部在 proxy section 内）
 const CF_MANAGED_PROXY_KEYS = ['cf_cookies', 'cf_clearance', 'browser', 'user_agent'];
-const CF_REFRESH_SUB_KEYS = ['flaresolverr_url', 'refresh_interval', 'timeout'];
+const CF_REFRESH_SUB_KEYS = ['flaresolverr_url', 'cf_refresh_target_url', 'refresh_interval', 'timeout'];
 
 const SECTION_ORDER = new Map(Object.keys(LOCALE_MAP).map((key, index) => [key, index]));
 

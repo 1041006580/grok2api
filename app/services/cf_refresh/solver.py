@@ -13,7 +13,7 @@ from urllib.error import HTTPError, URLError
 
 from loguru import logger
 
-from .config import GROK_URL, get_timeout, get_proxy, get_flaresolverr_url
+from .config import GROK_URL, get_timeout, get_proxy, get_flaresolverr_url, get_target_url
 
 
 def _extract_all_cookies(cookies: list[dict]) -> str:
@@ -52,6 +52,7 @@ async def solve_cf_challenge() -> Optional[Dict[str, str]]:
     flaresolverr_url = get_flaresolverr_url()
     cf_timeout = get_timeout()
     proxy = get_proxy()
+    target_url = get_target_url()
 
     if not flaresolverr_url:
         logger.error("FlareSolverr 地址未配置，无法刷新 cf_clearance")
@@ -61,7 +62,7 @@ async def solve_cf_challenge() -> Optional[Dict[str, str]]:
 
     payload = {
         "cmd": "request.get",
-        "url": GROK_URL,
+        "url": target_url,
         "maxTimeout": cf_timeout * 1000,
     }
 
@@ -71,7 +72,7 @@ async def solve_cf_challenge() -> Optional[Dict[str, str]]:
     body = json.dumps(payload).encode("utf-8")
     headers = {"Content-Type": "application/json"}
 
-    logger.info(f"正在通过 FlareSolverr 访问 {GROK_URL} ...")
+    logger.info(f"正在通过 FlareSolverr 访问 {target_url} ...")
     logger.debug(f"FlareSolverr 地址: {url}")
 
     req = urllib_request.Request(url, data=body, method="POST", headers=headers)
