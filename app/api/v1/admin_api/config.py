@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from app.core.auth import verify_app_key
 from app.core.config import config
 from app.core.storage import get_storage as resolve_storage, LocalStorage, RedisStorage, SQLStorage
+from app.services.cf_refresh.scheduler import notify_config_changed, request_manual_refresh
 
 router = APIRouter()
 
@@ -91,7 +92,22 @@ async def update_config(data: dict):
     """更新配置"""
     try:
         await config.update(_sanitize_proxy_config_payload(data))
+        await notify_config_changed()
         return {"status": "success", "message": "配置已更新"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/config/cf-refresh/trigger", dependencies=[Depends(verify_app_key)])
+async def trigger_cf_refresh():
+    """手动触发一次 CF 自动刷新。"""
+    try:
+        success = await request_manual_refresh()
+        if success:
+            return {"status": "success", "message": "刷新完成"}
+        raise HTTPException(status_code=400, detail="CF refresh failed")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

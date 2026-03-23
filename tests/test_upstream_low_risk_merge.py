@@ -272,6 +272,36 @@ class CfRefreshTargetUrlTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["cf_clearance"], "abc")
 
 
+class CfRefreshControlsTests(unittest.IsolatedAsyncioTestCase):
+    async def test_update_config_notifies_cf_refresh_scheduler(self):
+        from app.api.v1.admin_api.config import update_config
+
+        with patch("app.api.v1.admin_api.config.config.update", new=AsyncMock()) as mock_update:
+            with patch("app.api.v1.admin_api.config.notify_config_changed", new=AsyncMock()) as mock_notify:
+                result = await update_config({"proxy": {"enabled": True}})
+
+        self.assertEqual(result["status"], "success")
+        mock_update.assert_awaited_once()
+        mock_notify.assert_awaited_once()
+
+    async def test_manual_cf_refresh_endpoint_calls_scheduler(self):
+        from app.api.v1.admin_api.config import trigger_cf_refresh
+
+        with patch("app.api.v1.admin_api.config.request_manual_refresh", new=AsyncMock(return_value=True)) as mock_refresh:
+            result = await trigger_cf_refresh()
+
+        self.assertEqual(result["status"], "success")
+        mock_refresh.assert_awaited_once()
+
+    def test_config_page_contains_manual_cf_refresh_button(self):
+        html = (ROOT / "app/static/admin/pages/config.html").read_text(encoding="utf-8")
+        self.assertIn('id="cf-refresh-btn"', html)
+
+    def test_config_script_contains_manual_cf_refresh_handler(self):
+        js = (ROOT / "app/static/admin/js/config.js").read_text(encoding="utf-8")
+        self.assertIn("async function triggerCfRefresh()", js)
+
+
 class VideosApiTests(unittest.IsolatedAsyncioTestCase):
     def test_app_registers_videos_route(self):
         from main import app

@@ -8,6 +8,15 @@ from .config import get_refresh_interval, get_flaresolverr_url, is_enabled
 from .solver import solve_cf_challenge
 
 _task: asyncio.Task | None = None
+_wakeup_event: asyncio.Event | None = None
+_refresh_lock = asyncio.Lock()
+
+
+def _ensure_wakeup_event() -> asyncio.Event:
+    global _wakeup_event
+    if _wakeup_event is None:
+        _wakeup_event = asyncio.Event()
+    return _wakeup_event
 
 
 async def _update_app_config(
@@ -64,20 +73,44 @@ async def refresh_once() -> bool:
     return success
 
 
+async def request_manual_refresh() -> bool:
+    """手动立即执行一次刷新。"""
+    if not get_flaresolverr_url():
+        logger.error("手动刷新失败：FlareSolverr 地址未配置")
+        return False
+    async with _refresh_lock:
+        return await refresh_once()
+
+
+async def notify_config_changed() -> None:
+    """通知调度器配置已变更，立即重新检查状态。"""
+    try:
+        _ensure_wakeup_event().set()
+    except Exception as e:
+        logger.debug(f"cf_refresh scheduler wakeup skipped: {e}")
+
+
 async def _scheduler_loop():
     """后台调度循环"""
     logger.info(
         f"cf_refresh scheduler started (FlareSolverr: {get_flaresolverr_url()}, interval: {get_refresh_interval()}s)"
     )
+    wakeup_event = _ensure_wakeup_event()
 
     # 周期性刷新（每次循环重新读取配置，支持面板修改实时生效）
     while True:
-        if is_enabled():
-            await refresh_once()
-        else:
-            logger.debug("cf_refresh disabled, skip refresh")
+        async with _refresh_lock:
+            if is_enabled():
+                await refresh_once()
+            else:
+                logger.debug("cf_refresh disabled, skip refresh")
         interval = get_refresh_interval()
-        await asyncio.sleep(interval)
+        try:
+            await asyncio.wait_for(wakeup_event.wait(), timeout=interval)
+        except asyncio.TimeoutError:
+            pass
+        finally:
+            wakeup_event.clear()
 
 
 def start():
@@ -85,6 +118,7 @@ def start():
     global _task
     if _task is not None:
         return
+    _ensure_wakeup_event()
     _task = asyncio.get_running_loop().create_task(_scheduler_loop())
     logger.info("cf_refresh background task started")
 
@@ -96,3 +130,6 @@ def stop():
         _task.cancel()
         _task = None
         logger.info("cf_refresh background task stopped")
+
+
+__all__ = ["start", "stop", "refresh_once", "request_manual_refresh", "notify_config_changed"]

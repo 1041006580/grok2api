@@ -627,6 +627,34 @@ async function saveConfig() {
   }
 }
 
+async function triggerCfRefresh() {
+  const btn = byId('cf-refresh-btn');
+  if (!btn) return;
+  const originalText = btn.innerText;
+  btn.disabled = true;
+  btn.innerText = '刷新中...';
+  try {
+    const res = await fetch('/v1/admin/config/cf-refresh/trigger', {
+      method: 'POST',
+      headers: buildAuthHeaders(apiKey)
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.detail || data.message || `HTTP ${res.status}`);
+    }
+    showToast(data.message || '刷新完成', 'success');
+    btn.innerText = '完成';
+    setTimeout(() => {
+      btn.innerText = originalText;
+    }, 1500);
+  } catch (e) {
+    showToast(`刷新失败: ${e.message}`, 'error');
+    btn.innerText = originalText;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 async function copyToClipboard(text, btn) {
   if (!text) return;
   try {
