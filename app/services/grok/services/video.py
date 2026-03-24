@@ -422,6 +422,8 @@ class VideoService:
         video_length: int = 6,
         resolution_name: str = "480p",
         preset: str = "normal",
+        grok_model: str = "grok-3",
+        model_mode: str | None = None,
     ) -> AsyncGenerator[bytes, None]:
         """Generate video."""
         logger.info(
@@ -454,7 +456,8 @@ class VideoService:
                         session,
                         token,
                         message=message,
-                        model="grok-3",
+                        model=grok_model,
+                        mode=model_mode,
                         tool_overrides={"videoGen": True},
                         model_config_override=model_config_override,
                     )
@@ -483,6 +486,8 @@ class VideoService:
         resolution: str = "480p",
         preset: str = "normal",
         file_attachments: Optional[list] = None,
+        grok_model: str = "grok-3",
+        model_mode: str | None = None,
     ) -> AsyncGenerator[bytes, None]:
         """Generate video from image."""
         logger.info(
@@ -540,7 +545,8 @@ class VideoService:
                         session,
                         token,
                         message=message,
-                        model="grok-3",
+                        model=grok_model,
+                        mode=model_mode,
                         file_attachments=effective_file_attachments or None,
                         tool_overrides={"videoGen": True},
                         model_config_override=model_config_override,
@@ -571,6 +577,8 @@ class VideoService:
         video_length: int = 6,
         resolution_name: str = "480p",
         preset: str = "normal",
+        grok_model: str = "grok-3",
+        model_mode: str | None = None,
     ) -> AsyncGenerator[bytes, None]:
         """Extend a previously generated video."""
         logger.info(
@@ -612,7 +620,8 @@ class VideoService:
                         session,
                         token,
                         message=message,
-                        model="grok-3",
+                        model=grok_model,
+                        mode=model_mode,
                         tool_overrides={"videoGen": True},
                         model_config_override=model_config_override,
                     )
@@ -647,6 +656,9 @@ class VideoService:
         """Video generation entrypoint."""
         # Auto-set defaults based on model
         is_super = model == "grok-imagine-1.0-video-super"
+        request_model_info = ModelService.get(model)
+        grok_model = getattr(request_model_info, "grok_model", "grok-3")
+        model_mode = getattr(request_model_info, "model_mode", None)
         if video_length is None or (is_super and video_length == 6):
             video_length = 15 if is_super else 6
         if resolution is None or (is_super and resolution == "480p"):
@@ -728,6 +740,8 @@ class VideoService:
                             resolution,
                             preset,
                             file_attachments=origin_file_attachments,
+                            grok_model=grok_model,
+                            model_mode=model_mode,
                         )
                     else:
                         first_response = await service.generate(
@@ -737,6 +751,8 @@ class VideoService:
                             round_length,
                             resolution,
                             preset,
+                            grok_model=grok_model,
+                            model_mode=model_mode,
                         )
 
                     first_result = await VideoCollectProcessor(
@@ -775,6 +791,8 @@ class VideoService:
                             video_length=round_length,
                             resolution_name=resolution,
                             preset=preset,
+                            grok_model=grok_model,
+                            model_mode=model_mode,
                         )
                         current_result = await VideoCollectProcessor(
                             model, token, upscale_on_finish=is_last and should_upscale
@@ -811,6 +829,8 @@ class VideoService:
                             resolution,
                             preset,
                             file_attachments=origin_file_attachments,
+                            grok_model=grok_model,
+                            model_mode=model_mode,
                         )
                     else:
                         response = await service.generate(
@@ -820,6 +840,8 @@ class VideoService:
                             video_length,
                             resolution,
                             preset,
+                            grok_model=grok_model,
+                            model_mode=model_mode,
                         )
 
                 # Process response.
@@ -842,7 +864,7 @@ class VideoService:
                     result = dict(result)
                     result.pop("_video_meta", None)
                 try:
-                    model_info = ModelService.get(model)
+                    model_info = request_model_info or ModelService.get(model)
                     effort = (
                         EffortType.HIGH
                         if (model_info and model_info.cost.value == "high")
