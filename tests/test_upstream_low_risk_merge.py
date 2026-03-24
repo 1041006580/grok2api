@@ -51,6 +51,55 @@ class CustomInstructionTests(unittest.TestCase):
 
         self.assertNotIn("customPersonality", payload)
 
+    def test_app_chat_video_payload_matches_captured_browser_shape(self):
+        def fake_get_config(key, default=None):
+            values = {
+                "app.temporary": True,
+                "app.custom_instruction": "Should not be injected into video payload",
+            }
+            return values.get(key, default)
+
+        with patch("app.services.reverse.app_chat.get_config", side_effect=fake_get_config):
+            payload = AppChatReverse.build_video_payload(
+                message="A golden retriever running on a beach at sunset --mode=custom",
+                model="grok-3",
+                tool_overrides={"videoGen": True},
+                model_config_override={
+                    "modelMap": {
+                        "videoGenModelConfig": {
+                            "parentPostId": "pid-1",
+                            "aspectRatio": "16:9",
+                            "videoLength": 6,
+                            "resolutionName": "480p",
+                        }
+                    }
+                },
+            )
+
+        self.assertEqual(
+            payload,
+            {
+                "temporary": True,
+                "modelName": "grok-3",
+                "message": "A golden retriever running on a beach at sunset --mode=custom",
+                "toolOverrides": {"videoGen": True},
+                "enableSideBySide": True,
+                "responseMetadata": {
+                    "experiments": [],
+                    "modelConfigOverride": {
+                        "modelMap": {
+                            "videoGenModelConfig": {
+                                "parentPostId": "pid-1",
+                                "aspectRatio": "16:9",
+                                "videoLength": 6,
+                                "resolutionName": "480p",
+                            }
+                        }
+                    },
+                },
+            },
+        )
+
 
 class SanitizationTests(unittest.TestCase):
     def test_token_info_normalizes_copied_token_text(self):
@@ -569,7 +618,7 @@ class VideoAutoExtensionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(called)
         self.assertEqual(called.args[3], 15)
 
-    async def test_video_super_passes_model_mode_for_initial_and_extension_requests(self):
+    async def test_video_super_uses_browser_like_payload_for_initial_and_extension_requests(self):
         from app.services.grok.services.video import VideoService
 
         class DummyCost:
@@ -607,7 +656,14 @@ class VideoAutoExtensionTests(unittest.IsolatedAsyncioTestCase):
         ]
 
         async def fake_request(session, token, message, model, mode=None, **kwargs):
-            captured_requests.append({"model": model, "mode": mode})
+            captured_requests.append(
+                {
+                    "model": model,
+                    "mode": mode,
+                    "payload_override": kwargs.get("payload_override"),
+                    "referer_override": kwargs.get("referer_override"),
+                }
+            )
 
             async def _stream():
                 yield "data: stub"
@@ -647,8 +703,65 @@ class VideoAutoExtensionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             captured_requests,
             [
-                {"model": "grok-3", "mode": "MODEL_MODE_FAST"},
-                {"model": "grok-3", "mode": "MODEL_MODE_FAST"},
+                {
+                    "model": "grok-3",
+                    "mode": None,
+                    "referer_override": "https://grok.com/imagine",
+                    "payload_override": {
+                        "temporary": True,
+                        "modelName": "grok-3",
+                        "message": "make an 18 second clip --mode=custom",
+                        "toolOverrides": {"videoGen": True},
+                        "enableSideBySide": True,
+                        "responseMetadata": {
+                            "experiments": [],
+                            "modelConfigOverride": {
+                                "modelMap": {
+                                    "videoGenModelConfig": {
+                                        "aspectRatio": "16:9",
+                                        "parentPostId": "root-post",
+                                        "resolutionName": "720p",
+                                        "videoLength": 15,
+                                    }
+                                }
+                            },
+                        },
+                    },
+                },
+                {
+                    "model": "grok-3",
+                    "mode": None,
+                    "referer_override": "https://grok.com/imagine",
+                    "payload_override": {
+                        "temporary": True,
+                        "modelName": "grok-3",
+                        "message": "make an 18 second clip --mode=custom",
+                        "toolOverrides": {"videoGen": True},
+                        "enableSideBySide": True,
+                        "responseMetadata": {
+                            "experiments": [],
+                            "modelConfigOverride": {
+                                "modelMap": {
+                                    "videoGenModelConfig": {
+                                        "isVideoExtension": True,
+                                        "videoExtensionStartTime": 3.0,
+                                        "extendPostId": "round-one-post",
+                                        "stitchWithExtendPostId": True,
+                                        "originalPrompt": "make an 18 second clip",
+                                        "originalPostId": "round-one-post",
+                                        "originalRefType": "ORIGINAL_REF_TYPE_VIDEO_EXTENSION",
+                                        "mode": "custom",
+                                        "aspectRatio": "16:9",
+                                        "videoLength": 15,
+                                        "resolutionName": "720p",
+                                        "parentPostId": "round-one-post",
+                                        "isVideoEdit": False,
+                                    }
+                                }
+                            },
+                        },
+                    },
+                },
             ],
         )
 

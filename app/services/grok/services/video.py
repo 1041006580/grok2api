@@ -447,6 +447,12 @@ class VideoService:
                 }
             }
         }
+        payload_override = AppChatReverse.build_video_payload(
+            message=message,
+            model=grok_model,
+            tool_overrides={"videoGen": True},
+            model_config_override=model_config_override,
+        )
 
         async def _stream():
             session = _new_session()
@@ -457,9 +463,11 @@ class VideoService:
                         token,
                         message=message,
                         model=grok_model,
-                        mode=model_mode,
+                        mode=None,
                         tool_overrides={"videoGen": True},
                         model_config_override=model_config_override,
+                        payload_override=payload_override,
+                        referer_override="https://grok.com/imagine",
                     )
                     logger.info(f"Video generation started: post_id={post_id}")
                     async for line in stream_response:
@@ -536,6 +544,13 @@ class VideoService:
                 }
             }
         }
+        payload_override = AppChatReverse.build_video_payload(
+            message=message,
+            model=grok_model,
+            file_attachments=effective_file_attachments or None,
+            tool_overrides={"videoGen": True},
+            model_config_override=model_config_override,
+        )
 
         async def _stream():
             session = _new_session()
@@ -546,10 +561,12 @@ class VideoService:
                         token,
                         message=message,
                         model=grok_model,
-                        mode=model_mode,
+                        mode=None,
                         file_attachments=effective_file_attachments or None,
                         tool_overrides={"videoGen": True},
                         model_config_override=model_config_override,
+                        payload_override=payload_override,
+                        referer_override="https://grok.com/imagine",
                     )
                     logger.info(f"Video generation started: post_id={post_id}")
                     async for line in stream_response:
@@ -611,6 +628,12 @@ class VideoService:
                 }
             }
         }
+        payload_override = AppChatReverse.build_video_payload(
+            message=message,
+            model=grok_model,
+            tool_overrides={"videoGen": True},
+            model_config_override=model_config_override,
+        )
 
         async def _stream():
             session = _new_session()
@@ -621,9 +644,11 @@ class VideoService:
                         token,
                         message=message,
                         model=grok_model,
-                        mode=model_mode,
+                        mode=None,
                         tool_overrides={"videoGen": True},
                         model_config_override=model_config_override,
+                        payload_override=payload_override,
+                        referer_override="https://grok.com/imagine",
                     )
                     logger.info(
                         f"Video extension started: parent_post_id={parent_post_id}, start_time={start_time}"
