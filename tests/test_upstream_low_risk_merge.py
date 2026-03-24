@@ -372,6 +372,42 @@ class VideosApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(body["url"], "https://example.com/generated.mp4")
 
 
+class ChatVideoValidationTests(unittest.TestCase):
+    def test_chat_video_non_stream_accepts_18_seconds(self):
+        from app.api.v1.chat import ChatCompletionRequest, validate_request
+
+        request = ChatCompletionRequest(
+            model="grok-imagine-1.0-video",
+            messages=[{"role": "user", "content": "make a longer clip"}],
+            stream=False,
+            video_config={"video_length": 18},
+        )
+
+        validate_request(request)
+        self.assertEqual(request.video_config.video_length, 18)
+
+    def test_chat_video_stream_rejects_18_seconds(self):
+        from app.api.v1.chat import ChatCompletionRequest, validate_request
+
+        request = ChatCompletionRequest(
+            model="grok-imagine-1.0-video",
+            messages=[{"role": "user", "content": "make a longer clip"}],
+            stream=True,
+            video_config={"video_length": 18},
+        )
+
+        with self.assertRaises(Exception) as ctx:
+            validate_request(request)
+
+        exc = ctx.exception
+        self.assertEqual(getattr(exc, "status_code", None), 400)
+        self.assertEqual(getattr(exc, "code", None), "invalid_video_length")
+        self.assertEqual(
+            getattr(exc, "message", ""),
+            "Streaming video_length must be 6, 10, or 15 seconds",
+        )
+
+
 class VideoAutoExtensionTests(unittest.IsolatedAsyncioTestCase):
     async def _run_video_completion_case(
         self,
