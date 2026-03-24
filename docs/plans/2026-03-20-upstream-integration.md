@@ -598,3 +598,46 @@ Run these before claiming the merge is complete:
 7. `uv run main.py`
 
 If any command fails, stop and fix that layer before proceeding.
+
+## Actual Verification Record
+
+The following commands were actually used during execution of this integration branch:
+
+1. `uv sync --dev`
+2. `uv run python -m pytest tests/merge/test_config_contract.py tests/merge/test_route_surface.py -q`
+3. `uv run python -m pytest tests/merge/test_docs_exist.py -q`
+4. `git fetch upstream`
+5. `git merge --no-commit --no-ff upstream/main`
+6. `git merge --abort`
+7. `uv run python -m pytest tests/merge/test_module_aliases.py tests/merge/test_route_surface.py -q`
+8. `uv run python -m pytest tests/merge/test_config_contract.py tests/merge/test_route_surface.py tests/merge/test_video_routes.py -q`
+9. `uv run python -m pytest tests/merge/test_reverse_contract.py -q`
+10. `uv run python -m pytest tests/merge/test_video_contract.py tests/merge/test_video_routes.py -q`
+11. `.venv\\Scripts\\python -m pytest tests/merge/test_token_contract.py -q`
+12. `uv run python -m pytest tests/merge/test_static_surface.py -q`
+13. `.venv\\Scripts\\python -m pytest tests/merge/test_repo_metadata.py -q`
+14. `.venv\\Scripts\\python -m pytest tests/merge/test_final_checklist.py -q`
+15. `uv run python -m pytest tests/merge -q`
+16. `uv run python -m compileall app main.py`
+17. `uv run python scripts/merge_smoke.py --routes-only`
+18. `uv run python scripts/merge_smoke.py --chat --files`
+19. `uv run python scripts/merge_smoke.py --video`
+20. `uv run python scripts/merge_smoke.py --tokens`
+21. `uv run python scripts/merge_smoke.py --admin --static`
+
+Notes:
+
+- Some `uv run` invocations were blocked by execution policy and were safely re-run via `.venv\\Scripts\\python -m pytest`.
+- The final full regression suite passed with `19 passed, 1 warning`.
+- The remaining warning is the existing Pydantic v2 deprecation in `app/api/v1/response.py`.
+
+## Remaining Compatibility Shims
+
+These compatibility layers remain intentionally in place after this integration pass:
+
+- `app/api/v1/admin/*` currently wraps the legacy `app/api/v1/admin_api/*` implementation
+- `app/api/v1/function/imagine.py` and `app/api/v1/function/voice.py` currently wrap `public_api` modules
+- `main.py` currently exposes both `/v1/public/*` and `/v1/function/*`
+- `app/api/pages/function.py` and `app/api/pages/admin.py` prefer `_public/static` but still fall back to `app/static`
+
+These are acceptable for the current integration goal because they preserve local behavior while exposing the upstream structure. A later cleanup pass can remove the fallback paths once the old imports and routes are retired.
