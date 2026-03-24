@@ -139,6 +139,25 @@ def _video_meta_from_result(result: Dict[str, Any]) -> Dict[str, str]:
     return extracted
 
 
+def _video_extra_cookies_from_token_info(token_info: Any) -> str:
+    if not token_info:
+        return ""
+    note = getattr(token_info, "note", "") or ""
+    if not isinstance(note, str):
+        note = str(note)
+    note = note.strip()
+    if not note:
+        return ""
+    lowered = note.lower()
+    if lowered.startswith("cookie:"):
+        return note.split(":", 1)[1].strip()
+    if lowered.startswith("cookies:"):
+        return note.split(":", 1)[1].strip()
+    if note.startswith("x-userid="):
+        return note
+    return ""
+
+
 class VideoService:
     """Video generation service."""
 
@@ -151,6 +170,8 @@ class VideoService:
         prompt: str,
         media_type: str = "MEDIA_POST_TYPE_VIDEO",
         media_url: str = None,
+        extra_cookies: str | None = None,
+        referer_override: str | None = None,
     ) -> str:
         """Create media post and return post ID."""
         try:
@@ -168,6 +189,8 @@ class VideoService:
                         media_type,
                         media_value,
                         prompt=prompt_value,
+                        extra_cookies=extra_cookies,
+                        referer_override=referer_override,
                     )
 
             try:
@@ -195,10 +218,21 @@ class VideoService:
             logger.error(f"Create post error: {e}")
             raise UpstreamException(f"Create post error: {str(e)}")
 
-    async def create_image_post(self, token: str, image_url: str) -> str:
+    async def create_image_post(
+        self,
+        token: str,
+        image_url: str,
+        extra_cookies: str | None = None,
+        referer_override: str | None = None,
+    ) -> str:
         """Create image post and return post ID."""
         return await self.create_post(
-            token, prompt="", media_type="MEDIA_POST_TYPE_IMAGE", media_url=image_url
+            token,
+            prompt="",
+            media_type="MEDIA_POST_TYPE_IMAGE",
+            media_url=image_url,
+            extra_cookies=extra_cookies,
+            referer_override=referer_override,
         )
 
     @staticmethod
@@ -424,12 +458,18 @@ class VideoService:
         preset: str = "normal",
         grok_model: str = "grok-3",
         model_mode: str | None = None,
+        extra_cookies: str | None = None,
     ) -> AsyncGenerator[bytes, None]:
         """Generate video."""
         logger.info(
             f"Video generation: prompt='{prompt[:50]}...', ratio={aspect_ratio}, length={video_length}s, preset={preset}"
         )
-        post_id = await self.create_post(token, prompt)
+        post_id = await self.create_post(
+            token,
+            prompt,
+            extra_cookies=extra_cookies,
+            referer_override="https://grok.com/imagine",
+        )
         mode_map = {
             "fun": "--mode=extremely-crazy",
             "normal": "--mode=normal",
@@ -468,6 +508,7 @@ class VideoService:
                         model_config_override=model_config_override,
                         payload_override=payload_override,
                         referer_override="https://grok.com/imagine",
+                        extra_cookies=extra_cookies,
                     )
                     logger.info(f"Video generation started: post_id={post_id}")
                     async for line in stream_response:
@@ -496,6 +537,7 @@ class VideoService:
         file_attachments: Optional[list] = None,
         grok_model: str = "grok-3",
         model_mode: str | None = None,
+        extra_cookies: str | None = None,
     ) -> AsyncGenerator[bytes, None]:
         """Generate video from image."""
         logger.info(
@@ -505,7 +547,12 @@ class VideoService:
         effective_file_attachments = list(file_attachments or [])
 
         try:
-            post_id = await self.create_image_post(token, effective_image_url)
+            post_id = await self.create_image_post(
+                token,
+                effective_image_url,
+                extra_cookies=extra_cookies,
+                referer_override="https://grok.com/imagine",
+            )
         except UpstreamException as e:
             status = (e.details or {}).get("status") if getattr(e, "details", None) else None
             if status != 400:
@@ -526,7 +573,12 @@ class VideoService:
                 )
             finally:
                 await upload_service.close()
-            post_id = await self.create_image_post(token, effective_image_url)
+            post_id = await self.create_image_post(
+                token,
+                effective_image_url,
+                extra_cookies=extra_cookies,
+                referer_override="https://grok.com/imagine",
+            )
         mode_map = {
             "fun": "--mode=extremely-crazy",
             "normal": "--mode=normal",
@@ -567,6 +619,7 @@ class VideoService:
                         model_config_override=model_config_override,
                         payload_override=payload_override,
                         referer_override="https://grok.com/imagine",
+                        extra_cookies=extra_cookies,
                     )
                     logger.info(f"Video generation started: post_id={post_id}")
                     async for line in stream_response:
@@ -596,6 +649,7 @@ class VideoService:
         preset: str = "normal",
         grok_model: str = "grok-3",
         model_mode: str | None = None,
+        extra_cookies: str | None = None,
     ) -> AsyncGenerator[bytes, None]:
         """Extend a previously generated video."""
         logger.info(
@@ -649,6 +703,7 @@ class VideoService:
                         model_config_override=model_config_override,
                         payload_override=payload_override,
                         referer_override="https://grok.com/imagine",
+                        extra_cookies=extra_cookies,
                     )
                     logger.info(
                         f"Video extension started: parent_post_id={parent_post_id}, start_time={start_time}"
@@ -731,6 +786,7 @@ class VideoService:
             token = token_info.token
             if token.startswith("sso="):
                 token = token[4:]
+            extra_cookies = _video_extra_cookies_from_token_info(token_info)
             pool_name = token_mgr.get_pool_name_for_token(token) or BASIC_POOL_NAME
             should_upscale = resolution == "720p" and pool_name == BASIC_POOL_NAME
             round_length = _round_length_for_video(pool_name, target_length)
@@ -767,6 +823,7 @@ class VideoService:
                             file_attachments=origin_file_attachments,
                             grok_model=grok_model,
                             model_mode=model_mode,
+                            extra_cookies=extra_cookies,
                         )
                     else:
                         first_response = await service.generate(
@@ -778,6 +835,7 @@ class VideoService:
                             preset,
                             grok_model=grok_model,
                             model_mode=model_mode,
+                            extra_cookies=extra_cookies,
                         )
 
                     first_result = await VideoCollectProcessor(
@@ -818,6 +876,7 @@ class VideoService:
                             preset=preset,
                             grok_model=grok_model,
                             model_mode=model_mode,
+                            extra_cookies=extra_cookies,
                         )
                         current_result = await VideoCollectProcessor(
                             model, token, upscale_on_finish=is_last and should_upscale
@@ -856,6 +915,7 @@ class VideoService:
                             file_attachments=origin_file_attachments,
                             grok_model=grok_model,
                             model_mode=model_mode,
+                            extra_cookies=extra_cookies,
                         )
                     else:
                         response = await service.generate(
@@ -867,6 +927,7 @@ class VideoService:
                             preset,
                             grok_model=grok_model,
                             model_mode=model_mode,
+                            extra_cookies=extra_cookies,
                         )
 
                 # Process response.

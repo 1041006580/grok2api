@@ -123,6 +123,20 @@ class SanitizationTests(unittest.TestCase):
         self.assertEqual(sanitized["proxy"]["cf_cookies"], "cf_clearance=abc; foo=bar")
         self.assertEqual(sanitized["proxy"]["cf_clearance"], "abc")
 
+    def test_build_sso_cookie_appends_explicit_extra_cookies(self):
+        def fake_get_config(key, default=None):
+            values = {
+                "proxy.cf_cookies": "",
+                "proxy.cf_clearance": "",
+                "proxy.enabled": False,
+            }
+            return values.get(key, default)
+
+        with patch("app.services.reverse.utils.headers.get_config", side_effect=fake_get_config):
+            cookie = build_sso_cookie("sso=abc123", extra_cookies="x-userid=user-1")
+
+        self.assertEqual(cookie, "sso=abc123; sso-rw=abc123; x-userid=user-1")
+
 
 class StaticAssetTests(unittest.TestCase):
     def test_token_admin_page_contains_batch_enable_disable_buttons(self):
@@ -821,6 +835,131 @@ class VideoAutoExtensionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             result["choices"][0]["message"]["content"],
             "final rendered html",
+        )
+
+    async def test_video_request_uses_token_note_as_extra_cookie_context(self):
+        from app.services.grok.services.video import VideoService
+
+        class DummyCost:
+            value = "high"
+
+        class DummyTier:
+            value = "basic"
+
+        class DummyModelInfo:
+            grok_model = "grok-3"
+            model_mode = "MODEL_MODE_FAST"
+            cost = DummyCost()
+            tier = DummyTier()
+
+        token_info = TokenInfo(token="token-1", quota=10, note="x-userid=user-1")
+        fake_mgr = SimpleNamespace(
+            get_token_for_video=lambda **kwargs: token_info,
+            get_pool_name_for_token=lambda token: "ssoBasic",
+            consume=AsyncMock(return_value=True),
+            mark_rate_limited=AsyncMock(return_value=True),
+            reload_if_stale=AsyncMock(return_value=None),
+        )
+        media_post_calls = []
+        app_chat_calls = []
+
+        class DummyMediaResponse:
+            def json(self):
+                return {"post": {"id": "root-post"}}
+
+        async def fake_media_post(
+            session,
+            token,
+            mediaType,
+            mediaUrl,
+            prompt="",
+            extra_cookies=None,
+            referer_override=None,
+        ):
+            media_post_calls.append(
+                {
+                    "token": token,
+                    "mediaType": mediaType,
+                    "mediaUrl": mediaUrl,
+                    "prompt": prompt,
+                    "extra_cookies": extra_cookies,
+                    "referer_override": referer_override,
+                }
+            )
+            return DummyMediaResponse()
+
+        async def fake_app_chat(session, token, message, model, mode=None, **kwargs):
+            app_chat_calls.append(
+                {
+                    "token": token,
+                    "message": message,
+                    "model": model,
+                    "mode": mode,
+                    "extra_cookies": kwargs.get("extra_cookies"),
+                    "referer_override": kwargs.get("referer_override"),
+                }
+            )
+
+            async def _stream():
+                yield "data: stub"
+
+            return _stream()
+
+        async def fake_collect(stream):
+            async for _ in stream:
+                pass
+            return {"choices": [{"message": {"content": "ok"}}]}
+
+        with patch("app.services.grok.services.video.get_token_manager", new=AsyncMock(return_value=fake_mgr)):
+            with patch("app.services.grok.services.video.ModelService.pool_candidates_for_model", return_value=["ssoBasic"]):
+                with patch("app.services.grok.services.video.ModelService.get", return_value=DummyModelInfo()):
+                    with patch(
+                        "app.services.grok.services.video.get_config",
+                        side_effect=lambda key, default=None: {
+                            "retry.max_retry": 3,
+                            "app.stream": False,
+                            "app.thinking": True,
+                            "video.concurrent": 1,
+                        }.get(key, default),
+                    ):
+                        with patch("app.services.grok.services.video.MediaPostReverse.request", new=AsyncMock(side_effect=fake_media_post)):
+                            with patch("app.services.grok.services.video.AppChatReverse.request", new=AsyncMock(side_effect=fake_app_chat)):
+                                with patch("app.services.grok.services.video.VideoCollectProcessor.process", new=AsyncMock(side_effect=fake_collect)):
+                                    await VideoService.completions(
+                                        model="grok-imagine-1.0-video",
+                                        messages=[{"role": "user", "content": "make a clip"}],
+                                        stream=False,
+                                        aspect_ratio="16:9",
+                                        video_length=6,
+                                        resolution="480p",
+                                        preset="custom",
+                                    )
+
+        self.assertEqual(
+            media_post_calls,
+            [
+                {
+                    "token": "token-1",
+                    "mediaType": "MEDIA_POST_TYPE_VIDEO",
+                    "mediaUrl": "",
+                    "prompt": "make a clip",
+                    "extra_cookies": "x-userid=user-1",
+                    "referer_override": "https://grok.com/imagine",
+                }
+            ],
+        )
+        self.assertEqual(
+            app_chat_calls,
+            [
+                {
+                    "token": "token-1",
+                    "message": "make a clip --mode=custom",
+                    "model": "grok-3",
+                    "mode": None,
+                    "extra_cookies": "x-userid=user-1",
+                    "referer_override": "https://grok.com/imagine",
+                }
+            ],
         )
 
 

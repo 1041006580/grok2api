@@ -28,6 +28,8 @@ class MediaPostReverse:
         mediaType: str,
         mediaUrl: str,
         prompt: str = "",
+        extra_cookies: str | None = None,
+        referer_override: str | None = None,
     ) -> Any:
         """Create media post in Grok.
 
@@ -50,7 +52,8 @@ class MediaPostReverse:
                 cookie_token=token,
                 content_type="application/json",
                 origin="https://grok.com",
-                referer="https://grok.com",
+                referer=referer_override or "https://grok.com",
+                extra_cookies=extra_cookies,
             )
 
             # Build payload

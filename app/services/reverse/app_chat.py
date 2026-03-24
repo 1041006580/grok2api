@@ -146,6 +146,7 @@ class AppChatReverse:
         model_config_override: Dict[str, Any] = None,
         payload_override: Dict[str, Any] = None,
         referer_override: str | None = None,
+        extra_cookies: str | None = None,
     ) -> Any:
         """Send app chat request to Grok.
         
@@ -188,6 +189,7 @@ class AppChatReverse:
                 content_type="application/json",
                 origin="https://grok.com",
                 referer=referer,
+                extra_cookies=extra_cookies,
             )
 
             # Build payload
