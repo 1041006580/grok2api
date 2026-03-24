@@ -1,6 +1,6 @@
 # Grok2API
 
-**中文** | [English](docs/README.en.md)
+**中文** | [English](docs/README.en.md) | [文档](https://blog.cheny.me/blog/posts/grok2api)
 
 > [!NOTE]
 > 本项目仅供学习与研究，使用者必须在遵循 Grok 的 **使用条款** 以及 **法律法规** 的情况下使用，不得用于非法用途。
@@ -15,6 +15,8 @@
 <br>
 
 ## 快速开始
+
+> [文档](https://blog.cheny.me/blog/posts/grok2api)
 
 ### 本地开发
 
@@ -31,6 +33,15 @@ cd grok2api
 
 docker compose up -d
 ```
+
+> Docker Compose 端口变量：
+>
+> - `SERVER_PORT`：容器内应用监听端口
+> - `HOST_PORT`：宿主机映射端口（仅 Docker Compose 使用）
+>
+> 小贴士：端口映射规则是 `HOST_PORT:SERVER_PORT`，你访问的是 `HOST_PORT`，容器内服务实际监听的是 `SERVER_PORT`。
+>
+> 示例：`HOST_PORT=9000 SERVER_PORT=8011 docker compose up -d`，访问 `http://localhost:9000`。
 
 ### Vercel 部署
 
@@ -52,7 +63,7 @@ docker compose up -d
 
 ## 管理面板
 
-- 访问地址：`http://<host>:8000/admin`
+- 访问地址：`http://<host>:<port>/admin`（本地运行使用 `SERVER_PORT`，Docker Compose 使用 `HOST_PORT`，默认均为 `8000`）
 - 默认密码：`grok2api`（配置项 `app.app_key`，建议修改）
 
 **功能说明**：

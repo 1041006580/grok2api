@@ -9,6 +9,7 @@ from curl_cffi.requests import AsyncSession
 
 from app.core.logger import logger
 from app.core.config import get_config
+from app.core.proxy_pool import get_current_proxy_from, rotate_proxy, should_rotate_proxy
 from app.core.exceptions import UpstreamException
 from app.services.grok.utils.retry import explicit_auth_failure
 from app.services.token.service import TokenService
@@ -95,6 +96,9 @@ class AppChatReverse:
             "toolOverrides": tool_overrides or {},
         }
 
+        if model == "grok-420":
+            payload["enable420"] = True
+
         custom_personality = AppChatReverse._resolve_custom_personality()
         if custom_personality is not None:
             payload["customPersonality"] = custom_personality
@@ -131,24 +135,6 @@ class AppChatReverse:
             Any: The response from the request.
         """
         try:
-            # Get proxies
-            base_proxy = get_config("proxy.base_proxy_url")
-            proxy = None
-            proxies = None
-            if base_proxy:
-                normalized_proxy = _normalize_chat_proxy(base_proxy)
-                scheme = urlparse(normalized_proxy).scheme.lower()
-                if scheme.startswith("socks"):
-                    # curl_cffi 对 SOCKS 代理优先使用 proxy 参数，避免被按 HTTP CONNECT 处理
-                    proxy = normalized_proxy
-                else:
-                    proxies = {"http": normalized_proxy, "https": normalized_proxy}
-                logger.info(
-                    f"AppChatReverse proxy enabled: scheme={scheme}, target={normalized_proxy}"
-                )
-            else:
-                logger.warning("AppChatReverse proxy is empty, request will use direct network")
-
             # Build headers
             headers = build_headers(
                 cookie_token=token,
@@ -179,8 +165,25 @@ class AppChatReverse:
                     float(get_config("image.timeout") or 0),
                 )
             browser = get_config("proxy.browser")
+            active_proxy_key = None
 
             async def _do_request():
+                nonlocal active_proxy_key
+                active_proxy_key, base_proxy = get_current_proxy_from("proxy.base_proxy_url")
+                proxy = None
+                proxies = None
+                if base_proxy:
+                    normalized_proxy = _normalize_chat_proxy(base_proxy)
+                    scheme = urlparse(normalized_proxy).scheme.lower()
+                    if scheme.startswith("socks"):
+                        proxy = normalized_proxy
+                    else:
+                        proxies = {"http": normalized_proxy, "https": normalized_proxy}
+                    logger.info(
+                        f"AppChatReverse proxy enabled: scheme={scheme}, target={normalized_proxy}"
+                    )
+                else:
+                    logger.warning("AppChatReverse proxy is empty, request will use direct network")
                 try:
                     response = await session.post(
                         resolve_api_url(CHAT_API),
@@ -231,7 +234,11 @@ class AppChatReverse:
                         )
                     raise
 
-            response = await retry_on_status(_do_request)
+            async def _on_retry(attempt: int, status_code: int, error: Exception, delay: float):
+                if active_proxy_key and should_rotate_proxy(status_code):
+                    rotate_proxy(active_proxy_key)
+
+            response = await retry_on_status(_do_request, on_retry=_on_retry)
 
             # Stream response
             async def stream_response():

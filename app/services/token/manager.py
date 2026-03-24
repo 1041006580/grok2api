@@ -20,7 +20,6 @@ from app.core.config import get_config
 from app.core.exceptions import UpstreamException
 from app.services.grok.utils.retry import explicit_auth_failure
 from app.services.token.pool import TokenPool
-from app.services.grok.batch_services.usage import UsageService
 
 
 DEFAULT_REFRESH_BATCH_SIZE = 10
@@ -522,6 +521,8 @@ class TokenManager:
 
         # 尝试 API 同步
         try:
+            from app.services.grok.batch_services.usage import UsageService
+
             usage_service = UsageService()
             result = await usage_service.get(token_str)
 
@@ -885,6 +886,8 @@ class TokenManager:
 
         # 批量并发刷新
         semaphore = asyncio.Semaphore(DEFAULT_REFRESH_CONCURRENCY)
+        from app.services.grok.batch_services.usage import UsageService
+
         usage_service = UsageService()
         refreshed = 0
         recovered = 0

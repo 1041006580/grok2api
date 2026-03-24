@@ -17,7 +17,12 @@ _USAGE_SEM_VALUE = None
 
 
 def _get_usage_semaphore() -> asyncio.Semaphore:
-    value = max(1, int(get_config("usage.concurrent")))
+    value = get_config("usage.concurrent", 100)
+    try:
+        value = int(value)
+    except Exception:
+        value = 100
+    value = max(1, value)
     global _USAGE_SEMAPHORE, _USAGE_SEM_VALUE
     if _USAGE_SEMAPHORE is None or value != _USAGE_SEM_VALUE:
         _USAGE_SEM_VALUE = value
@@ -28,7 +33,7 @@ def _get_usage_semaphore() -> asyncio.Semaphore:
 class UsageService:
     """用量查询服务"""
 
-    async def get(self, token: str, model_name: str = "grok-3") -> Dict:
+    async def get(self, token: str, model_name: str = "grok-4-1-thinking-1129") -> Dict:
         """
         获取速率限制信息
 
