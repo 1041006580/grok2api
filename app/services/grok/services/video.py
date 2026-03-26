@@ -191,6 +191,11 @@ def _fallback_round_length_from_error(
         return None
     message = _extract_upstream_error_message(error)
     if not message:
+        # Some upstream 400 responses on the streaming chat endpoint come back
+        # with an empty body even though the same request is rejected as >10s
+        # in the browser. Preserve the fallback for 15s-style round requests.
+        if requested_round_length > 10:
+            return 10
         return None
     match = re.search(
         r"Video duration must be between 1 and (\d+) seconds, got (\d+)",
