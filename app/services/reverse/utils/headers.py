@@ -53,7 +53,7 @@ def _sanitize_header_value(
     return normalized
 
 
-def build_sso_cookie(sso_token: str) -> str:
+def build_sso_cookie(sso_token: str, extra_cookies: Optional[str] = None) -> str:
     """
     Build SSO Cookie string.
 
@@ -71,6 +71,14 @@ def build_sso_cookie(sso_token: str) -> str:
 
     # SSO Cookie
     cookie = f"sso={sso_token}; sso-rw={sso_token}"
+
+    # Token-specific extra cookies
+    extra_cookie_text = _sanitize_header_value(
+        extra_cookies or "",
+        field_name="extra_cookies",
+    )
+    if extra_cookie_text:
+        cookie += f"; {extra_cookie_text}"
 
     # CF Cookies
     cf_cookies = _sanitize_header_value(
@@ -197,7 +205,12 @@ def _build_client_hints(browser: Optional[str], user_agent: Optional[str]) -> Di
     return hints
 
 
-def build_ws_headers(token: Optional[str] = None, origin: Optional[str] = None, extra: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+def build_ws_headers(
+    token: Optional[str] = None,
+    origin: Optional[str] = None,
+    extra: Optional[Dict[str, str]] = None,
+    extra_cookies: Optional[str] = None,
+) -> Dict[str, str]:
     """
     Build headers for WebSocket requests.
 
@@ -226,7 +239,7 @@ def build_ws_headers(token: Optional[str] = None, origin: Optional[str] = None, 
         headers.update(client_hints)
 
     if token:
-        headers["Cookie"] = build_sso_cookie(token)
+        headers["Cookie"] = build_sso_cookie(token, extra_cookies=extra_cookies)
 
     if extra:
         headers.update(extra)
@@ -234,7 +247,13 @@ def build_ws_headers(token: Optional[str] = None, origin: Optional[str] = None, 
     return headers
 
 
-def build_headers(cookie_token: str, content_type: Optional[str] = None, origin: Optional[str] = None, referer: Optional[str] = None) -> Dict[str, str]:
+def build_headers(
+    cookie_token: str,
+    content_type: Optional[str] = None,
+    origin: Optional[str] = None,
+    referer: Optional[str] = None,
+    extra_cookies: Optional[str] = None,
+) -> Dict[str, str]:
     """
     Build headers for reverse interfaces.
 
@@ -270,7 +289,7 @@ def build_headers(cookie_token: str, content_type: Optional[str] = None, origin:
         headers.update(client_hints)
 
     # Cookie
-    headers["Cookie"] = build_sso_cookie(cookie_token)
+    headers["Cookie"] = build_sso_cookie(cookie_token, extra_cookies=extra_cookies)
 
     # Content-Type and Accept/Sec-Fetch-Dest
     if content_type and content_type == "application/json":

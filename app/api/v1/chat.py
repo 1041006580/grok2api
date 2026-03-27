@@ -40,7 +40,7 @@ class VideoConfig(BaseModel):
     """视频生成配置"""
 
     aspect_ratio: Optional[str] = Field("3:2", description="视频比例: 1280x720(16:9), 720x1280(9:16), 1792x1024(3:2), 1024x1792(2:3), 1024x1024(1:1)")
-    video_length: Optional[int] = Field(6, description="视频时长(秒): 6 / 10 / 15")
+    video_length: Optional[int] = Field(6, description="视频时长(秒): 非流式 6-30，流式 6 / 10 / 15")
     resolution_name: Optional[str] = Field("480p", description="视频分辨率: 480p, 720p")
     preset: Optional[str] = Field("custom", description="风格预设: fun, normal, spicy")
 
@@ -634,6 +634,7 @@ def validate_request(request: ChatCompletionRequest):
     # video 验证
     if model_info and model_info.is_video:
         config = request.video_config or VideoConfig()
+        is_stream = request.stream if request.stream is not None else get_config("app.stream")
         ratio_map = {
             "1280x720": "16:9",
             "720x1280": "9:16",
@@ -656,12 +657,20 @@ def validate_request(request: ChatCompletionRequest):
             )
         config.aspect_ratio = ratio_map[config.aspect_ratio]
 
-        if config.video_length not in (6, 10, 15):
+        video_length = int(config.video_length or 6)
+        if not (6 <= video_length <= 30):
             raise ValidationException(
-                message="video_length must be 6, 10, or 15 seconds",
+                message="video_length must be between 6 and 30 seconds",
                 param="video_config.video_length",
                 code="invalid_video_length",
             )
+        if is_stream and video_length not in (6, 10, 15):
+            raise ValidationException(
+                message="Streaming video_length must be 6, 10, or 15 seconds",
+                param="video_config.video_length",
+                code="invalid_video_length",
+            )
+        config.video_length = video_length
         if config.resolution_name not in ("480p", "720p"):
             raise ValidationException(
                 message="resolution_name must be one of ['480p', '720p']",

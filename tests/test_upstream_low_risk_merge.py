@@ -5,6 +5,7 @@ import orjson
 from types import SimpleNamespace
 import json
 
+from app.core.exceptions import UpstreamException
 from app.services.reverse.app_chat import AppChatReverse
 from app.services.reverse.utils.headers import build_sso_cookie
 from app.services.reverse.utils.session import ResettableSession
@@ -51,6 +52,55 @@ class CustomInstructionTests(unittest.TestCase):
 
         self.assertNotIn("customPersonality", payload)
 
+    def test_app_chat_video_payload_matches_captured_browser_shape(self):
+        def fake_get_config(key, default=None):
+            values = {
+                "app.temporary": True,
+                "app.custom_instruction": "Should not be injected into video payload",
+            }
+            return values.get(key, default)
+
+        with patch("app.services.reverse.app_chat.get_config", side_effect=fake_get_config):
+            payload = AppChatReverse.build_video_payload(
+                message="A golden retriever running on a beach at sunset --mode=custom",
+                model="grok-3",
+                tool_overrides={"videoGen": True},
+                model_config_override={
+                    "modelMap": {
+                        "videoGenModelConfig": {
+                            "parentPostId": "pid-1",
+                            "aspectRatio": "16:9",
+                            "videoLength": 6,
+                            "resolutionName": "480p",
+                        }
+                    }
+                },
+            )
+
+        self.assertEqual(
+            payload,
+            {
+                "temporary": True,
+                "modelName": "grok-3",
+                "message": "A golden retriever running on a beach at sunset --mode=custom",
+                "toolOverrides": {"videoGen": True},
+                "enableSideBySide": True,
+                "responseMetadata": {
+                    "experiments": [],
+                    "modelConfigOverride": {
+                        "modelMap": {
+                            "videoGenModelConfig": {
+                                "parentPostId": "pid-1",
+                                "aspectRatio": "16:9",
+                                "videoLength": 6,
+                                "resolutionName": "480p",
+                            }
+                        }
+                    },
+                },
+            },
+        )
+
 
 class SanitizationTests(unittest.TestCase):
     def test_token_info_normalizes_copied_token_text(self):
@@ -73,6 +123,20 @@ class SanitizationTests(unittest.TestCase):
         self.assertEqual(sanitized["proxy"]["user_agent"], "Mozilla/5.0")
         self.assertEqual(sanitized["proxy"]["cf_cookies"], "cf_clearance=abc; foo=bar")
         self.assertEqual(sanitized["proxy"]["cf_clearance"], "abc")
+
+    def test_build_sso_cookie_appends_explicit_extra_cookies(self):
+        def fake_get_config(key, default=None):
+            values = {
+                "proxy.cf_cookies": "",
+                "proxy.cf_clearance": "",
+                "proxy.enabled": False,
+            }
+            return values.get(key, default)
+
+        with patch("app.services.reverse.utils.headers.get_config", side_effect=fake_get_config):
+            cookie = build_sso_cookie("sso=abc123", extra_cookies="x-userid=user-1")
+
+        self.assertEqual(cookie, "sso=abc123; sso-rw=abc123; x-userid=user-1")
 
 
 class StaticAssetTests(unittest.TestCase):
@@ -372,6 +436,42 @@ class VideosApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(body["url"], "https://example.com/generated.mp4")
 
 
+class ChatVideoValidationTests(unittest.TestCase):
+    def test_chat_video_non_stream_accepts_18_seconds(self):
+        from app.api.v1.chat import ChatCompletionRequest, validate_request
+
+        request = ChatCompletionRequest(
+            model="grok-imagine-1.0-video",
+            messages=[{"role": "user", "content": "make a longer clip"}],
+            stream=False,
+            video_config={"video_length": 18},
+        )
+
+        validate_request(request)
+        self.assertEqual(request.video_config.video_length, 18)
+
+    def test_chat_video_stream_rejects_18_seconds(self):
+        from app.api.v1.chat import ChatCompletionRequest, validate_request
+
+        request = ChatCompletionRequest(
+            model="grok-imagine-1.0-video",
+            messages=[{"role": "user", "content": "make a longer clip"}],
+            stream=True,
+            video_config={"video_length": 18},
+        )
+
+        with self.assertRaises(Exception) as ctx:
+            validate_request(request)
+
+        exc = ctx.exception
+        self.assertEqual(getattr(exc, "status_code", None), 400)
+        self.assertEqual(getattr(exc, "code", None), "invalid_video_length")
+        self.assertEqual(
+            getattr(exc, "message", ""),
+            "Streaming video_length must be 6, 10, or 15 seconds",
+        )
+
+
 class VideoAutoExtensionTests(unittest.IsolatedAsyncioTestCase):
     async def _run_video_completion_case(
         self,
@@ -435,7 +535,7 @@ class VideoAutoExtensionTests(unittest.IsolatedAsyncioTestCase):
         with patch("app.services.grok.services.video.get_token_manager", new=AsyncMock(return_value=fake_mgr)):
             with patch("app.services.grok.services.video.ModelService.pool_candidates_for_model", return_value=["ssoBasic", "ssoSuper"]):
                 with patch("app.services.grok.services.video.ModelService.get", return_value=DummyModelInfo()):
-                    with patch("app.services.grok.services.video.get_config", side_effect=lambda key, default=None: {"retry.max_retry": 3, "app.stream": False, "app.thinking": True}.get(key, default)):
+                    with patch("app.services.grok.services.video.get_config", side_effect=lambda key, default=None: {"retry.max_retry": 3, "app.stream": False, "app.thinking": True, "video.concurrent": 1}.get(key, default)):
                         with patch.object(VideoService, "generate", new=AsyncMock(return_value="round-1-stream")) as mock_generate:
                             with patch.object(VideoService, "generate_extension", new=AsyncMock(side_effect=["round-2-stream", "round-3-stream"])) as mock_extend:
                                 with patch("app.services.grok.services.video.VideoCollectProcessor.process", new=AsyncMock(side_effect=collect_results)):
@@ -533,6 +633,430 @@ class VideoAutoExtensionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(called)
         self.assertEqual(called.args[3], 15)
 
+    async def test_video_super_falls_back_to_10_second_rounds_when_upstream_rejects_15_seconds(self):
+        from app.services.grok.services.video import VideoService
+
+        class DummyCost:
+            value = "high"
+
+        class DummyTier:
+            value = "super"
+
+        class DummyModelInfo:
+            grok_model = "grok-3"
+            model_mode = "MODEL_MODE_FAST"
+            cost = DummyCost()
+            tier = DummyTier()
+
+        token_info = TokenInfo(token="token-1", quota=10)
+        fake_mgr = SimpleNamespace(
+            get_token_for_video=lambda **kwargs: token_info,
+            get_pool_name_for_token=lambda token: "ssoSuper",
+            consume=AsyncMock(return_value=True),
+            mark_rate_limited=AsyncMock(return_value=True),
+            reload_if_stale=AsyncMock(return_value=None),
+        )
+
+        generate_lengths = []
+        extension_calls = []
+        collect_results = [
+            {
+                "choices": [{"message": {"content": "round 1"}}],
+                "raw_video_url": "https://assets.grok.com/users/u/round-one-post/generated_video.mp4",
+                "post_id": "round-one-post",
+            },
+            {
+                "choices": [{"message": {"content": "round 2"}}],
+                "raw_video_url": "https://assets.grok.com/users/u/round-two-post/generated_video.mp4",
+                "post_id": "round-two-post",
+            },
+        ]
+
+        async def fake_generate(
+            self,
+            token,
+            prompt,
+            aspect_ratio="3:2",
+            video_length=6,
+            resolution_name="480p",
+            preset="normal",
+            grok_model="grok-3",
+            model_mode=None,
+            extra_cookies=None,
+        ):
+            generate_lengths.append(video_length)
+            if video_length == 15:
+                raise UpstreamException(
+                    message="AppChatReverse: Chat failed, 400",
+                    details={
+                        "status": 400,
+                        "body": (
+                            '{"error":{"code":3,"message":"Video duration must be between 1 and 10 seconds, got 15","details":[]}}'
+                        ),
+                    },
+                )
+            async def _stream():
+                yield "data: stub"
+
+            return _stream()
+
+        async def fake_generate_extension(
+            self,
+            token,
+            prompt,
+            parent_post_id,
+            original_post_id,
+            start_time,
+            aspect_ratio="3:2",
+            video_length=6,
+            resolution_name="480p",
+            preset="normal",
+            grok_model="grok-3",
+            model_mode=None,
+            extra_cookies=None,
+        ):
+            extension_calls.append(
+                {
+                    "parent_post_id": parent_post_id,
+                    "original_post_id": original_post_id,
+                    "start_time": start_time,
+                    "video_length": video_length,
+                }
+            )
+            async def _stream():
+                yield "data: stub"
+
+            return _stream()
+
+        async def fake_collect(stream):
+            async for _ in stream:
+                pass
+            return collect_results.pop(0)
+
+        with patch("app.services.grok.services.video.get_token_manager", new=AsyncMock(return_value=fake_mgr)):
+            with patch("app.services.grok.services.video.ModelService.pool_candidates_for_model", return_value=["ssoSuper"]):
+                with patch("app.services.grok.services.video.ModelService.get", return_value=DummyModelInfo()):
+                    with patch(
+                        "app.services.grok.services.video.get_config",
+                        side_effect=lambda key, default=None: {
+                            "retry.max_retry": 3,
+                            "app.stream": False,
+                            "app.thinking": True,
+                            "video.concurrent": 1,
+                        }.get(key, default),
+                    ):
+                        with patch.object(VideoService, "generate", new=fake_generate):
+                            with patch.object(VideoService, "generate_extension", new=fake_generate_extension):
+                                with patch("app.services.grok.services.video.VideoCollectProcessor.process", new=AsyncMock(side_effect=fake_collect)):
+                                    result = await VideoService.completions(
+                                        model="grok-imagine-1.0-video-super",
+                                        messages=[{"role": "user", "content": "make a 15 second clip"}],
+                                        stream=False,
+                                        aspect_ratio="16:9",
+                                        video_length=15,
+                                        resolution="720p",
+                                        preset="custom",
+                                    )
+
+        self.assertEqual(generate_lengths, [15, 10])
+        self.assertEqual(
+            extension_calls,
+            [
+                {
+                    "parent_post_id": "round-one-post",
+                    "original_post_id": "round-one-post",
+                    "start_time": 5.0,
+                    "video_length": 10,
+                }
+            ],
+        )
+        self.assertEqual(result["choices"][0]["message"]["content"], "round 2")
+        fake_mgr.consume.assert_awaited_once()
+
+    async def test_video_super_falls_back_to_10_second_rounds_when_upstream_returns_empty_400_body(self):
+        from app.services.grok.services.video import VideoService
+
+        class DummyCost:
+            value = "high"
+
+        class DummyTier:
+            value = "super"
+
+        class DummyModelInfo:
+            grok_model = "grok-3"
+            model_mode = "MODEL_MODE_FAST"
+            cost = DummyCost()
+            tier = DummyTier()
+
+        token_info = TokenInfo(token="token-1", quota=10)
+        fake_mgr = SimpleNamespace(
+            get_token_for_video=lambda **kwargs: token_info,
+            get_pool_name_for_token=lambda token: "ssoSuper",
+            consume=AsyncMock(return_value=True),
+            mark_rate_limited=AsyncMock(return_value=True),
+            reload_if_stale=AsyncMock(return_value=None),
+        )
+
+        generate_lengths = []
+        extension_calls = []
+        collect_results = [
+            {
+                "choices": [{"message": {"content": "round 1"}}],
+                "raw_video_url": "https://assets.grok.com/users/u/round-one-post/generated_video.mp4",
+                "post_id": "round-one-post",
+            },
+            {
+                "choices": [{"message": {"content": "round 2"}}],
+                "raw_video_url": "https://assets.grok.com/users/u/round-two-post/generated_video.mp4",
+                "post_id": "round-two-post",
+            },
+        ]
+
+        async def fake_generate(
+            self,
+            token,
+            prompt,
+            aspect_ratio="3:2",
+            video_length=6,
+            resolution_name="480p",
+            preset="normal",
+            grok_model="grok-3",
+            model_mode=None,
+            extra_cookies=None,
+        ):
+            generate_lengths.append(video_length)
+            if video_length == 15:
+                raise UpstreamException(
+                    message="AppChatReverse: Chat failed, 400",
+                    details={"status": 400, "body": ""},
+                )
+
+            async def _stream():
+                yield "data: stub"
+
+            return _stream()
+
+        async def fake_generate_extension(
+            self,
+            token,
+            prompt,
+            parent_post_id,
+            original_post_id,
+            start_time,
+            aspect_ratio="3:2",
+            video_length=6,
+            resolution_name="480p",
+            preset="normal",
+            grok_model="grok-3",
+            model_mode=None,
+            extra_cookies=None,
+        ):
+            extension_calls.append(
+                {
+                    "parent_post_id": parent_post_id,
+                    "original_post_id": original_post_id,
+                    "start_time": start_time,
+                    "video_length": video_length,
+                }
+            )
+
+            async def _stream():
+                yield "data: stub"
+
+            return _stream()
+
+        async def fake_collect(stream):
+            async for _ in stream:
+                pass
+            return collect_results.pop(0)
+
+        with patch("app.services.grok.services.video.get_token_manager", new=AsyncMock(return_value=fake_mgr)):
+            with patch("app.services.grok.services.video.ModelService.pool_candidates_for_model", return_value=["ssoSuper"]):
+                with patch("app.services.grok.services.video.ModelService.get", return_value=DummyModelInfo()):
+                    with patch(
+                        "app.services.grok.services.video.get_config",
+                        side_effect=lambda key, default=None: {
+                            "retry.max_retry": 3,
+                            "app.stream": False,
+                            "app.thinking": True,
+                            "video.concurrent": 1,
+                        }.get(key, default),
+                    ):
+                        with patch.object(VideoService, "generate", new=fake_generate):
+                            with patch.object(VideoService, "generate_extension", new=fake_generate_extension):
+                                with patch("app.services.grok.services.video.VideoCollectProcessor.process", new=AsyncMock(side_effect=fake_collect)):
+                                    result = await VideoService.completions(
+                                        model="grok-imagine-1.0-video-super",
+                                        messages=[{"role": "user", "content": "make a 15 second clip"}],
+                                        stream=False,
+                                        aspect_ratio="16:9",
+                                        video_length=15,
+                                        resolution="720p",
+                                        preset="custom",
+                                    )
+
+        self.assertEqual(generate_lengths, [15, 10])
+        self.assertEqual(
+            extension_calls,
+            [
+                {
+                    "parent_post_id": "round-one-post",
+                    "original_post_id": "round-one-post",
+                    "start_time": 5.0,
+                    "video_length": 10,
+                }
+            ],
+        )
+        self.assertEqual(result["choices"][0]["message"]["content"], "round 2")
+        fake_mgr.consume.assert_awaited_once()
+
+    async def test_video_super_uses_browser_like_payload_for_initial_and_extension_requests(self):
+        from app.services.grok.services.video import VideoService
+
+        class DummyCost:
+            value = "high"
+
+        class DummyTier:
+            value = "super"
+
+        class DummyModelInfo:
+            grok_model = "grok-3"
+            model_mode = "MODEL_MODE_FAST"
+            cost = DummyCost()
+            tier = DummyTier()
+
+        token_info = TokenInfo(token="token-1", quota=10)
+        fake_mgr = SimpleNamespace(
+            get_token_for_video=lambda **kwargs: token_info,
+            get_pool_name_for_token=lambda token: "ssoSuper",
+            consume=AsyncMock(return_value=True),
+            mark_rate_limited=AsyncMock(return_value=True),
+            reload_if_stale=AsyncMock(return_value=None),
+        )
+        captured_requests = []
+        collect_results = [
+            {
+                "choices": [{"message": {"content": "round 1"}}],
+                "raw_video_url": "https://assets.grok.com/users/u/round-one-post/generated_video.mp4",
+                "post_id": "round-one-post",
+            },
+            {
+                "choices": [{"message": {"content": "round 2"}}],
+                "raw_video_url": "https://assets.grok.com/users/u/round-two-post/generated_video.mp4",
+                "post_id": "round-two-post",
+            },
+        ]
+
+        async def fake_request(session, token, message, model, mode=None, **kwargs):
+            captured_requests.append(
+                {
+                    "model": model,
+                    "mode": mode,
+                    "payload_override": kwargs.get("payload_override"),
+                    "referer_override": kwargs.get("referer_override"),
+                }
+            )
+
+            async def _stream():
+                yield "data: stub"
+
+            return _stream()
+
+        async def fake_collect(stream):
+            async for _ in stream:
+                pass
+            return collect_results.pop(0)
+
+        with patch("app.services.grok.services.video.get_token_manager", new=AsyncMock(return_value=fake_mgr)):
+            with patch("app.services.grok.services.video.ModelService.pool_candidates_for_model", return_value=["ssoSuper"]):
+                with patch("app.services.grok.services.video.ModelService.get", return_value=DummyModelInfo()):
+                    with patch(
+                        "app.services.grok.services.video.get_config",
+                        side_effect=lambda key, default=None: {
+                            "retry.max_retry": 3,
+                            "app.stream": False,
+                            "app.thinking": True,
+                            "video.concurrent": 1,
+                        }.get(key, default),
+                    ):
+                        with patch.object(VideoService, "create_post", new=AsyncMock(return_value="root-post")):
+                            with patch("app.services.grok.services.video.AppChatReverse.request", new=AsyncMock(side_effect=fake_request)):
+                                with patch("app.services.grok.services.video.VideoCollectProcessor.process", new=AsyncMock(side_effect=fake_collect)):
+                                    await VideoService.completions(
+                                        model="grok-imagine-1.0-video-super",
+                                        messages=[{"role": "user", "content": "make an 18 second clip"}],
+                                        stream=False,
+                                        aspect_ratio="16:9",
+                                        video_length=18,
+                                        resolution="720p",
+                                        preset="custom",
+                                    )
+
+        self.assertEqual(
+            captured_requests,
+            [
+                {
+                    "model": "grok-3",
+                    "mode": None,
+                    "referer_override": "https://grok.com/imagine",
+                    "payload_override": {
+                        "temporary": True,
+                        "modelName": "grok-3",
+                        "message": "make an 18 second clip --mode=custom",
+                        "toolOverrides": {"videoGen": True},
+                        "enableSideBySide": True,
+                        "responseMetadata": {
+                            "experiments": [],
+                            "modelConfigOverride": {
+                                "modelMap": {
+                                    "videoGenModelConfig": {
+                                        "aspectRatio": "16:9",
+                                        "parentPostId": "root-post",
+                                        "resolutionName": "720p",
+                                        "videoLength": 15,
+                                    }
+                                }
+                            },
+                        },
+                    },
+                },
+                {
+                    "model": "grok-3",
+                    "mode": None,
+                    "referer_override": "https://grok.com/imagine",
+                    "payload_override": {
+                        "temporary": True,
+                        "modelName": "grok-3",
+                        "message": "make an 18 second clip --mode=custom",
+                        "toolOverrides": {"videoGen": True},
+                        "enableSideBySide": True,
+                        "responseMetadata": {
+                            "experiments": [],
+                            "modelConfigOverride": {
+                                "modelMap": {
+                                    "videoGenModelConfig": {
+                                        "isVideoExtension": True,
+                                        "videoExtensionStartTime": 3.0,
+                                        "extendPostId": "round-one-post",
+                                        "stitchWithExtendPostId": True,
+                                        "originalPrompt": "make an 18 second clip",
+                                        "originalPostId": "round-one-post",
+                                        "originalRefType": "ORIGINAL_REF_TYPE_VIDEO_EXTENSION",
+                                        "mode": "custom",
+                                        "aspectRatio": "16:9",
+                                        "videoLength": 15,
+                                        "resolutionName": "720p",
+                                        "parentPostId": "round-one-post",
+                                        "isVideoEdit": False,
+                                    }
+                                }
+                            },
+                        },
+                    },
+                },
+            ],
+        )
+
     async def test_video_auto_extension_uses_raw_video_metadata_for_post_id(self):
         from app.services.grok.services.video import VideoService
 
@@ -589,6 +1113,131 @@ class VideoAutoExtensionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             result["choices"][0]["message"]["content"],
             "final rendered html",
+        )
+
+    async def test_video_request_uses_token_note_as_extra_cookie_context(self):
+        from app.services.grok.services.video import VideoService
+
+        class DummyCost:
+            value = "high"
+
+        class DummyTier:
+            value = "basic"
+
+        class DummyModelInfo:
+            grok_model = "grok-3"
+            model_mode = "MODEL_MODE_FAST"
+            cost = DummyCost()
+            tier = DummyTier()
+
+        token_info = TokenInfo(token="token-1", quota=10, note="x-userid=user-1")
+        fake_mgr = SimpleNamespace(
+            get_token_for_video=lambda **kwargs: token_info,
+            get_pool_name_for_token=lambda token: "ssoBasic",
+            consume=AsyncMock(return_value=True),
+            mark_rate_limited=AsyncMock(return_value=True),
+            reload_if_stale=AsyncMock(return_value=None),
+        )
+        media_post_calls = []
+        app_chat_calls = []
+
+        class DummyMediaResponse:
+            def json(self):
+                return {"post": {"id": "root-post"}}
+
+        async def fake_media_post(
+            session,
+            token,
+            mediaType,
+            mediaUrl,
+            prompt="",
+            extra_cookies=None,
+            referer_override=None,
+        ):
+            media_post_calls.append(
+                {
+                    "token": token,
+                    "mediaType": mediaType,
+                    "mediaUrl": mediaUrl,
+                    "prompt": prompt,
+                    "extra_cookies": extra_cookies,
+                    "referer_override": referer_override,
+                }
+            )
+            return DummyMediaResponse()
+
+        async def fake_app_chat(session, token, message, model, mode=None, **kwargs):
+            app_chat_calls.append(
+                {
+                    "token": token,
+                    "message": message,
+                    "model": model,
+                    "mode": mode,
+                    "extra_cookies": kwargs.get("extra_cookies"),
+                    "referer_override": kwargs.get("referer_override"),
+                }
+            )
+
+            async def _stream():
+                yield "data: stub"
+
+            return _stream()
+
+        async def fake_collect(stream):
+            async for _ in stream:
+                pass
+            return {"choices": [{"message": {"content": "ok"}}]}
+
+        with patch("app.services.grok.services.video.get_token_manager", new=AsyncMock(return_value=fake_mgr)):
+            with patch("app.services.grok.services.video.ModelService.pool_candidates_for_model", return_value=["ssoBasic"]):
+                with patch("app.services.grok.services.video.ModelService.get", return_value=DummyModelInfo()):
+                    with patch(
+                        "app.services.grok.services.video.get_config",
+                        side_effect=lambda key, default=None: {
+                            "retry.max_retry": 3,
+                            "app.stream": False,
+                            "app.thinking": True,
+                            "video.concurrent": 1,
+                        }.get(key, default),
+                    ):
+                        with patch("app.services.grok.services.video.MediaPostReverse.request", new=AsyncMock(side_effect=fake_media_post)):
+                            with patch("app.services.grok.services.video.AppChatReverse.request", new=AsyncMock(side_effect=fake_app_chat)):
+                                with patch("app.services.grok.services.video.VideoCollectProcessor.process", new=AsyncMock(side_effect=fake_collect)):
+                                    await VideoService.completions(
+                                        model="grok-imagine-1.0-video",
+                                        messages=[{"role": "user", "content": "make a clip"}],
+                                        stream=False,
+                                        aspect_ratio="16:9",
+                                        video_length=6,
+                                        resolution="480p",
+                                        preset="custom",
+                                    )
+
+        self.assertEqual(
+            media_post_calls,
+            [
+                {
+                    "token": "token-1",
+                    "mediaType": "MEDIA_POST_TYPE_VIDEO",
+                    "mediaUrl": "",
+                    "prompt": "make a clip",
+                    "extra_cookies": "x-userid=user-1",
+                    "referer_override": "https://grok.com/imagine",
+                }
+            ],
+        )
+        self.assertEqual(
+            app_chat_calls,
+            [
+                {
+                    "token": "token-1",
+                    "message": "make a clip --mode=custom",
+                    "model": "grok-3",
+                    "mode": None,
+                    "extra_cookies": "x-userid=user-1",
+                    "referer_override": "https://grok.com/imagine",
+                }
+            ],
         )
 
 

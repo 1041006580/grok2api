@@ -109,6 +109,36 @@ class AppChatReverse:
         return payload
 
     @staticmethod
+    def build_video_payload(
+        message: str,
+        model: str,
+        file_attachments: List[str] = None,
+        tool_overrides: Dict[str, Any] = None,
+        model_config_override: Dict[str, Any] = None,
+    ) -> Dict[str, Any]:
+        """Build minimal browser-like payload for video generation."""
+
+        payload = {
+            "temporary": get_config("app.temporary", True),
+            "modelName": model,
+            "message": message,
+            "toolOverrides": tool_overrides or {},
+            "enableSideBySide": True,
+            "responseMetadata": {
+                "experiments": [],
+            },
+        }
+
+        attachments = file_attachments or []
+        if attachments:
+            payload["fileAttachments"] = attachments
+
+        if model_config_override:
+            payload["responseMetadata"]["modelConfigOverride"] = model_config_override
+
+        return payload
+
+    @staticmethod
     async def request(
         session: AsyncSession,
         token: str,
@@ -118,6 +148,9 @@ class AppChatReverse:
         file_attachments: List[str] = None,
         tool_overrides: Dict[str, Any] = None,
         model_config_override: Dict[str, Any] = None,
+        payload_override: Dict[str, Any] = None,
+        referer_override: str | None = None,
+        extra_cookies: str | None = None,
     ) -> Any:
         """Send app chat request to Grok.
         
@@ -136,15 +169,17 @@ class AppChatReverse:
         """
         try:
             # Build headers
+            referer = referer_override or "https://grok.com/"
             headers = build_headers(
                 cookie_token=token,
                 content_type="application/json",
                 origin="https://grok.com",
-                referer="https://grok.com/",
+                referer=referer,
+                extra_cookies=extra_cookies,
             )
 
             # Build payload
-            payload = AppChatReverse.build_payload(
+            payload = payload_override or AppChatReverse.build_payload(
                 message=message,
                 model=model,
                 mode=mode,

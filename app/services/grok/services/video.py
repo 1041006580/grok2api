@@ -3,7 +3,6 @@ Grok video generation service.
 """
 
 import asyncio
-import math
 import uuid
 import re
 from typing import Any, AsyncGenerator, AsyncIterable, Dict, Optional
@@ -139,6 +138,81 @@ def _video_meta_from_result(result: Dict[str, Any]) -> Dict[str, str]:
     return extracted
 
 
+def _video_extra_cookies_from_token_info(token_info: Any) -> str:
+    if not token_info:
+        return ""
+    note = getattr(token_info, "note", "") or ""
+    if not isinstance(note, str):
+        note = str(note)
+    note = note.strip()
+    if not note:
+        return ""
+    lowered = note.lower()
+    if lowered.startswith("cookie:"):
+        return note.split(":", 1)[1].strip()
+    if lowered.startswith("cookies:"):
+        return note.split(":", 1)[1].strip()
+    if note.startswith("x-userid="):
+        return note
+    return ""
+
+
+def _extract_upstream_error_message(error: UpstreamException) -> str:
+    if not isinstance(error, UpstreamException):
+        return ""
+    details = getattr(error, "details", None) or {}
+    body = details.get("body")
+    payload: Any = body
+    if isinstance(body, str):
+        text = body.strip()
+        if not text:
+            return ""
+        try:
+            payload = orjson.loads(text)
+        except orjson.JSONDecodeError:
+            return text
+    if isinstance(payload, dict):
+        nested = payload.get("error")
+        if isinstance(nested, dict) and isinstance(nested.get("message"), str):
+            return nested["message"]
+        if isinstance(payload.get("message"), str):
+            return payload["message"]
+    return ""
+
+
+def _fallback_round_length_from_error(
+    error: UpstreamException, requested_round_length: int
+) -> Optional[int]:
+    if not isinstance(error, UpstreamException):
+        return None
+    details = getattr(error, "details", None) or {}
+    status = details.get("status")
+    if status != 400:
+        return None
+    message = _extract_upstream_error_message(error)
+    if not message:
+        # Some upstream 400 responses on the streaming chat endpoint come back
+        # with an empty body even though the same request is rejected as >10s
+        # in the browser. Preserve the fallback for 15s-style round requests.
+        if requested_round_length > 10:
+            return 10
+        return None
+    match = re.search(
+        r"Video duration must be between 1 and (\d+) seconds, got (\d+)",
+        message,
+        re.IGNORECASE,
+    )
+    if not match:
+        return None
+    max_allowed = int(match.group(1))
+    requested = int(match.group(2))
+    if requested != requested_round_length:
+        return None
+    if max_allowed <= 0 or max_allowed >= requested_round_length:
+        return None
+    return max_allowed
+
+
 class VideoService:
     """Video generation service."""
 
@@ -151,6 +225,8 @@ class VideoService:
         prompt: str,
         media_type: str = "MEDIA_POST_TYPE_VIDEO",
         media_url: str = None,
+        extra_cookies: str | None = None,
+        referer_override: str | None = None,
     ) -> str:
         """Create media post and return post ID."""
         try:
@@ -168,6 +244,8 @@ class VideoService:
                         media_type,
                         media_value,
                         prompt=prompt_value,
+                        extra_cookies=extra_cookies,
+                        referer_override=referer_override,
                     )
 
             try:
@@ -179,7 +257,7 @@ class VideoService:
                 except Exception:
                     pass
                 logger.error(f"Create post: failed to parse response JSON: {json_err}, raw={raw}")
-                raise UpstreamException(f"Create post: invalid JSON response")
+                raise UpstreamException("Create post: invalid JSON response")
 
             post_id = body.get("post", {}).get("id", "") if isinstance(body, dict) else ""
             if not post_id:
@@ -195,10 +273,21 @@ class VideoService:
             logger.error(f"Create post error: {e}")
             raise UpstreamException(f"Create post error: {str(e)}")
 
-    async def create_image_post(self, token: str, image_url: str) -> str:
+    async def create_image_post(
+        self,
+        token: str,
+        image_url: str,
+        extra_cookies: str | None = None,
+        referer_override: str | None = None,
+    ) -> str:
         """Create image post and return post ID."""
         return await self.create_post(
-            token, prompt="", media_type="MEDIA_POST_TYPE_IMAGE", media_url=image_url
+            token,
+            prompt="",
+            media_type="MEDIA_POST_TYPE_IMAGE",
+            media_url=image_url,
+            extra_cookies=extra_cookies,
+            referer_override=referer_override,
         )
 
     @staticmethod
@@ -422,12 +511,20 @@ class VideoService:
         video_length: int = 6,
         resolution_name: str = "480p",
         preset: str = "normal",
+        grok_model: str = "grok-3",
+        model_mode: str | None = None,
+        extra_cookies: str | None = None,
     ) -> AsyncGenerator[bytes, None]:
         """Generate video."""
         logger.info(
             f"Video generation: prompt='{prompt[:50]}...', ratio={aspect_ratio}, length={video_length}s, preset={preset}"
         )
-        post_id = await self.create_post(token, prompt)
+        post_id = await self.create_post(
+            token,
+            prompt,
+            extra_cookies=extra_cookies,
+            referer_override="https://grok.com/imagine",
+        )
         mode_map = {
             "fun": "--mode=extremely-crazy",
             "normal": "--mode=normal",
@@ -445,6 +542,12 @@ class VideoService:
                 }
             }
         }
+        payload_override = AppChatReverse.build_video_payload(
+            message=message,
+            model=grok_model,
+            tool_overrides={"videoGen": True},
+            model_config_override=model_config_override,
+        )
 
         async def _stream():
             session = _new_session()
@@ -454,9 +557,13 @@ class VideoService:
                         session,
                         token,
                         message=message,
-                        model="grok-3",
+                        model=grok_model,
+                        mode=None,
                         tool_overrides={"videoGen": True},
                         model_config_override=model_config_override,
+                        payload_override=payload_override,
+                        referer_override="https://grok.com/imagine",
+                        extra_cookies=extra_cookies,
                     )
                     logger.info(f"Video generation started: post_id={post_id}")
                     async for line in stream_response:
@@ -483,6 +590,9 @@ class VideoService:
         resolution: str = "480p",
         preset: str = "normal",
         file_attachments: Optional[list] = None,
+        grok_model: str = "grok-3",
+        model_mode: str | None = None,
+        extra_cookies: str | None = None,
     ) -> AsyncGenerator[bytes, None]:
         """Generate video from image."""
         logger.info(
@@ -492,7 +602,12 @@ class VideoService:
         effective_file_attachments = list(file_attachments or [])
 
         try:
-            post_id = await self.create_image_post(token, effective_image_url)
+            post_id = await self.create_image_post(
+                token,
+                effective_image_url,
+                extra_cookies=extra_cookies,
+                referer_override="https://grok.com/imagine",
+            )
         except UpstreamException as e:
             status = (e.details or {}).get("status") if getattr(e, "details", None) else None
             if status != 400:
@@ -513,7 +628,12 @@ class VideoService:
                 )
             finally:
                 await upload_service.close()
-            post_id = await self.create_image_post(token, effective_image_url)
+            post_id = await self.create_image_post(
+                token,
+                effective_image_url,
+                extra_cookies=extra_cookies,
+                referer_override="https://grok.com/imagine",
+            )
         mode_map = {
             "fun": "--mode=extremely-crazy",
             "normal": "--mode=normal",
@@ -531,6 +651,13 @@ class VideoService:
                 }
             }
         }
+        payload_override = AppChatReverse.build_video_payload(
+            message=message,
+            model=grok_model,
+            file_attachments=effective_file_attachments or None,
+            tool_overrides={"videoGen": True},
+            model_config_override=model_config_override,
+        )
 
         async def _stream():
             session = _new_session()
@@ -540,10 +667,14 @@ class VideoService:
                         session,
                         token,
                         message=message,
-                        model="grok-3",
+                        model=grok_model,
+                        mode=None,
                         file_attachments=effective_file_attachments or None,
                         tool_overrides={"videoGen": True},
                         model_config_override=model_config_override,
+                        payload_override=payload_override,
+                        referer_override="https://grok.com/imagine",
+                        extra_cookies=extra_cookies,
                     )
                     logger.info(f"Video generation started: post_id={post_id}")
                     async for line in stream_response:
@@ -571,6 +702,9 @@ class VideoService:
         video_length: int = 6,
         resolution_name: str = "480p",
         preset: str = "normal",
+        grok_model: str = "grok-3",
+        model_mode: str | None = None,
+        extra_cookies: str | None = None,
     ) -> AsyncGenerator[bytes, None]:
         """Extend a previously generated video."""
         logger.info(
@@ -603,6 +737,12 @@ class VideoService:
                 }
             }
         }
+        payload_override = AppChatReverse.build_video_payload(
+            message=message,
+            model=grok_model,
+            tool_overrides={"videoGen": True},
+            model_config_override=model_config_override,
+        )
 
         async def _stream():
             session = _new_session()
@@ -612,9 +752,13 @@ class VideoService:
                         session,
                         token,
                         message=message,
-                        model="grok-3",
+                        model=grok_model,
+                        mode=None,
                         tool_overrides={"videoGen": True},
                         model_config_override=model_config_override,
+                        payload_override=payload_override,
+                        referer_override="https://grok.com/imagine",
+                        extra_cookies=extra_cookies,
                     )
                     logger.info(
                         f"Video extension started: parent_post_id={parent_post_id}, start_time={start_time}"
@@ -647,6 +791,9 @@ class VideoService:
         """Video generation entrypoint."""
         # Auto-set defaults based on model
         is_super = model == "grok-imagine-1.0-video-super"
+        request_model_info = ModelService.get(model)
+        grok_model = getattr(request_model_info, "grok_model", "grok-3")
+        model_mode = getattr(request_model_info, "model_mode", None)
         if video_length is None or (is_super and video_length == 6):
             video_length = 15 if is_super else 6
         if resolution is None or (is_super and resolution == "480p"):
@@ -694,178 +841,216 @@ class VideoService:
             token = token_info.token
             if token.startswith("sso="):
                 token = token[4:]
+            extra_cookies = _video_extra_cookies_from_token_info(token_info)
             pool_name = token_mgr.get_pool_name_for_token(token) or BASIC_POOL_NAME
             should_upscale = resolution == "720p" and pool_name == BASIC_POOL_NAME
-            round_length = _round_length_for_video(pool_name, target_length)
-            use_auto_extension = (not is_stream) and target_length > round_length
+            forced_round_length: Optional[int] = None
+            duration_fallback_used = False
 
-            try:
-                # Resolve image source with origin tracking.
-                source_info = await VideoService._resolve_video_image_source(
-                    messages, image_attachments, token
+            while True:
+                round_length = forced_round_length or _round_length_for_video(
+                    pool_name, target_length
                 )
-                image_url = source_info.get("image_url")
-                source_type = source_info.get("source_type", ORIGIN_UNKNOWN)
-                origin_file_attachments = source_info.get("file_attachments") or []
+                use_auto_extension = (not is_stream) and target_length > round_length
 
-                # Generate video.
-                service = VideoService()
-                if use_auto_extension:
-                    logger.info(
-                        f"Video auto extension enabled: target_length={target_length}s, round_length={round_length}s"
+                try:
+                    # Resolve image source with origin tracking.
+                    source_info = await VideoService._resolve_video_image_source(
+                        messages, image_attachments, token
                     )
-                    if image_url:
+                    image_url = source_info.get("image_url")
+                    source_type = source_info.get("source_type", ORIGIN_UNKNOWN)
+                    origin_file_attachments = source_info.get("file_attachments") or []
+
+                    # Generate video.
+                    service = VideoService()
+                    if use_auto_extension:
                         logger.info(
-                            f"Video image source resolved: source_type={source_type}, "
-                            f"has_file_attachments={bool(origin_file_attachments)}"
+                            f"Video auto extension enabled: target_length={target_length}s, round_length={round_length}s"
                         )
-                        first_response = await service.generate_from_image(
-                            token,
-                            prompt,
-                            image_url,
-                            aspect_ratio,
-                            round_length,
-                            resolution,
-                            preset,
-                            file_attachments=origin_file_attachments,
-                        )
-                    else:
-                        first_response = await service.generate(
-                            token,
-                            prompt,
-                            aspect_ratio,
-                            round_length,
-                            resolution,
-                            preset,
-                        )
+                        if image_url:
+                            logger.info(
+                                f"Video image source resolved: source_type={source_type}, "
+                                f"has_file_attachments={bool(origin_file_attachments)}"
+                            )
+                            first_response = await service.generate_from_image(
+                                token,
+                                prompt,
+                                image_url,
+                                aspect_ratio,
+                                round_length,
+                                resolution,
+                                preset,
+                                file_attachments=origin_file_attachments,
+                                grok_model=grok_model,
+                                model_mode=model_mode,
+                                extra_cookies=extra_cookies,
+                            )
+                        else:
+                            first_response = await service.generate(
+                                token,
+                                prompt,
+                                aspect_ratio,
+                                round_length,
+                                resolution,
+                                preset,
+                                grok_model=grok_model,
+                                model_mode=model_mode,
+                                extra_cookies=extra_cookies,
+                            )
 
-                    first_result = await VideoCollectProcessor(
-                        model, token, upscale_on_finish=False
-                    ).process(first_response)
-                    current_result = first_result
-                    first_meta = _video_meta_from_result(current_result)
-                    current_content = (
-                        (first_result.get("choices") or [{}])[0]
-                        .get("message", {})
-                        .get("content", "")
-                    )
-                    current_video_url = first_meta.get("raw_video_url") or _extract_video_url(current_content)
-                    original_post_id = first_meta.get("post_id") or _extract_post_id(current_video_url)
-                    last_post_id = original_post_id
-
-                    if not last_post_id:
-                        raise UpstreamException(
-                            message="Video auto extension failed: missing first round post id",
-                            details={"status": 502, "type": "missing_post_id"},
-                        )
-
-                    extension_starts = _build_extension_start_times(
-                        target_length, round_length
-                    )
-
-                    for index, start_time in enumerate(extension_starts, start=1):
-                        is_last = index == len(extension_starts)
-                        extension_response = await service.generate_extension(
-                            token,
-                            prompt,
-                            parent_post_id=last_post_id,
-                            original_post_id=original_post_id,
-                            start_time=start_time,
-                            aspect_ratio=aspect_ratio,
-                            video_length=round_length,
-                            resolution_name=resolution,
-                            preset=preset,
-                        )
-                        current_result = await VideoCollectProcessor(
-                            model, token, upscale_on_finish=is_last and should_upscale
-                        ).process(extension_response)
-                        current_meta = _video_meta_from_result(current_result)
+                        first_result = await VideoCollectProcessor(
+                            model, token, upscale_on_finish=False
+                        ).process(first_response)
+                        current_result = first_result
+                        first_meta = _video_meta_from_result(current_result)
                         current_content = (
-                            (current_result.get("choices") or [{}])[0]
+                            (first_result.get("choices") or [{}])[0]
                             .get("message", {})
                             .get("content", "")
                         )
-                        current_video_url = current_meta.get("raw_video_url") or _extract_video_url(current_content)
-                        next_post_id = current_meta.get("post_id") or _extract_post_id(current_video_url)
-                        if not next_post_id and not is_last:
+                        current_video_url = first_meta.get("raw_video_url") or _extract_video_url(current_content)
+                        original_post_id = first_meta.get("post_id") or _extract_post_id(current_video_url)
+                        last_post_id = original_post_id
+
+                        if not last_post_id:
                             raise UpstreamException(
-                                message="Video auto extension failed: missing round post id",
-                                details={"status": 502, "type": "missing_post_id", "round": index + 1},
+                                message="Video auto extension failed: missing first round post id",
+                                details={"status": 502, "type": "missing_post_id"},
                             )
-                        if next_post_id:
-                            last_post_id = next_post_id
 
-                    result = current_result
-                else:
-                    if image_url:
-                        logger.info(
-                            f"Video image source resolved: source_type={source_type}, "
-                            f"has_file_attachments={bool(origin_file_attachments)}"
+                        extension_starts = _build_extension_start_times(
+                            target_length, round_length
                         )
-                        response = await service.generate_from_image(
-                            token,
-                            prompt,
-                            image_url,
-                            aspect_ratio,
-                            video_length,
-                            resolution,
-                            preset,
-                            file_attachments=origin_file_attachments,
-                        )
+
+                        for index, start_time in enumerate(extension_starts, start=1):
+                            is_last = index == len(extension_starts)
+                            extension_response = await service.generate_extension(
+                                token,
+                                prompt,
+                                parent_post_id=last_post_id,
+                                original_post_id=original_post_id,
+                                start_time=start_time,
+                                aspect_ratio=aspect_ratio,
+                                video_length=round_length,
+                                resolution_name=resolution,
+                                preset=preset,
+                                grok_model=grok_model,
+                                model_mode=model_mode,
+                                extra_cookies=extra_cookies,
+                            )
+                            current_result = await VideoCollectProcessor(
+                                model, token, upscale_on_finish=is_last and should_upscale
+                            ).process(extension_response)
+                            current_meta = _video_meta_from_result(current_result)
+                            current_content = (
+                                (current_result.get("choices") or [{}])[0]
+                                .get("message", {})
+                                .get("content", "")
+                            )
+                            current_video_url = current_meta.get("raw_video_url") or _extract_video_url(current_content)
+                            next_post_id = current_meta.get("post_id") or _extract_post_id(current_video_url)
+                            if not next_post_id and not is_last:
+                                raise UpstreamException(
+                                    message="Video auto extension failed: missing round post id",
+                                    details={"status": 502, "type": "missing_post_id", "round": index + 1},
+                                )
+                            if next_post_id:
+                                last_post_id = next_post_id
+
+                        result = current_result
                     else:
-                        response = await service.generate(
+                        if image_url:
+                            logger.info(
+                                f"Video image source resolved: source_type={source_type}, "
+                                f"has_file_attachments={bool(origin_file_attachments)}"
+                            )
+                            response = await service.generate_from_image(
+                                token,
+                                prompt,
+                                image_url,
+                                aspect_ratio,
+                                round_length,
+                                resolution,
+                                preset,
+                                file_attachments=origin_file_attachments,
+                                grok_model=grok_model,
+                                model_mode=model_mode,
+                                extra_cookies=extra_cookies,
+                            )
+                        else:
+                            response = await service.generate(
+                                token,
+                                prompt,
+                                aspect_ratio,
+                                round_length,
+                                resolution,
+                                preset,
+                                grok_model=grok_model,
+                                model_mode=model_mode,
+                                extra_cookies=extra_cookies,
+                            )
+
+                    # Process response.
+                    if is_stream:
+                        processor = VideoStreamProcessor(
+                            model,
                             token,
-                            prompt,
-                            aspect_ratio,
-                            video_length,
-                            resolution,
-                            preset,
+                            show_think,
+                            upscale_on_finish=should_upscale,
+                        )
+                        return wrap_stream_with_usage(
+                            processor.process(response), token_mgr, token, model
                         )
 
-                # Process response.
-                if is_stream:
-                    processor = VideoStreamProcessor(
-                        model,
-                        token,
-                        show_think,
-                        upscale_on_finish=should_upscale,
-                    )
-                    return wrap_stream_with_usage(
-                        processor.process(response), token_mgr, token, model
-                    )
+                    if not use_auto_extension:
+                        result = await VideoCollectProcessor(
+                            model, token, upscale_on_finish=should_upscale
+                        ).process(response)
+                    if isinstance(result, dict) and "_video_meta" in result:
+                        result = dict(result)
+                        result.pop("_video_meta", None)
+                    try:
+                        model_info = request_model_info or ModelService.get(model)
+                        effort = (
+                            EffortType.HIGH
+                            if (model_info and model_info.cost.value == "high")
+                            else EffortType.LOW
+                        )
+                        await token_mgr.consume(token, effort)
+                        logger.debug(
+                            f"Video completed, recorded usage (effort={effort.value})"
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to record video usage: {e}")
+                    return result
 
-                if not use_auto_extension:
-                    result = await VideoCollectProcessor(
-                        model, token, upscale_on_finish=should_upscale
-                    ).process(response)
-                if isinstance(result, dict) and "_video_meta" in result:
-                    result = dict(result)
-                    result.pop("_video_meta", None)
-                try:
-                    model_info = ModelService.get(model)
-                    effort = (
-                        EffortType.HIGH
-                        if (model_info and model_info.cost.value == "high")
-                        else EffortType.LOW
+                except UpstreamException as e:
+                    fallback_round_length = _fallback_round_length_from_error(
+                        e, round_length
                     )
-                    await token_mgr.consume(token, effort)
-                    logger.debug(
-                        f"Video completed, recorded usage (effort={effort.value})"
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to record video usage: {e}")
-                return result
+                    if (
+                        not is_stream
+                        and not duration_fallback_used
+                        and fallback_round_length is not None
+                    ):
+                        duration_fallback_used = True
+                        forced_round_length = fallback_round_length
+                        logger.warning(
+                            f"Video round length {round_length}s rejected by upstream; "
+                            f"retrying with {forced_round_length}s rounds for target_length={target_length}s"
+                        )
+                        continue
 
-            except UpstreamException as e:
-                last_error = e
-                if rate_limited(e):
-                    await token_mgr.mark_rate_limited(token)
-                    logger.warning(
-                        f"Token {mask_token_for_log(token)} rate limited (429), "
-                        f"trying next token (attempt {attempt + 1}/{max_token_retries})"
-                    )
-                    continue
-                raise
+                    last_error = e
+                    if rate_limited(e):
+                        await token_mgr.mark_rate_limited(token)
+                        logger.warning(
+                            f"Token {mask_token_for_log(token)} rate limited (429), "
+                            f"trying next token (attempt {attempt + 1}/{max_token_retries})"
+                        )
+                        break
+                    raise
 
         if last_error:
             raise last_error
