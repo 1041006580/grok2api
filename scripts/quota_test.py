@@ -8,6 +8,8 @@ Grok 模型真实额度测试脚本
 每个模型使用一个全新的 basic token 以保证数据准确。
 """
 
+__test__ = False
+
 import argparse
 import asyncio
 import base64

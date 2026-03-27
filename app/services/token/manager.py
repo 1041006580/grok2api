@@ -41,6 +41,15 @@ def _default_quota_for_pool(pool_name: str) -> int:
     return BASIC__DEFAULT_QUOTA
 
 
+class UsageService:
+    """Lazy proxy to avoid circular imports while keeping a stable patch point."""
+
+    async def get(self, *args, **kwargs):
+        from app.services.grok.batch_services.usage import UsageService as _UsageService
+
+        return await _UsageService().get(*args, **kwargs)
+
+
 class TokenManager:
     """管理 Token 的增删改查和配额同步"""
 
@@ -521,8 +530,6 @@ class TokenManager:
 
         # 尝试 API 同步
         try:
-            from app.services.grok.batch_services.usage import UsageService
-
             usage_service = UsageService()
             result = await usage_service.get(token_str)
 
@@ -886,8 +893,6 @@ class TokenManager:
 
         # 批量并发刷新
         semaphore = asyncio.Semaphore(DEFAULT_REFRESH_CONCURRENCY)
-        from app.services.grok.batch_services.usage import UsageService
-
         usage_service = UsageService()
         refreshed = 0
         recovered = 0
