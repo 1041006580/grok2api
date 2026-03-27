@@ -20,7 +20,11 @@ class SetBirthReverse:
     """/rest/auth/set-birth-date reverse interface."""
 
     @staticmethod
-    async def request(session: AsyncSession, token: str) -> Any:
+    async def request(
+        session: AsyncSession,
+        token: str,
+        extra_cookies: str | None = None,
+    ) -> Any:
         """Set birth date in Grok.
 
         Args:
@@ -41,6 +45,7 @@ class SetBirthReverse:
                 content_type="application/json",
                 origin="https://grok.com",
                 referer="https://grok.com/?_s=data",
+                extra_cookies=extra_cookies,
             )
 
             # Build payload

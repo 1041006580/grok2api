@@ -19,7 +19,11 @@ class NsfwMgmtReverse:
     """/auth_mgmt.AuthManagement/UpdateUserFeatureControls reverse interface."""
 
     @staticmethod
-    async def request(session: AsyncSession, token: str) -> GrpcStatus:
+    async def request(
+        session: AsyncSession,
+        token: str,
+        extra_cookies: str | None = None,
+    ) -> GrpcStatus:
         """Enable NSFW feature control via gRPC-Web.
 
         Args:
@@ -39,6 +43,7 @@ class NsfwMgmtReverse:
                 cookie_token=token,
                 origin="https://grok.com",
                 referer="https://grok.com/?_s=data",
+                extra_cookies=extra_cookies,
             )
             headers["Content-Type"] = "application/grpc-web+proto"
             headers["Accept"] = "*/*"

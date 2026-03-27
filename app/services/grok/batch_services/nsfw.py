@@ -3,6 +3,7 @@ Batch NSFW service.
 """
 
 import asyncio
+import re
 from typing import Callable, Awaitable, Dict, Any, Optional
 
 from app.core.logger import logger
@@ -10,12 +11,16 @@ from app.core.config import get_config
 from app.core.exceptions import UpstreamException
 from app.services.reverse.nsfw_mgmt import NsfwMgmtReverse
 from app.services.reverse.set_birth import SetBirthReverse
+from app.services.reverse.utils.headers import build_headers
 from app.services.reverse.utils.session import ResettableSession
+from app.services.reverse.utils.urls import resolve_api_url
 from app.core.batch import run_batch
 
 
 _NSFW_SEMAPHORE = None
 _NSFW_SEM_VALUE = None
+NSFW_SETTINGS_PAGE_URL = "https://grok.com/?_s=data"
+_X_USERID_RE = re.compile(r"x-userid=([^;,\s]+)")
 
 
 def _get_nsfw_semaphore() -> asyncio.Semaphore:
@@ -40,6 +45,114 @@ def _get_nsfw_prerequisite_error() -> Optional[str]:
         "NSFW enable requires a proxy/reverse proxy or Cloudflare cookies "
         "(proxy.base_proxy_url, proxy.reverse_base_url, proxy.cf_clearance, or proxy.cf_cookies)."
     )
+
+
+def _find_token_info(mgr, token: str):
+    pools = getattr(mgr, "pools", None)
+    if not isinstance(pools, dict):
+        return None
+    raw_token = token[4:] if token.startswith("sso=") else token
+    for pool in pools.values():
+        getter = getattr(pool, "get", None)
+        if not callable(getter):
+            continue
+        token_info = getter(raw_token)
+        if token_info:
+            return token_info
+    return None
+
+
+def _extra_cookies_from_token_info(token_info: Any) -> str:
+    if not token_info:
+        return ""
+    note = getattr(token_info, "note", "") or ""
+    if not isinstance(note, str):
+        note = str(note)
+    note = note.strip()
+    if not note:
+        return ""
+    lowered = note.lower()
+    if lowered.startswith("cookie:") or lowered.startswith("cookies:"):
+        return note.split(":", 1)[1].strip()
+    if note.startswith("x-userid="):
+        return note
+    return ""
+
+
+def _extract_x_userid_cookie(headers: Any) -> str:
+    if not headers:
+        return ""
+
+    cookie_values = []
+    get_list = getattr(headers, "get_list", None)
+    if callable(get_list):
+        try:
+            cookie_values.extend(str(v) for v in get_list("set-cookie"))
+        except Exception:
+            pass
+
+    items = getattr(headers, "items", None)
+    if callable(items):
+        try:
+            for key, value in items():
+                if str(key).lower() == "set-cookie":
+                    cookie_values.append(str(value))
+        except Exception:
+            pass
+
+    joined = "\n".join(cookie_values)
+    match = _X_USERID_RE.search(joined)
+    if not match:
+        return ""
+    return f"x-userid={match.group(1)}"
+
+
+async def _resolve_nsfw_extra_cookies(session, token: str, mgr) -> str:
+    token_info = _find_token_info(mgr, token)
+    extra_cookies = _extra_cookies_from_token_info(token_info)
+    if extra_cookies:
+        return extra_cookies
+
+    base_proxy = get_config("proxy.base_proxy_url")
+    proxies = {"http": base_proxy, "https": base_proxy} if base_proxy else None
+    browser = get_config("proxy.browser")
+    timeout = get_config("nsfw.timeout")
+    headers = build_headers(
+        cookie_token=token,
+        origin="https://grok.com",
+        referer="https://grok.com/?_s=data",
+    )
+    headers["Accept"] = (
+        "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,"
+        "image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
+    )
+    headers["Sec-Fetch-Dest"] = "document"
+    headers["Cache-Control"] = "no-cache"
+    headers["Pragma"] = "no-cache"
+
+    try:
+        response = await session.get(
+            resolve_api_url(NSFW_SETTINGS_PAGE_URL),
+            headers=headers,
+            timeout=timeout,
+            proxies=proxies,
+            impersonate=browser,
+        )
+    except Exception as exc:
+        logger.warning(f"NSFW x-userid probe failed: {exc}")
+        return ""
+
+    if response.status_code != 200:
+        logger.warning(
+            f"NSFW x-userid probe returned {response.status_code}",
+            extra={"error_type": "UpstreamException"},
+        )
+        return ""
+
+    extra_cookies = _extract_x_userid_cookie(getattr(response, "headers", None))
+    if extra_cookies and token_info and not getattr(token_info, "note", ""):
+        token_info.note = extra_cookies
+    return extra_cookies
 
 
 class NSFWService:
@@ -69,6 +182,8 @@ class NSFWService:
 
                 browser = get_config("proxy.browser")
                 async with ResettableSession(impersonate=browser) as session:
+                    extra_cookies = await _resolve_nsfw_extra_cookies(session, token, mgr)
+
                     async def _record_fail(err: UpstreamException, reason: str):
                         status = None
                         if err.details and "status" in err.details:
@@ -81,7 +196,11 @@ class NSFWService:
 
                     try:
                         async with _get_nsfw_semaphore():
-                            await SetBirthReverse.request(session, token)
+                            await SetBirthReverse.request(
+                                session,
+                                token,
+                                extra_cookies=extra_cookies,
+                            )
                     except UpstreamException as e:
                         status = await _record_fail(e, "set_birth_auth_failed")
                         return {
@@ -92,7 +211,11 @@ class NSFWService:
 
                     try:
                         async with _get_nsfw_semaphore():
-                            grpc_status = await NsfwMgmtReverse.request(session, token)
+                            grpc_status = await NsfwMgmtReverse.request(
+                                session,
+                                token,
+                                extra_cookies=extra_cookies,
+                            )
                         success = grpc_status.code in (-1, 0)
                     except UpstreamException as e:
                         status = await _record_fail(e, "nsfw_mgmt_auth_failed")
