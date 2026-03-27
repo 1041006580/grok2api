@@ -8,7 +8,6 @@ from typing import Callable, Awaitable, Dict, Any, Optional
 from app.core.logger import logger
 from app.core.config import get_config
 from app.core.exceptions import UpstreamException
-from app.services.reverse.accept_tos import AcceptTosReverse
 from app.services.reverse.nsfw_mgmt import NsfwMgmtReverse
 from app.services.reverse.set_birth import SetBirthReverse
 from app.services.reverse.utils.session import ResettableSession
@@ -28,6 +27,21 @@ def _get_nsfw_semaphore() -> asyncio.Semaphore:
     return _NSFW_SEMAPHORE
 
 
+def _get_nsfw_prerequisite_error() -> Optional[str]:
+    base_proxy = str(get_config("proxy.base_proxy_url") or "").strip()
+    reverse_base = str(get_config("proxy.reverse_base_url") or "").strip()
+    cf_clearance = str(get_config("proxy.cf_clearance") or "").strip()
+    cf_cookies = str(get_config("proxy.cf_cookies") or "").strip()
+
+    if base_proxy or reverse_base or cf_clearance or cf_cookies:
+        return None
+
+    return (
+        "NSFW enable requires a proxy/reverse proxy or Cloudflare cookies "
+        "(proxy.base_proxy_url, proxy.reverse_base_url, proxy.cf_clearance, or proxy.cf_cookies)."
+    )
+
+
 class NSFWService:
     """NSFW 模式服务"""
     @staticmethod
@@ -40,8 +54,19 @@ class NSFWService:
     ) -> Dict[str, Dict[str, Any]]:
         """Batch enable NSFW."""
         batch_size = get_config("nsfw.batch_size")
+        prerequisite_error = _get_nsfw_prerequisite_error()
+        if prerequisite_error:
+            logger.warning(prerequisite_error)
+
         async def _enable(token: str):
             try:
+                if prerequisite_error:
+                    return {
+                        "success": False,
+                        "http_status": 400,
+                        "error": prerequisite_error,
+                    }
+
                 browser = get_config("proxy.browser")
                 async with ResettableSession(impersonate=browser) as session:
                     async def _record_fail(err: UpstreamException, reason: str):
@@ -53,17 +78,6 @@ class NSFWService:
                         if status == 401:
                             await mgr.record_fail(token, status, reason)
                         return status or 0
-
-                    try:
-                        async with _get_nsfw_semaphore():
-                            await AcceptTosReverse.request(session, token)
-                    except UpstreamException as e:
-                        status = await _record_fail(e, "tos_auth_failed")
-                        return {
-                            "success": False,
-                            "http_status": status,
-                            "error": f"Accept ToS failed: {str(e)}",
-                        }
 
                     try:
                         async with _get_nsfw_semaphore():

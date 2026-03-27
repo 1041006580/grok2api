@@ -2,8 +2,6 @@
 Reverse interface: set birth date.
 """
 
-import datetime
-import random
 from typing import Any
 from curl_cffi.requests import AsyncSession
 
@@ -15,6 +13,7 @@ from app.services.reverse.utils.retry import retry_on_status
 from app.services.reverse.utils.urls import resolve_api_url
 
 SET_BIRTH_API = "https://grok.com/rest/auth/set-birth-date"
+ADULT_BIRTH_DATE = "2001-01-01T16:00:00.000Z"
 
 
 class SetBirthReverse:
@@ -41,22 +40,11 @@ class SetBirthReverse:
                 cookie_token=token,
                 content_type="application/json",
                 origin="https://grok.com",
-                referer="https://grok.com/?_s=home",
+                referer="https://grok.com/?_s=data",
             )
 
             # Build payload
-            today = datetime.date.today()
-            birth_year = today.year - random.randint(20, 48)
-            birth_month = random.randint(1, 12)
-            birth_day = random.randint(1, 28)
-            hour = random.randint(0, 23)
-            minute = random.randint(0, 59)
-            second = random.randint(0, 59)
-            microsecond = random.randint(0, 999)
-            payload = {
-                "birthDate": f"{birth_year:04d}-{birth_month:02d}-{birth_day:02d}"
-                f"T{hour:02d}:{minute:02d}:{second:02d}.{microsecond:03d}Z"
-            }
+            payload = {"birthDate": ADULT_BIRTH_DATE}
 
             # Curl Config
             timeout = get_config("nsfw.timeout")

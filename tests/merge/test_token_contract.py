@@ -30,3 +30,143 @@ def test_usage_service_defaults_to_supported_rate_limit_model():
             asyncio.run(UsageService().get("sso=test"))
 
     assert captured["model_name"] == "grok-4-1-thinking-1129"
+
+
+def test_nsfw_batch_requires_proxy_or_cf_clearance_before_accept_tos():
+    from app.core.config import config
+    from app.services.grok.batch_services.nsfw import NSFWService
+
+    config._config = {
+        "nsfw": {"batch_size": 1, "concurrent": 1},
+        "proxy": {
+            "base_proxy_url": "",
+            "reverse_base_url": "",
+            "cf_clearance": "",
+            "cf_cookies": "",
+            "browser": "chrome136",
+        },
+    }
+
+    mgr = AsyncMock()
+    mgr.record_fail = AsyncMock()
+    mgr.add_tag = AsyncMock()
+
+    with patch(
+        "app.services.reverse.accept_tos.AcceptTosReverse.request",
+        new_callable=AsyncMock,
+        side_effect=AssertionError("AcceptTosReverse should not run without proxy/cf_clearance"),
+    ) as accept_tos:
+        results = asyncio.run(NSFWService.batch(["sso=test-token"], mgr))
+
+    result = results["sso=test-token"]
+
+    accept_tos.assert_not_awaited()
+    assert result["ok"] is True
+    assert result["data"]["success"] is False
+    assert result["data"]["http_status"] == 400
+    assert "cf_clearance" in result["data"]["error"]
+
+
+def test_nsfw_batch_matches_browser_flow_without_accept_tos():
+    from app.core.config import config
+    from app.services.grok.batch_services.nsfw import NSFWService
+    from app.services.reverse.utils.grpc import GrpcStatus
+
+    config._config = {
+        "nsfw": {"batch_size": 1, "concurrent": 1, "timeout": 60},
+        "proxy": {
+            "base_proxy_url": "",
+            "reverse_base_url": "",
+            "cf_clearance": "cf-token",
+            "cf_cookies": "",
+            "browser": "chrome136",
+            "user_agent": "Mozilla/5.0",
+        },
+        "retry": {
+            "max_retry": 3,
+            "retry_status_codes": [401, 429, 403],
+            "retry_budget": 60,
+            "retry_backoff_base": 0.5,
+            "retry_backoff_factor": 2.0,
+            "retry_backoff_max": 20.0,
+        },
+    }
+
+    mgr = AsyncMock()
+    mgr.record_fail = AsyncMock()
+    mgr.add_tag = AsyncMock()
+
+    with patch(
+        "app.services.reverse.accept_tos.AcceptTosReverse.request",
+        new_callable=AsyncMock,
+        side_effect=AssertionError(
+            "AcceptTosReverse should not run when matching browser NSFW flow"
+        ),
+    ) as accept_tos:
+        with patch(
+            "app.services.grok.batch_services.nsfw.SetBirthReverse.request",
+            new_callable=AsyncMock,
+        ) as set_birth:
+            with patch(
+                "app.services.grok.batch_services.nsfw.NsfwMgmtReverse.request",
+                new_callable=AsyncMock,
+                return_value=GrpcStatus(code=0, message=""),
+            ) as nsfw_mgmt:
+                results = asyncio.run(NSFWService.batch(["sso=test-token"], mgr))
+
+    result = results["sso=test-token"]
+
+    accept_tos.assert_not_awaited()
+    set_birth.assert_awaited_once()
+    nsfw_mgmt.assert_awaited_once()
+    mgr.add_tag.assert_awaited_once_with("sso=test-token", "nsfw")
+    assert result["ok"] is True
+    assert result["data"]["success"] is True
+    assert result["data"]["http_status"] == 200
+
+
+def test_set_birth_reverse_uses_browser_adult_payload():
+    from app.core.config import config
+    from app.services.reverse.set_birth import SetBirthReverse
+
+    captured = {}
+
+    class DummyResponse:
+        status_code = 200
+
+    async def fake_post(url, *, headers, json, timeout, proxies, impersonate):
+        captured["url"] = url
+        captured["headers"] = headers
+        captured["json"] = json
+        captured["timeout"] = timeout
+        captured["proxies"] = proxies
+        captured["impersonate"] = impersonate
+        return DummyResponse()
+
+    session = AsyncMock()
+    session.post.side_effect = fake_post
+
+    config._config = {
+        "nsfw": {"timeout": 60},
+        "proxy": {
+            "base_proxy_url": "",
+            "browser": "chrome136",
+            "user_agent": "Mozilla/5.0",
+            "cf_clearance": "cf-token",
+            "cf_cookies": "",
+        },
+        "retry": {
+            "max_retry": 3,
+            "retry_status_codes": [401, 429, 403],
+            "retry_budget": 60,
+            "retry_backoff_base": 0.5,
+            "retry_backoff_factor": 2.0,
+            "retry_backoff_max": 20.0,
+        },
+    }
+
+    asyncio.run(SetBirthReverse.request(session, "sso=test-token"))
+
+    assert captured["url"] == "https://grok.com/rest/auth/set-birth-date"
+    assert captured["headers"]["Referer"] == "https://grok.com/?_s=data"
+    assert captured["json"] == {"birthDate": "2001-01-01T16:00:00.000Z"}
