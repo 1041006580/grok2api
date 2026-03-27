@@ -21,6 +21,7 @@ _NSFW_SEMAPHORE = None
 _NSFW_SEM_VALUE = None
 NSFW_SETTINGS_PAGE_URL = "https://grok.com/?_s=data"
 _X_USERID_RE = re.compile(r"x-userid=([^;,\s]+)")
+_USER_ID_RE = re.compile(r'userId(?:\\")?\s*:\s*(?:\\")?([0-9a-fA-F-]{36})')
 
 
 def _get_nsfw_semaphore() -> asyncio.Semaphore:
@@ -107,6 +108,27 @@ def _extract_x_userid_cookie(headers: Any) -> str:
     return f"x-userid={match.group(1)}"
 
 
+def _extract_x_userid_from_body(response: Any) -> str:
+    body_text = ""
+    text = getattr(response, "text", None)
+    if isinstance(text, str):
+        body_text = text
+    elif isinstance(text, bytes):
+        body_text = text.decode("utf-8", errors="ignore")
+    else:
+        content = getattr(response, "content", None)
+        if isinstance(content, bytes):
+            body_text = content.decode("utf-8", errors="ignore")
+
+    if not body_text:
+        return ""
+
+    match = _USER_ID_RE.search(body_text)
+    if not match:
+        return ""
+    return f"x-userid={match.group(1)}"
+
+
 async def _resolve_nsfw_extra_cookies(session, token: str, mgr) -> str:
     token_info = _find_token_info(mgr, token)
     extra_cookies = _extra_cookies_from_token_info(token_info)
@@ -150,6 +172,8 @@ async def _resolve_nsfw_extra_cookies(session, token: str, mgr) -> str:
         return ""
 
     extra_cookies = _extract_x_userid_cookie(getattr(response, "headers", None))
+    if not extra_cookies:
+        extra_cookies = _extract_x_userid_from_body(response)
     if extra_cookies and token_info and not getattr(token_info, "note", ""):
         token_info.note = extra_cookies
     return extra_cookies

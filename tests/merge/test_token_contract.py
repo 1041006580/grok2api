@@ -270,6 +270,82 @@ def test_nsfw_batch_fetches_x_userid_cookie_when_note_missing():
     assert pool.get("test-token").note == "x-userid=user-42"
 
 
+def test_nsfw_batch_extracts_x_userid_from_probe_html_when_cookie_missing():
+    from app.core.config import config
+    from app.services.grok.batch_services.nsfw import NSFWService
+    from app.services.reverse.utils.grpc import GrpcStatus
+    from app.services.token.models import TokenInfo
+    from app.services.token.pool import TokenPool
+
+    config._config = {
+        "nsfw": {"batch_size": 1, "concurrent": 1, "timeout": 60},
+        "proxy": {
+            "base_proxy_url": "",
+            "reverse_base_url": "",
+            "cf_clearance": "cf-token",
+            "cf_cookies": "",
+            "browser": "chrome136",
+            "user_agent": "Mozilla/5.0",
+        },
+        "retry": {
+            "max_retry": 3,
+            "retry_status_codes": [401, 429, 403],
+            "retry_budget": 60,
+            "retry_backoff_base": 0.5,
+            "retry_backoff_factor": 2.0,
+            "retry_backoff_max": 20.0,
+        },
+    }
+
+    pool = TokenPool("ssoSuper")
+    pool.add(TokenInfo(token="test-token", quota=10, note=""))
+    mgr = SimpleNamespace(
+        pools={"ssoSuper": pool},
+        record_fail=AsyncMock(),
+        add_tag=AsyncMock(),
+    )
+
+    fake_session = AsyncMock()
+    fake_session.get.return_value = SimpleNamespace(
+        status_code=200,
+        headers={},
+        text='self.__next_f.push([1,"3c:[\\"$\\",\\"$L46\\",null,{\\"initialData\\":{\\"user\\":{\\"sessionId\\":\\"abc\\",\\"userId\\":\\"523696fe-4dd4-43c6-864a-244c05bcbad7\\"}}}"])',
+    )
+    session_ctx = AsyncMock()
+    session_ctx.__aenter__.return_value = fake_session
+    session_ctx.__aexit__.return_value = None
+
+    set_birth_calls = []
+    nsfw_calls = []
+
+    async def fake_set_birth(session, token, extra_cookies=None):
+        set_birth_calls.append(extra_cookies)
+
+    async def fake_nsfw_mgmt(session, token, extra_cookies=None):
+        nsfw_calls.append(extra_cookies)
+        return GrpcStatus(code=0, message="")
+
+    with patch(
+        "app.services.grok.batch_services.nsfw.ResettableSession",
+        autospec=True,
+        return_value=session_ctx,
+    ):
+        with patch(
+            "app.services.grok.batch_services.nsfw.SetBirthReverse.request",
+            new=AsyncMock(side_effect=fake_set_birth),
+        ):
+            with patch(
+                "app.services.grok.batch_services.nsfw.NsfwMgmtReverse.request",
+                new=AsyncMock(side_effect=fake_nsfw_mgmt),
+            ):
+                results = asyncio.run(NSFWService.batch(["test-token"], mgr))
+
+    assert results["test-token"]["data"]["success"] is True
+    assert set_birth_calls == ["x-userid=523696fe-4dd4-43c6-864a-244c05bcbad7"]
+    assert nsfw_calls == ["x-userid=523696fe-4dd4-43c6-864a-244c05bcbad7"]
+    assert pool.get("test-token").note == "x-userid=523696fe-4dd4-43c6-864a-244c05bcbad7"
+
+
 def test_set_birth_reverse_uses_browser_adult_payload():
     from app.core.config import config
     from app.services.reverse.set_birth import SetBirthReverse
