@@ -256,6 +256,8 @@
     "tabExpired": "失效",
     "tabNsfw": "已开 NSFW",
     "tabNoNsfw": "未开 NSFW",
+    "tabBasicToken": "Basic Token",
+    "tabSuperToken": "Super Token",
     "statusFilterAria": "Token 状态筛选",
     "tableToken": "Token",
     "tableType": "类型",

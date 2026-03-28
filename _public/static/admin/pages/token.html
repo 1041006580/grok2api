@@ -117,6 +117,15 @@
                 data-filter="no-nsfw" onclick="filterByStatus('no-nsfw')">
           <span data-i18n="token.tabNoNsfw">未开 NSFW</span> <span class="badge badge-gray" id="tab-count-no-nsfw">0</span>
         </button>
+        <span class="tab-sep"></span>
+        <button class="tab-item" role="tab" aria-selected="false"
+                data-filter="basic-token" onclick="filterByStatus('basic-token')">
+          <span data-i18n="token.tabBasicToken">Basic Token</span> <span class="badge badge-gray" id="tab-count-basic-token">0</span>
+        </button>
+        <button class="tab-item" role="tab" aria-selected="false"
+                data-filter="super-token" onclick="filterByStatus('super-token')">
+          <span data-i18n="token.tabSuperToken">Super Token</span> <span class="badge badge-green" id="tab-count-super-token">0</span>
+        </button>
       </div>
 
       <div class="token-table-shell rounded-lg overflow-hidden bg-white mb-4">

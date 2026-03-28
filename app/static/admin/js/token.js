@@ -174,6 +174,8 @@ function updateStats(data) {
   let invalidTokens = 0;
   let nsfwTokens = 0;
   let noNsfwTokens = 0;
+  let basicTokens = 0;
+  let superTokens = 0;
   let chatQuota = 0;
   let totalCalls = 0;
 
@@ -190,6 +192,11 @@ function updateStats(data) {
       nsfwTokens++;
     } else {
       noNsfwTokens++;
+    }
+    if (t.pool === 'ssoSuper') {
+      superTokens++;
+    } else if (t.pool === 'ssoBasic') {
+      basicTokens++;
     }
     totalCalls += Number(t.use_count || 0);
   });
@@ -211,7 +218,9 @@ function updateStats(data) {
     cooling: coolingTokens,
     expired: invalidTokens,
     nsfw: nsfwTokens,
-    'no-nsfw': noNsfwTokens
+    'no-nsfw': noNsfwTokens,
+    'basic-token': basicTokens,
+    'super-token': superTokens
   });
 }
 
@@ -1014,6 +1023,8 @@ function getFilteredTokens() {
     if (currentFilter === 'expired') return t.status !== 'active' && t.status !== 'cooling';
     if (currentFilter === 'nsfw') return t.tags && t.tags.includes('nsfw');
     if (currentFilter === 'no-nsfw') return !t.tags || !t.tags.includes('nsfw');
+    if (currentFilter === 'basic-token') return t.pool === 'ssoBasic';
+    if (currentFilter === 'super-token') return t.pool === 'ssoSuper';
     return true;
   });
 }
@@ -1025,7 +1036,9 @@ function updateTabCounts(counts) {
     cooling: flatTokens.filter(t => t.status === 'cooling').length,
     expired: flatTokens.filter(t => t.status !== 'active' && t.status !== 'cooling').length,
     nsfw: flatTokens.filter(t => t.tags && t.tags.includes('nsfw')).length,
-    'no-nsfw': flatTokens.filter(t => !t.tags || !t.tags.includes('nsfw')).length
+    'no-nsfw': flatTokens.filter(t => !t.tags || !t.tags.includes('nsfw')).length,
+    'basic-token': flatTokens.filter(t => t.pool === 'ssoBasic').length,
+    'super-token': flatTokens.filter(t => t.pool === 'ssoSuper').length
   };
 
   Object.entries(safeCounts).forEach(([key, count]) => {

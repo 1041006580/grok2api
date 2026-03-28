@@ -256,6 +256,8 @@
     "tabExpired": "Expired",
     "tabNsfw": "NSFW On",
     "tabNoNsfw": "NSFW Off",
+    "tabBasicToken": "Basic Token",
+    "tabSuperToken": "Super Token",
     "statusFilterAria": "Token status filter",
     "tableToken": "Token",
     "tableType": "Type",

@@ -3,7 +3,7 @@
 import asyncio
 import time
 from datetime import datetime
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Tuple
 
 from app.core.logger import logger
 from app.core.mask import mask_token_for_log
@@ -20,6 +20,7 @@ from app.core.config import get_config
 from app.core.exceptions import UpstreamException
 from app.services.grok.utils.retry import explicit_auth_failure
 from app.services.token.pool import TokenPool
+from app.services.token.tier import classify_remaining_tier, extract_remaining_quota
 
 
 DEFAULT_REFRESH_BATCH_SIZE = 10
@@ -211,6 +212,136 @@ class TokenManager:
                     except (TypeError, ValueError):
                         return None
         return None
+
+    def _resolve_pool_from_usage_result(
+        self,
+        result: dict,
+        fallback_pool_name: Optional[str] = None,
+    ) -> Tuple[Optional[str], Optional[str], Optional[int]]:
+        remaining = extract_remaining_quota(result)
+        tier = classify_remaining_tier(remaining)
+        if tier in {"heavy", "super"}:
+            return (
+                SUPER_POOL_NAME,
+                f"tier={tier}, remaining={remaining}",
+                remaining,
+            )
+        if tier == "basic":
+            return (
+                BASIC_POOL_NAME,
+                f"tier={tier}, remaining={remaining}",
+                remaining,
+            )
+
+        window_size = self._extract_window_size_seconds(result)
+        if window_size is not None:
+            if window_size >= SUPER_WINDOW_THRESHOLD_SECONDS:
+                return (
+                    BASIC_POOL_NAME,
+                    f"windowSizeSeconds={window_size}",
+                    remaining,
+                )
+            return (
+                SUPER_POOL_NAME,
+                f"windowSizeSeconds={window_size}",
+                remaining,
+            )
+
+        return fallback_pool_name, None, remaining
+
+    async def classify_token_pool(
+        self,
+        token_str: str,
+        fallback_pool_name: Optional[str] = None,
+    ) -> Optional[str]:
+        """Detect basic/super tier for an existing token and move pools if needed."""
+        raw_token = token_str.removeprefix("sso=")
+        current_pool_name = self.get_pool_name_for_token(raw_token) or fallback_pool_name
+        if current_pool_name not in {BASIC_POOL_NAME, SUPER_POOL_NAME}:
+            return current_pool_name
+
+        token_info = None
+        if current_pool_name and current_pool_name in self.pools:
+            token_info = self.pools[current_pool_name].get(raw_token)
+
+        try:
+            result = await UsageService().get(raw_token)
+        except Exception as e:
+            logger.warning(
+                f"Token {mask_token_for_log(raw_token)}: tier detection failed, keep pool "
+                f"{current_pool_name or fallback_pool_name or BASIC_POOL_NAME} ({e})"
+            )
+            return current_pool_name or fallback_pool_name
+
+        target_pool_name, reason, remaining = self._resolve_pool_from_usage_result(
+            result,
+            fallback_pool_name=current_pool_name or fallback_pool_name,
+        )
+
+        if token_info:
+            old_status = token_info.status
+            old_quota = token_info.quota
+            if remaining is not None:
+                token_info.update_quota(remaining)
+            token_info.record_success(is_usage=False)
+            token_info.mark_synced()
+
+            final_pool_name = current_pool_name
+            if (
+                current_pool_name
+                and target_pool_name
+                and target_pool_name != current_pool_name
+            ):
+                final_pool_name = self._move_token_pool(
+                    token_info,
+                    current_pool_name,
+                    target_pool_name,
+                    reason=reason or "tier_detection",
+                )
+
+            if final_pool_name:
+                change_kind = (
+                    "state"
+                    if token_info.status != old_status or token_info.quota != old_quota
+                    else "usage"
+                )
+                self._track_token_change(token_info, final_pool_name, change_kind)
+                self._schedule_save()
+
+        return target_pool_name or current_pool_name or fallback_pool_name
+
+    async def classify_tokens(
+        self,
+        tokens: List[str],
+        fallback_pools: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Optional[str]]:
+        """Best-effort batch tier detection for imported tokens."""
+        normalized_tokens: List[str] = []
+        seen = set()
+        for token in tokens:
+            raw_token = str(token).strip().removeprefix("sso=")
+            if not raw_token or raw_token in seen:
+                continue
+            seen.add(raw_token)
+            normalized_tokens.append(raw_token)
+
+        if not normalized_tokens:
+            return {}
+
+        semaphore = asyncio.Semaphore(DEFAULT_REFRESH_CONCURRENCY)
+
+        async def _classify_one(raw_token: str):
+            async with semaphore:
+                detected_pool = await self.classify_token_pool(
+                    raw_token,
+                    fallback_pool_name=(fallback_pools or {}).get(raw_token),
+                )
+                return raw_token, detected_pool
+
+        results = await asyncio.gather(
+            *(_classify_one(token) for token in normalized_tokens)
+        )
+        return dict(results)
 
     def _move_token_pool(
         self,
@@ -533,12 +664,8 @@ class TokenManager:
             usage_service = UsageService()
             result = await usage_service.get(token_str)
 
-            if result and "remainingTokens" in result:
-                new_quota = result.get("remainingTokens")
-                if new_quota is None:
-                    new_quota = result.get("remainingQueries")
-                if new_quota is None:
-                    return False
+            new_quota = extract_remaining_quota(result)
+            if new_quota is not None:
                 old_quota = target_token.quota
                 old_status = target_token.status
 
@@ -546,28 +673,21 @@ class TokenManager:
                 target_token.record_success(is_usage=is_usage)
                 target_token.mark_synced()
 
-                window_size = self._extract_window_size_seconds(result)
-                if window_size is not None:
-                    if (
-                        target_pool_name == SUPER_POOL_NAME
-                        and window_size >= SUPER_WINDOW_THRESHOLD_SECONDS
-                    ):
-                        target_pool_name = self._move_token_pool(
-                            target_token,
-                            SUPER_POOL_NAME,
-                            BASIC_POOL_NAME,
-                            reason=f"windowSizeSeconds={window_size}",
-                        )
-                    elif (
-                        target_pool_name == BASIC_POOL_NAME
-                        and window_size < SUPER_WINDOW_THRESHOLD_SECONDS
-                    ):
-                        target_pool_name = self._move_token_pool(
-                            target_token,
-                            BASIC_POOL_NAME,
-                            SUPER_POOL_NAME,
-                            reason=f"windowSizeSeconds={window_size}",
-                        )
+                detected_pool_name, reason, _ = self._resolve_pool_from_usage_result(
+                    result,
+                    fallback_pool_name=target_pool_name,
+                )
+                if (
+                    target_pool_name
+                    and detected_pool_name
+                    and detected_pool_name != target_pool_name
+                ):
+                    target_pool_name = self._move_token_pool(
+                        target_token,
+                        target_pool_name,
+                        detected_pool_name,
+                        reason=reason or "usage_sync",
+                    )
 
                 consumed = max(0, old_quota - new_quota)
                 logger.info(
@@ -703,22 +823,48 @@ class TokenManager:
         Returns:
             是否成功
         """
-        if pool_name not in self.pools:
-            self.pools[pool_name] = TokenPool(pool_name)
-            logger.info(f"Pool '{pool_name}': created")
-
-        pool = self.pools[pool_name]
-
         token = token[4:] if token.startswith("sso=") else token
-        if pool.get(token):
-            logger.warning(f"Pool '{pool_name}': token already exists")
+        existing_pool_name = self.get_pool_name_for_token(token)
+        if existing_pool_name:
+            logger.warning(f"Pool '{existing_pool_name}': token already exists")
             return False
 
-        token_info = TokenInfo(token=token, quota=_default_quota_for_pool(pool_name))
+        final_pool_name = pool_name
+        detected_quota = None
+        if pool_name in {BASIC_POOL_NAME, SUPER_POOL_NAME}:
+            try:
+                result = await UsageService().get(token)
+                final_pool_name, reason, detected_quota = self._resolve_pool_from_usage_result(
+                    result,
+                    fallback_pool_name=pool_name,
+                )
+                if final_pool_name != pool_name:
+                    logger.info(
+                        f"Token {mask_token_for_log(token)}: auto detected pool "
+                        f"{pool_name} -> {final_pool_name} ({reason})"
+                    )
+            except Exception as e:
+                logger.warning(
+                    f"Token {mask_token_for_log(token)}: tier detection failed during add, "
+                    f"keep pool {pool_name} ({e})"
+                )
+                final_pool_name = pool_name
+
+        if final_pool_name not in self.pools:
+            self.pools[final_pool_name] = TokenPool(final_pool_name)
+            logger.info(f"Pool '{final_pool_name}': created")
+
+        pool = self.pools[final_pool_name]
+        token_info = TokenInfo(
+            token=token,
+            quota=detected_quota
+            if detected_quota is not None
+            else _default_quota_for_pool(final_pool_name),
+        )
         pool.add(token_info)
-        self._track_token_change(token_info, pool_name, "state")
+        self._track_token_change(token_info, final_pool_name, "state")
         await self._save(force=True)
-        logger.info(f"Pool '{pool_name}': token added")
+        logger.info(f"Pool '{final_pool_name}': token added")
         return True
 
     async def mark_asset_clear(self, token: str) -> bool:
@@ -924,41 +1070,30 @@ class TokenManager:
                             token_str, model_name=rate_limit_model_name
                         )
 
-                        if result and "remainingTokens" in result:
-                            new_quota = result.get("remainingTokens")
-                            if new_quota is None:
-                                new_quota = result.get("remainingQueries")
-                            if new_quota is None:
-                                return {"recovered": False, "expired": False}
+                        new_quota = extract_remaining_quota(result)
+                        if new_quota is not None:
                             old_quota = token_info.quota
                             old_status = token_info.status
 
                             token_info.update_quota(new_quota)
                             token_info.mark_synced()
 
-                            window_size = self._extract_window_size_seconds(result)
-                            if window_size is not None:
-                                current_pool = self.get_pool_name_for_token(token_info.token)
-                                if (
-                                    current_pool == SUPER_POOL_NAME
-                                    and window_size >= SUPER_WINDOW_THRESHOLD_SECONDS
-                                ):
-                                    self._move_token_pool(
-                                        token_info,
-                                        SUPER_POOL_NAME,
-                                        BASIC_POOL_NAME,
-                                        reason=f"windowSizeSeconds={window_size}",
-                                    )
-                                elif (
-                                    current_pool == BASIC_POOL_NAME
-                                    and window_size < SUPER_WINDOW_THRESHOLD_SECONDS
-                                ):
-                                    self._move_token_pool(
-                                        token_info,
-                                        BASIC_POOL_NAME,
-                                        SUPER_POOL_NAME,
-                                        reason=f"windowSizeSeconds={window_size}",
-                                    )
+                            current_pool = self.get_pool_name_for_token(token_info.token)
+                            detected_pool_name, reason, _ = self._resolve_pool_from_usage_result(
+                                result,
+                                fallback_pool_name=current_pool,
+                            )
+                            if (
+                                current_pool
+                                and detected_pool_name
+                                and detected_pool_name != current_pool
+                            ):
+                                self._move_token_pool(
+                                    token_info,
+                                    current_pool,
+                                    detected_pool_name,
+                                    reason=reason or "cooling_refresh",
+                                )
 
                             logger.info(
                                 f"Token {mask_token_for_log(token_info.token)}: refreshed "

@@ -1361,6 +1361,69 @@ class TokenRefreshBehaviorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["expired"], 1)
         self.assertEqual(token.status, TokenStatus.EXPIRED)
 
+    async def test_sync_usage_moves_token_to_super_pool_based_on_remaining_queries(self):
+        token = self.manager.pools["ssoBasic"].get("token-1")
+        self.assertIsNotNone(token)
+
+        with patch(
+            "app.services.token.manager.UsageService.get",
+            new=AsyncMock(return_value={"remainingQueries": 12}),
+        ):
+            result = await self.manager.sync_usage("token-1", consume_on_fail=False)
+
+        self.assertTrue(result)
+        self.assertIsNone(self.manager.pools["ssoBasic"].get("token-1"))
+        moved = self.manager.pools["ssoSuper"].get("token-1")
+        self.assertIsNotNone(moved)
+        self.assertEqual(moved.quota, 12)
+
+
+class TokenTierDetectionTests(unittest.IsolatedAsyncioTestCase):
+    def test_sso_tier_thresholds_match_upstream_checker(self):
+        from app.services.token.tier import classify_remaining_tier
+
+        self.assertEqual(classify_remaining_tier(41), "heavy")
+        self.assertEqual(classify_remaining_tier(9), "super")
+        self.assertEqual(classify_remaining_tier(8), "basic")
+        self.assertEqual(classify_remaining_tier(None), "unknown")
+
+    async def test_add_auto_detects_super_tokens_from_remaining_queries(self):
+        self.manager = TokenManager()
+        self.manager.pools = {}
+        self.manager.initialized = True
+        self.manager._schedule_save = lambda: None
+        self.manager._save = AsyncMock()
+
+        with patch(
+            "app.services.token.manager.UsageService.get",
+            new=AsyncMock(return_value={"remainingQueries": 12}),
+        ):
+            added = await self.manager.add("token-super", pool_name="ssoBasic")
+
+        self.assertTrue(added)
+        self.assertIsNone(self.manager.pools.get("ssoBasic", TokenPool("ssoBasic")).get("token-super"))
+        token = self.manager.pools["ssoSuper"].get("token-super")
+        self.assertIsNotNone(token)
+        self.assertEqual(token.quota, 12)
+
+    async def test_add_falls_back_to_requested_pool_when_detection_fails(self):
+        self.manager = TokenManager()
+        self.manager.pools = {}
+        self.manager.initialized = True
+        self.manager._schedule_save = lambda: None
+        self.manager._save = AsyncMock()
+
+        with patch(
+            "app.services.token.manager.UsageService.get",
+            new=AsyncMock(side_effect=UpstreamException("boom", details={"status": 502})),
+        ):
+            added = await self.manager.add("token-basic", pool_name="ssoBasic")
+
+        self.assertTrue(added)
+        token = self.manager.pools["ssoBasic"].get("token-basic")
+        self.assertIsNotNone(token)
+        self.assertEqual(token.quota, 80)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -10,7 +10,11 @@ from app.core.logger import logger
 from app.core.storage import get_storage
 from app.services.grok.batch_services.usage import UsageService
 from app.services.grok.batch_services.nsfw import NSFWService
-from app.services.token.manager import get_token_manager
+from app.services.token.manager import (
+    BASIC_POOL_NAME,
+    SUPER_POOL_NAME,
+    get_token_manager,
+)
 
 router = APIRouter()
 
@@ -30,11 +34,16 @@ async def update_tokens(data: dict):
     try:
         from app.services.token.models import TokenInfo
 
+        classification_targets: list[str] = []
+        fallback_pools: dict[str, str] = {}
+        allowed_auto_pools = {BASIC_POOL_NAME, SUPER_POOL_NAME}
+
         async with storage.acquire_lock("tokens_save", timeout=10):
             existing = await storage.load_tokens() or {}
             normalized = {}
             allowed_fields = set(TokenInfo.model_fields.keys())
             existing_map = {}
+            existing_pool_by_token = {}
             for pool_name, tokens in existing.items():
                 if not isinstance(tokens, list):
                     continue
@@ -52,6 +61,7 @@ async def update_tokens(data: dict):
                     token_key = token_data.get("token")
                     if isinstance(token_key, str):
                         pool_map[token_key] = token_data
+                        existing_pool_by_token[token_key] = pool_name
                 existing_map[pool_name] = pool_map
             for pool_name, tokens in (data or {}).items():
                 if not isinstance(tokens, list):
@@ -80,6 +90,14 @@ async def update_tokens(data: dict):
                     filtered = {k: v for k, v in merged.items() if k in allowed_fields}
                     try:
                         info = TokenInfo(**filtered)
+                        token_key = info.token
+                        if (
+                            pool_name in allowed_auto_pools
+                            and token_key not in existing_pool_by_token
+                            and token_key not in fallback_pools
+                        ):
+                            classification_targets.append(token_key)
+                            fallback_pools[token_key] = pool_name
                         pool_list.append(info.model_dump())
                     except Exception as e:
                         logger.warning(f"Skip invalid token in pool '{pool_name}': {e}")
@@ -87,8 +105,15 @@ async def update_tokens(data: dict):
                 normalized[pool_name] = pool_list
 
             await storage.save_tokens(normalized)
-            mgr = await get_token_manager()
-            await mgr.reload()
+
+        mgr = await get_token_manager()
+        await mgr.reload()
+        if classification_targets:
+            await mgr.classify_tokens(
+                classification_targets,
+                fallback_pools=fallback_pools,
+            )
+            await mgr._save(force=True)
         return {"status": "success", "message": "Token 已更新"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
