@@ -14,14 +14,17 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
+from app.core.config import get_config
 from app.core.exceptions import UpstreamException, ValidationException
 from app.services.grok.services.model import ModelService
 from app.services.grok.services.video import VideoService
+from app.services.grok.services.xai_video import XAIVideoService
 
 
 router = APIRouter(tags=["Videos"])
 
 VIDEO_MODEL_ID = "grok-imagine-1.0-video"
+XAI_VIDEO_MODEL_ID = "grok-imagine-video"
 SIZE_TO_ASPECT = {
     "1280x720": "16:9",
     "720x1280": "9:16",
@@ -85,9 +88,13 @@ def _extract_video_url(content: str) -> str:
 
 def _normalize_model(model: Optional[str]) -> str:
     requested = (model or VIDEO_MODEL_ID).strip()
+    if requested == XAI_VIDEO_MODEL_ID:
+        return requested
     if requested != VIDEO_MODEL_ID:
         raise ValidationException(
-            message=f"The model `{VIDEO_MODEL_ID}` is required for video generation.",
+            message=(
+                f"model must be one of ['{VIDEO_MODEL_ID}', '{XAI_VIDEO_MODEL_ID}']"
+            ),
             param="model",
             code="model_not_supported",
         )
@@ -125,11 +132,13 @@ def _normalize_quality(quality: Optional[str]) -> Tuple[str, str]:
     return value, resolution
 
 
-def _normalize_seconds(seconds: Optional[int]) -> int:
+def _normalize_seconds(seconds: Optional[int], *, model: str) -> int:
     value = int(seconds or 6)
-    if value < MIN_SECONDS or value > MAX_SECONDS:
+    min_seconds = 1 if model == XAI_VIDEO_MODEL_ID else MIN_SECONDS
+    max_seconds = 15 if model == XAI_VIDEO_MODEL_ID else MAX_SECONDS
+    if value < min_seconds or value > max_seconds:
         raise ValidationException(
-            message="seconds must be between 6 and 30",
+            message=f"seconds must be between {min_seconds} and {max_seconds}",
             param="seconds",
             code="invalid_seconds",
         )
@@ -329,7 +338,45 @@ async def _create_video_from_payload(payload: BaseModel, references: List[str]) 
     model = _normalize_model(payload.model)
     size, aspect_ratio = _normalize_size(payload.size)
     quality, resolution = _normalize_quality(payload.quality)
-    seconds = _normalize_seconds(payload.seconds)
+    seconds = _normalize_seconds(payload.seconds, model=model)
+
+    if model == XAI_VIDEO_MODEL_ID:
+        if not str(get_config("xai.api_key", "") or "").strip():
+            raise ValidationException(
+                message="xai.api_key is not configured for model `grok-imagine-video`",
+                param="model",
+                code="xai_api_key_missing",
+            )
+        if seconds > 15:
+            raise ValidationException(
+                message="seconds must be between 1 and 15 for model `grok-imagine-video`",
+                param="seconds",
+                code="invalid_seconds",
+            )
+        if len(references) > 1:
+            raise ValidationException(
+                message="`grok-imagine-video` supports at most one image reference",
+                param="image_reference",
+                code="invalid_reference",
+            )
+        direct_result = await XAIVideoService().generate(
+            prompt=prompt,
+            model=model,
+            duration=seconds,
+            aspect_ratio=aspect_ratio,
+            resolution=resolution,
+            image_url=references[0] if references else None,
+        )
+        return JSONResponse(
+            content=_build_create_response(
+                model=model,
+                prompt=prompt,
+                size=size,
+                seconds=int(direct_result.get("duration") or seconds),
+                quality=quality,
+                url=str(direct_result["url"]),
+            )
+        )
 
     content: List[Dict[str, Any]] = [{"type": "text", "text": prompt}]
     for ref in references:

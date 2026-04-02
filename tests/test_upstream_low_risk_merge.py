@@ -435,6 +435,149 @@ class VideosApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(body["seconds"], "18")
         self.assertEqual(body["url"], "https://example.com/generated.mp4")
 
+    async def test_videos_route_supports_xai_api_key_generation_model(self):
+        from app.api.v1 import video as video_module
+        create_video = video_module.create_video
+
+        class FakeRequest:
+            headers = {"content-type": "application/json"}
+
+            async def json(self):
+                return {
+                    "model": "grok-imagine-video",
+                    "prompt": "launch a rocket over mars",
+                    "size": "1280x720",
+                    "seconds": 10,
+                    "quality": "high",
+                }
+
+        with patch(
+            "app.api.v1.video.get_config",
+            side_effect=lambda key, default=None: {"xai.api_key": "xai-test-key"}.get(key, default),
+            create=True,
+        ):
+            fake_service = type(
+                "FakeXAIVideoService",
+                (),
+                {
+                    "generate": AsyncMock(
+                        return_value={
+                            "url": "https://example.com/xai-generated.mp4",
+                            "duration": 10,
+                            "model": "grok-imagine-video",
+                        }
+                    )
+                },
+            )
+            with patch.object(video_module, "XAIVideoService", fake_service, create=True):
+                mock_generate = fake_service.generate
+                response = await create_video(FakeRequest())
+
+        self.assertEqual(response.status_code, 200)
+        body = orjson.loads(response.body)
+        self.assertEqual(body["model"], "grok-imagine-video")
+        self.assertEqual(body["seconds"], "10")
+        self.assertEqual(body["quality"], "high")
+        self.assertEqual(body["url"], "https://example.com/xai-generated.mp4")
+        mock_generate.assert_awaited_once_with(
+            prompt="launch a rocket over mars",
+            model="grok-imagine-video",
+            duration=10,
+            aspect_ratio="16:9",
+            resolution="720p",
+            image_url=None,
+        )
+
+    async def test_videos_route_passes_image_reference_to_xai_api_generation(self):
+        from app.api.v1 import video as video_module
+        create_video = video_module.create_video
+
+        class FakeRequest:
+            headers = {"content-type": "application/json"}
+
+            async def json(self):
+                return {
+                    "model": "grok-imagine-video",
+                    "prompt": "animate the still image into a calm timelapse",
+                    "image_reference": {
+                        "image_url": "https://example.com/still.png",
+                    },
+                    "seconds": 12,
+                }
+
+        with patch(
+            "app.api.v1.video.get_config",
+            side_effect=lambda key, default=None: {"xai.api_key": "xai-test-key"}.get(key, default),
+            create=True,
+        ):
+            fake_service = type(
+                "FakeXAIVideoService",
+                (),
+                {
+                    "generate": AsyncMock(
+                        return_value={
+                            "url": "https://example.com/xai-image-video.mp4",
+                            "duration": 12,
+                            "model": "grok-imagine-video",
+                        }
+                    )
+                },
+            )
+            with patch.object(video_module, "XAIVideoService", fake_service, create=True):
+                mock_generate = fake_service.generate
+                response = await create_video(FakeRequest())
+
+        self.assertEqual(response.status_code, 200)
+        body = orjson.loads(response.body)
+        self.assertEqual(body["url"], "https://example.com/xai-image-video.mp4")
+        mock_generate.assert_awaited_once_with(
+            prompt="animate the still image into a calm timelapse",
+            model="grok-imagine-video",
+            duration=12,
+            aspect_ratio="3:2",
+            resolution="480p",
+            image_url="https://example.com/still.png",
+        )
+
+    async def test_videos_route_accepts_five_second_xai_generation(self):
+        from app.api.v1 import video as video_module
+        create_video = video_module.create_video
+
+        class FakeRequest:
+            headers = {"content-type": "application/json"}
+
+            async def json(self):
+                return {
+                    "model": "grok-imagine-video",
+                    "prompt": "a five second cinematic wave",
+                    "seconds": 5,
+                }
+
+        with patch(
+            "app.api.v1.video.get_config",
+            side_effect=lambda key, default=None: {"xai.api_key": "xai-test-key"}.get(key, default),
+            create=True,
+        ):
+            fake_service = type(
+                "FakeXAIVideoService",
+                (),
+                {
+                    "generate": AsyncMock(
+                        return_value={
+                            "url": "https://example.com/xai-5s.mp4",
+                            "duration": 5,
+                            "model": "grok-imagine-video",
+                        }
+                    )
+                },
+            )
+            with patch.object(video_module, "XAIVideoService", fake_service, create=True):
+                response = await create_video(FakeRequest())
+
+        self.assertEqual(response.status_code, 200)
+        body = orjson.loads(response.body)
+        self.assertEqual(body["seconds"], "5")
+
 
 class ChatVideoValidationTests(unittest.TestCase):
     def test_chat_video_non_stream_accepts_18_seconds(self):
@@ -1361,33 +1504,48 @@ class TokenRefreshBehaviorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["expired"], 1)
         self.assertEqual(token.status, TokenStatus.EXPIRED)
 
-    async def test_sync_usage_moves_token_to_super_pool_based_on_remaining_queries(self):
+    async def test_sync_usage_keeps_basic_pool_when_rate_limit_window_matches_basic(self):
         token = self.manager.pools["ssoBasic"].get("token-1")
         self.assertIsNotNone(token)
 
         with patch(
             "app.services.token.manager.UsageService.get",
-            new=AsyncMock(return_value={"remainingQueries": 12}),
+            new=AsyncMock(
+                return_value={"remainingQueries": 12, "windowSizeSeconds": 72000}
+            ),
         ):
             result = await self.manager.sync_usage("token-1", consume_on_fail=False)
 
         self.assertTrue(result)
-        self.assertIsNone(self.manager.pools["ssoBasic"].get("token-1"))
-        moved = self.manager.pools["ssoSuper"].get("token-1")
-        self.assertIsNotNone(moved)
-        self.assertEqual(moved.quota, 12)
+        kept = self.manager.pools["ssoBasic"].get("token-1")
+        self.assertIsNotNone(kept)
+        self.assertIsNone(self.manager.pools.get("ssoSuper", TokenPool("ssoSuper")).get("token-1"))
+        self.assertEqual(kept.quota, 12)
 
 
 class TokenTierDetectionTests(unittest.IsolatedAsyncioTestCase):
-    def test_sso_tier_thresholds_match_upstream_checker(self):
-        from app.services.token.tier import classify_remaining_tier
+    async def test_add_auto_detects_super_tokens_from_short_window(self):
+        self.manager = TokenManager()
+        self.manager.pools = {}
+        self.manager.initialized = True
+        self.manager._schedule_save = lambda: None
+        self.manager._save = AsyncMock()
 
-        self.assertEqual(classify_remaining_tier(41), "heavy")
-        self.assertEqual(classify_remaining_tier(9), "super")
-        self.assertEqual(classify_remaining_tier(8), "basic")
-        self.assertEqual(classify_remaining_tier(None), "unknown")
+        with patch(
+            "app.services.token.manager.UsageService.get",
+            new=AsyncMock(
+                return_value={"remainingQueries": 12, "windowSizeSeconds": 7200}
+            ),
+        ):
+            added = await self.manager.add("token-super", pool_name="ssoBasic")
 
-    async def test_add_auto_detects_super_tokens_from_remaining_queries(self):
+        self.assertTrue(added)
+        self.assertIsNone(self.manager.pools.get("ssoBasic", TokenPool("ssoBasic")).get("token-super"))
+        token = self.manager.pools["ssoSuper"].get("token-super")
+        self.assertIsNotNone(token)
+        self.assertEqual(token.quota, 12)
+
+    async def test_add_keeps_basic_pool_when_only_remaining_queries_are_present(self):
         self.manager = TokenManager()
         self.manager.pools = {}
         self.manager.initialized = True
@@ -1398,11 +1556,10 @@ class TokenTierDetectionTests(unittest.IsolatedAsyncioTestCase):
             "app.services.token.manager.UsageService.get",
             new=AsyncMock(return_value={"remainingQueries": 12}),
         ):
-            added = await self.manager.add("token-super", pool_name="ssoBasic")
+            added = await self.manager.add("token-basic", pool_name="ssoBasic")
 
         self.assertTrue(added)
-        self.assertIsNone(self.manager.pools.get("ssoBasic", TokenPool("ssoBasic")).get("token-super"))
-        token = self.manager.pools["ssoSuper"].get("token-super")
+        token = self.manager.pools["ssoBasic"].get("token-basic")
         self.assertIsNotNone(token)
         self.assertEqual(token.quota, 12)
 

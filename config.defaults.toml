@@ -163,6 +163,19 @@ default_mode = "normal"
 # 默认视频宽高比
 default_aspect_ratio = "16:9"
 
+# ==================== xAI API ====================
+[xai]
+# x.ai API Key（用于官方视频生成接口）
+api_key = ""
+# x.ai API 基础地址
+base_url = "https://api.x.ai/v1"
+# x.ai 请求超时时间（秒）
+timeout = 60
+# 视频轮询间隔（秒）
+video_poll_interval_seconds = 5
+# 视频轮询总超时（秒）
+video_poll_timeout_seconds = 900
+
 # ==================== 语音配置 ====================
 [voice]
 # Voice 请求超时时间（秒）

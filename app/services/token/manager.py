@@ -20,7 +20,7 @@ from app.core.config import get_config
 from app.core.exceptions import UpstreamException
 from app.services.grok.utils.retry import explicit_auth_failure
 from app.services.token.pool import TokenPool
-from app.services.token.tier import classify_remaining_tier, extract_remaining_quota
+from app.services.token.tier import extract_remaining_quota
 
 
 DEFAULT_REFRESH_BATCH_SIZE = 10
@@ -219,20 +219,6 @@ class TokenManager:
         fallback_pool_name: Optional[str] = None,
     ) -> Tuple[Optional[str], Optional[str], Optional[int]]:
         remaining = extract_remaining_quota(result)
-        tier = classify_remaining_tier(remaining)
-        if tier in {"heavy", "super"}:
-            return (
-                SUPER_POOL_NAME,
-                f"tier={tier}, remaining={remaining}",
-                remaining,
-            )
-        if tier == "basic":
-            return (
-                BASIC_POOL_NAME,
-                f"tier={tier}, remaining={remaining}",
-                remaining,
-            )
-
         window_size = self._extract_window_size_seconds(result)
         if window_size is not None:
             if window_size >= SUPER_WINDOW_THRESHOLD_SECONDS:
@@ -247,6 +233,9 @@ class TokenManager:
                 remaining,
             )
 
+        # remainingQueries/remainingTokens alone cannot distinguish our
+        # basic(80/20h) and super(140/2h) pools reliably. If upstream
+        # does not provide the rate-limit window, keep the caller's pool.
         return fallback_pool_name, None, remaining
 
     async def classify_token_pool(

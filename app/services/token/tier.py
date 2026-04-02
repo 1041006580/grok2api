@@ -1,9 +1,6 @@
-"""Helpers for classifying SSO token tier from rate-limit responses."""
+"""Helpers for parsing SSO rate-limit responses."""
 
 from typing import Any, Mapping, Optional
-
-HEAVY_THRESHOLD = 41
-SUPER_THRESHOLD = 9
 
 
 def extract_remaining_quota(result: Mapping[str, Any] | None) -> Optional[int]:
@@ -32,15 +29,3 @@ def extract_remaining_quota(result: Mapping[str, Any] | None) -> Optional[int]:
                 return None
 
     return None
-
-
-def classify_remaining_tier(remaining: Optional[int]) -> str:
-    """Match the upstream sso-tier-checker thresholds."""
-    if remaining is None:
-        return "unknown"
-    if remaining >= HEAVY_THRESHOLD:
-        return "heavy"
-    if remaining >= SUPER_THRESHOLD:
-        return "super"
-    return "basic"
-
