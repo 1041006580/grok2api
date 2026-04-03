@@ -379,6 +379,18 @@ class VideoPageModelRulesTests(unittest.TestCase):
         self.assertIn("xAI API", html)
 
 
+class FunctionVideoPageModelSwitchTests(unittest.TestCase):
+    def test_function_video_page_has_selector_state_markers(self):
+        html = (ROOT / "_public/static/function/pages/video.html").read_text(encoding="utf-8")
+        js = (ROOT / "_public/static/function/js/video.js").read_text(encoding="utf-8")
+
+        self.assertIn('id="modelSelect"', html)
+        self.assertIn("const LEGACY_VIDEO_MODEL_IDS = [", js)
+        self.assertIn("const XAI_VIDEO_MODEL_ID = 'grok-imagine-video'", js)
+        self.assertIn("const XAI_MAX_DURATION_SECONDS = 15", js)
+        self.assertIn("modelSelect.addEventListener('change'", js)
+
+
 class VideosApiTests(unittest.IsolatedAsyncioTestCase):
     def test_app_registers_videos_route(self):
         from main import app

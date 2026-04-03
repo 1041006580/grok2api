@@ -8,6 +8,8 @@
   const imageFileName = document.getElementById('imageFileName');
   const clearImageFileBtn = document.getElementById('clearImageFileBtn');
   const selectImageFileBtn = document.getElementById('selectImageFileBtn');
+  const modelSelect = document.getElementById('modelSelect');
+  const modelRuleHint = document.getElementById('modelRuleHint');
   const ratioSelect = document.getElementById('ratioSelect');
   const lengthSelect = document.getElementById('lengthSelect');
   const resolutionSelect = document.getElementById('resolutionSelect');
@@ -37,6 +39,17 @@
   let currentPreviewItem = null;
   let previewCount = 0;
   const DEFAULT_REASONING_EFFORT = 'low';
+  const LEGACY_VIDEO_MODEL_IDS = [
+    'grok-imagine-1.0-video',
+    'grok-imagine-1.0-video-super'
+  ];
+  const XAI_VIDEO_MODEL_ID = 'grok-imagine-video';
+  const LEGACY_MIN_DURATION_SECONDS = 6;
+  const LEGACY_MAX_DURATION_SECONDS = 30;
+  const XAI_MIN_DURATION_SECONDS = 1;
+  const XAI_MAX_DURATION_SECONDS = 15;
+  const LEGACY_MODEL_RULE_HINT = 'Legacy SSO 模式保持原有流式任务链路，支持 6-30s。';
+  const XAI_MODEL_RULE_HINT = 'xAI API 模式支持 1-15s、单张参考图，并直接返回成片结果。';
 
   function toast(message, type) {
     if (typeof showToast === 'function') {
@@ -77,6 +90,7 @@
   }
 
   function updateMeta() {
+    const xaiMode = modelSelect ? modelSelect.value === XAI_VIDEO_MODEL_ID : false;
     if (aspectValue && ratioSelect) {
       aspectValue.textContent = ratioSelect.value;
     }
@@ -87,8 +101,59 @@
       resolutionValue.textContent = resolutionSelect.value;
     }
     if (presetValue && presetSelect) {
-      presetValue.textContent = presetSelect.value;
+      presetValue.textContent = xaiMode ? 'xAI API' : presetSelect.value;
     }
+  }
+
+  function clampLengthValue(minSeconds, maxSeconds) {
+    if (!lengthSelect) return;
+    const parsed = parseInt(lengthSelect.value, 10);
+    if (!Number.isFinite(parsed)) {
+      lengthSelect.value = String(minSeconds);
+      return;
+    }
+    if (parsed < minSeconds) {
+      lengthSelect.value = String(minSeconds);
+      return;
+    }
+    if (parsed > maxSeconds) {
+      lengthSelect.value = String(maxSeconds);
+    }
+  }
+
+  function updateFunctionVideoModelState() {
+    const selectedModelId = modelSelect ? modelSelect.value : LEGACY_VIDEO_MODEL_IDS[0];
+    const xaiMode = selectedModelId === XAI_VIDEO_MODEL_ID;
+
+    if (lengthSelect) {
+      lengthSelect.min = String(xaiMode ? XAI_MIN_DURATION_SECONDS : LEGACY_MIN_DURATION_SECONDS);
+      lengthSelect.max = String(xaiMode ? XAI_MAX_DURATION_SECONDS : LEGACY_MAX_DURATION_SECONDS);
+      clampLengthValue(
+        xaiMode ? XAI_MIN_DURATION_SECONDS : LEGACY_MIN_DURATION_SECONDS,
+        xaiMode ? XAI_MAX_DURATION_SECONDS : LEGACY_MAX_DURATION_SECONDS
+      );
+    }
+
+    if (modelRuleHint) {
+      modelRuleHint.textContent = xaiMode ? XAI_MODEL_RULE_HINT : LEGACY_MODEL_RULE_HINT;
+    }
+
+    if (presetSelect) {
+      presetSelect.disabled = xaiMode;
+      const presetBlock = presetSelect.closest('.settings-block');
+      if (presetBlock) {
+        presetBlock.classList.toggle('hidden', xaiMode);
+      }
+    }
+
+    if (presetValue) {
+      const presetMetaItem = presetValue.closest('.meta-item');
+      if (presetMetaItem) {
+        presetMetaItem.classList.toggle('hidden', xaiMode);
+      }
+    }
+
+    updateMeta();
   }
 
   function resetOutput(keepPreview) {
@@ -442,6 +507,7 @@
   }
 
   async function startConnection() {
+    updateFunctionVideoModelState();
     const prompt = promptInput ? promptInput.value.trim() : '';
     if (!prompt) {
       toast(t('common.enterPrompt'), 'error');
@@ -661,5 +727,11 @@
     });
   }
 
-  updateMeta();
+  if (modelSelect) {
+    modelSelect.addEventListener('change', () => {
+      updateFunctionVideoModelState();
+    });
+  }
+
+  updateFunctionVideoModelState();
 })();
