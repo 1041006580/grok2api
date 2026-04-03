@@ -338,6 +338,7 @@
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
+        model: modelSelect ? modelSelect.value : 'grok-imagine-1.0-video',
         prompt,
         image_url: imageUrl || null,
         reasoning_effort: DEFAULT_REASONING_EFFORT,

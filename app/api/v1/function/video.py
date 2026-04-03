@@ -12,12 +12,19 @@ from app.core.auth import verify_function_key
 from app.core.logger import logger
 from app.services.grok.services.video import VideoService
 from app.services.grok.services.model import ModelService
+from app.services.grok.services.xai_video import XAIVideoService
 
 router = APIRouter()
 
 VIDEO_SESSION_TTL = 600
 _VIDEO_SESSIONS: dict[str, dict] = {}
 _VIDEO_SESSIONS_LOCK = asyncio.Lock()
+LEGACY_VIDEO_MODEL_IDS = (
+    "grok-imagine-1.0-video",
+    "grok-imagine-1.0-video-super",
+)
+XAI_VIDEO_MODEL_ID = "grok-imagine-video"
+DEFAULT_VIDEO_MODEL_ID = LEGACY_VIDEO_MODEL_IDS[0]
 
 _VIDEO_RATIO_MAP = {
     "1280x720": "16:9",
@@ -45,6 +52,7 @@ async def _clean_sessions(now: float) -> None:
 
 async def _new_session(
     prompt: str,
+    model: str,
     aspect_ratio: str,
     video_length: int,
     resolution_name: str,
@@ -58,6 +66,7 @@ async def _new_session(
         await _clean_sessions(now)
         _VIDEO_SESSIONS[task_id] = {
             "prompt": prompt,
+            "model": model,
             "aspect_ratio": aspect_ratio,
             "video_length": video_length,
             "resolution_name": resolution_name,
@@ -109,6 +118,31 @@ def _normalize_ratio(value: Optional[str]) -> str:
     return _VIDEO_RATIO_MAP.get(raw, "")
 
 
+def _normalize_model(value: Optional[str]) -> str:
+    raw = (value or DEFAULT_VIDEO_MODEL_ID).strip()
+    if raw in LEGACY_VIDEO_MODEL_IDS or raw == XAI_VIDEO_MODEL_ID:
+        return raw
+    raise HTTPException(
+        status_code=400,
+        detail=(
+            "model must be one of "
+            f"{list(LEGACY_VIDEO_MODEL_IDS) + [XAI_VIDEO_MODEL_ID]}"
+        ),
+    )
+
+
+def _build_sse_chunk(content: str) -> str:
+    payload = {
+        "choices": [
+            {
+                "delta": {"content": content},
+                "finish_reason": None,
+            }
+        ]
+    }
+    return f"data: {orjson.dumps(payload).decode()}\n\n"
+
+
 def _validate_image_url(image_url: str) -> None:
     value = (image_url or "").strip()
     if not value:
@@ -125,6 +159,7 @@ def _validate_image_url(image_url: str) -> None:
 
 class VideoStartRequest(BaseModel):
     prompt: str
+    model: Optional[str] = DEFAULT_VIDEO_MODEL_ID
     aspect_ratio: Optional[str] = "3:2"
     video_length: Optional[int] = 6
     resolution_name: Optional[str] = "480p"
@@ -139,6 +174,7 @@ async def function_video_start(data: VideoStartRequest):
     if not prompt:
         raise HTTPException(status_code=400, detail="Prompt cannot be empty")
 
+    model_id = _normalize_model(data.model)
     aspect_ratio = _normalize_ratio(data.aspect_ratio)
     if not aspect_ratio:
         raise HTTPException(
@@ -147,7 +183,13 @@ async def function_video_start(data: VideoStartRequest):
         )
 
     video_length = int(data.video_length or 6)
-    if video_length < 6 or video_length > 30:
+    if model_id == XAI_VIDEO_MODEL_ID:
+        if video_length < 1 or video_length > 15:
+            raise HTTPException(
+                status_code=400,
+                detail="video_length must be between 1 and 15 seconds for grok-imagine-video",
+            )
+    elif video_length < 6 or video_length > 30:
         raise HTTPException(
             status_code=400, detail="video_length must be between 6 and 30 seconds"
         )
@@ -181,6 +223,7 @@ async def function_video_start(data: VideoStartRequest):
 
     task_id = await _new_session(
         prompt,
+        model_id,
         aspect_ratio,
         video_length,
         resolution_name,
@@ -198,6 +241,7 @@ async def function_video_sse(request: Request, task_id: str = Query("")):
         raise HTTPException(status_code=404, detail="Task not found")
 
     prompt = str(session.get("prompt") or "").strip()
+    model_id = _normalize_model(session.get("model"))
     aspect_ratio = str(session.get("aspect_ratio") or "3:2")
     video_length = int(session.get("video_length") or 6)
     resolution_name = str(session.get("resolution_name") or "480p")
@@ -207,7 +251,21 @@ async def function_video_sse(request: Request, task_id: str = Query("")):
 
     async def event_stream():
         try:
-            model_id = "grok-imagine-1.0-video"
+            if model_id == XAI_VIDEO_MODEL_ID:
+                result = await XAIVideoService().generate(
+                    prompt=prompt,
+                    model=model_id,
+                    duration=video_length,
+                    aspect_ratio=aspect_ratio,
+                    resolution=resolution_name,
+                    image_url=image_url,
+                )
+                if await request.is_disconnected():
+                    return
+                yield _build_sse_chunk(str(result["url"]))
+                yield "data: [DONE]\n\n"
+                return
+
             model_info = ModelService.get(model_id)
             if not model_info or not model_info.is_video:
                 payload = {

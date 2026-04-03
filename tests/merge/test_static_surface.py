@@ -27,3 +27,14 @@ def test_video_pages_expose_xai_video_model_option():
 
     assert "grok-imagine-video" in function_page
     assert "grok-imagine-video" in public_page
+
+
+def test_video_scripts_send_selected_model_and_public_page_handles_xai_mode():
+    function_js = Path("_public/static/function/js/video.js").read_text(encoding="utf-8")
+    public_js = Path("app/static/public/js/video.js").read_text(encoding="utf-8")
+
+    assert "model: modelSelect ? modelSelect.value : 'grok-imagine-1.0-video'" in function_js
+    assert "model: modelSelect ? modelSelect.value : 'grok-imagine-1.0-video'" in public_js
+    assert "function setLengthOptions(" in public_js
+    assert "function updatePublicVideoModelState()" in public_js
+    assert "const XAI_VIDEO_MODEL_ID = 'grok-imagine-video';" in public_js
