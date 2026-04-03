@@ -108,6 +108,74 @@ class XAIVideoService:
         resolution: str,
         image_url: Optional[str] = None,
     ) -> Dict[str, Any]:
+        started = await self.start_generation(
+            prompt=prompt,
+            model=model,
+            duration=duration,
+            aspect_ratio=aspect_ratio,
+            resolution=resolution,
+            image_url=image_url,
+        )
+        request_id = started.get("request_id")
+        if not isinstance(request_id, str) or not request_id.strip():
+            raise UpstreamException(
+                message="xAI video API did not return request_id",
+                details={"status": 502, "body": str(started)[:1000]},
+            )
+
+        deadline = time.monotonic() + self.poll_timeout
+        while True:
+            result = await self.get_generation(request_id)
+            status = str(result.get("status", "")).strip().lower()
+            if status in {"done", "completed", "succeeded"}:
+                video = result.get("video") or {}
+                url = video.get("url") or result.get("url")
+                if not isinstance(url, str) or not url.strip():
+                    raise UpstreamException(
+                        message="xAI video API completed without video url",
+                        details={"status": 502, "body": str(result)[:1000]},
+                    )
+                actual_duration = video.get("duration")
+                try:
+                    actual_duration = int(actual_duration)
+                except (TypeError, ValueError):
+                    actual_duration = duration
+                actual_model = video.get("model") or result.get("model") or model
+                return {
+                    "request_id": request_id,
+                    "status": status,
+                    "url": url.strip(),
+                    "duration": actual_duration,
+                    "model": actual_model,
+                }
+
+            if status in {"failed", "error", "expired", "cancelled"}:
+                message = self._extract_error_message(result) or (
+                    f"xAI video request ended with status `{status}`"
+                )
+                raise UpstreamException(
+                    message=message,
+                    details={"status": 502, "body": str(result)[:1000]},
+                )
+
+            if time.monotonic() >= deadline:
+                raise UpstreamException(
+                    message="xAI video generation polling timed out",
+                    details={"status": 504, "request_id": request_id},
+                )
+
+            await asyncio.sleep(self.poll_interval)
+
+    async def start_generation(
+        self,
+        *,
+        prompt: str,
+        model: str,
+        duration: int,
+        aspect_ratio: str,
+        resolution: str,
+        image_url: Optional[str] = None,
+    ) -> Dict[str, Any]:
         payload: Dict[str, Any] = {
             "model": model,
             "prompt": prompt,
@@ -120,65 +188,29 @@ class XAIVideoService:
 
         timeout = aiohttp.ClientTimeout(total=self.timeout)
         async with aiohttp.ClientSession(timeout=timeout) as session:
-            started = await self._request_json(
+            return await self._request_json(
                 session,
                 "POST",
                 f"{self.base_url}/videos/generations",
                 payload,
             )
-            request_id = started.get("request_id")
-            if not isinstance(request_id, str) or not request_id.strip():
-                raise UpstreamException(
-                    message="xAI video API did not return request_id",
-                    details={"status": 502, "body": str(started)[:1000]},
-                )
 
-            deadline = time.monotonic() + self.poll_timeout
-            while True:
-                result = await self._request_json(
-                    session,
-                    "GET",
-                    f"{self.base_url}/videos/{request_id}",
-                )
-                status = str(result.get("status", "")).strip().lower()
-                if status in {"done", "completed", "succeeded"}:
-                    video = result.get("video") or {}
-                    url = video.get("url") or result.get("url")
-                    if not isinstance(url, str) or not url.strip():
-                        raise UpstreamException(
-                            message="xAI video API completed without video url",
-                            details={"status": 502, "body": str(result)[:1000]},
-                        )
-                    actual_duration = video.get("duration")
-                    try:
-                        actual_duration = int(actual_duration)
-                    except (TypeError, ValueError):
-                        actual_duration = duration
-                    actual_model = video.get("model") or result.get("model") or model
-                    return {
-                        "request_id": request_id,
-                        "status": status,
-                        "url": url.strip(),
-                        "duration": actual_duration,
-                        "model": actual_model,
-                    }
+    async def get_generation(self, request_id: str) -> Dict[str, Any]:
+        request_id = str(request_id or "").strip()
+        if not request_id:
+            raise ValidationException(
+                message="request_id is required",
+                param="request_id",
+                code="invalid_request_error",
+            )
 
-                if status in {"failed", "error", "expired", "cancelled"}:
-                    message = self._extract_error_message(result) or (
-                        f"xAI video request ended with status `{status}`"
-                    )
-                    raise UpstreamException(
-                        message=message,
-                        details={"status": 502, "body": str(result)[:1000]},
-                    )
-
-                if time.monotonic() >= deadline:
-                    raise UpstreamException(
-                        message="xAI video generation polling timed out",
-                        details={"status": 504, "request_id": request_id},
-                    )
-
-                await asyncio.sleep(self.poll_interval)
+        timeout = aiohttp.ClientTimeout(total=self.timeout)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            return await self._request_json(
+                session,
+                "GET",
+                f"{self.base_url}/videos/{request_id}",
+            )
 
 
 __all__ = ["XAIVideoService", "DEFAULT_XAI_BASE_URL"]

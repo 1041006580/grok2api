@@ -10,7 +10,14 @@ def test_route_surface_contains_current_core_endpoints():
     assert "/v1/images/edits" in paths
     assert "/v1/responses" in paths
     assert "/v1/models" in paths
+    assert "/v1/models/{model_id}" in paths
+    assert "/v1/language-models" in paths
+    assert "/v1/language-models/{model_id}" in paths
+    assert "/v1/image-generation-models" in paths
+    assert "/v1/image-generation-models/{model_id}" in paths
     assert "/v1/videos" in paths
+    assert "/v1/videos/generations" in paths
+    assert "/v1/videos/{request_id}" in paths
     assert "/v1/files/image/{filename:path}" in paths
     assert "/v1/files/video/{filename:path}" in paths
 

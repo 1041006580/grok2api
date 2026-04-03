@@ -198,3 +198,81 @@ def test_public_video_sse_uses_xai_service_for_xai_model():
     legacy_completions.assert_not_called()
     assert "https://example.com/xai-page.mp4" in body
     assert "[DONE]" in body
+
+
+def test_official_xai_video_generation_start_returns_request_id():
+    from app.api.v1 import video as video_module
+
+    async def scenario():
+        with patch(
+            "app.api.v1.video.get_config",
+            side_effect=lambda key, default=None: {"xai.api_key": "xai-test-key"}.get(key, default),
+            create=True,
+        ):
+            fake_service = type(
+                "FakeXAIVideoService",
+                (),
+                {
+                    "start_generation": AsyncMock(
+                        return_value={"request_id": "vidreq_123", "status": "pending"}
+                    )
+                },
+            )
+            with patch.object(video_module, "XAIVideoService", fake_service, create=True):
+                result = await video_module.create_xai_video_generation(
+                    video_module.XAIVideoGenerationRequest(
+                        model="grok-imagine-video",
+                        prompt="launch a rocket over mars",
+                        duration=10,
+                        aspect_ratio="16:9",
+                        resolution="720p",
+                    )
+                )
+        return fake_service.start_generation, result
+
+    mock_start, result = asyncio.run(scenario())
+
+    mock_start.assert_awaited_once_with(
+        prompt="launch a rocket over mars",
+        model="grok-imagine-video",
+        duration=10,
+        aspect_ratio="16:9",
+        resolution="720p",
+        image_url=None,
+    )
+    assert result["request_id"] == "vidreq_123"
+    assert result["status"] == "pending"
+
+
+def test_official_xai_video_generation_status_returns_upstream_payload():
+    from app.api.v1 import video as video_module
+
+    async def scenario():
+        with patch(
+            "app.api.v1.video.get_config",
+            side_effect=lambda key, default=None: {"xai.api_key": "xai-test-key"}.get(key, default),
+            create=True,
+        ):
+            fake_service = type(
+                "FakeXAIVideoService",
+                (),
+                {
+                    "get_generation": AsyncMock(
+                        return_value={
+                            "request_id": "vidreq_123",
+                            "status": "done",
+                            "video": {"url": "https://example.com/video.mp4"},
+                        }
+                    )
+                },
+            )
+            with patch.object(video_module, "XAIVideoService", fake_service, create=True):
+                result = await video_module.get_xai_video_generation("vidreq_123")
+        return fake_service.get_generation, result
+
+    mock_get, result = asyncio.run(scenario())
+
+    mock_get.assert_awaited_once_with("vidreq_123")
+    assert result["request_id"] == "vidreq_123"
+    assert result["status"] == "done"
+    assert result["video"]["url"] == "https://example.com/video.mp4"

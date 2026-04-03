@@ -38,6 +38,7 @@ QUALITY_TO_RESOLUTION = {
 }
 MIN_SECONDS = 6
 MAX_SECONDS = 30
+ALLOWED_ASPECT_RATIOS = {"16:9", "9:16", "3:2", "2:3", "1:1"}
 
 
 class VideoCreateRequest(BaseModel):
@@ -52,6 +53,19 @@ class VideoCreateRequest(BaseModel):
     quality: Optional[str] = Field("standard", description="Quality: standard/high")
     image_reference: Optional[Any] = Field(None, description="Structured image reference")
     input_reference: Optional[Any] = Field(None, description="Multipart input reference file")
+
+
+class XAIVideoGenerationRequest(BaseModel):
+    """Official-style xAI video generation request."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    model: str = Field(XAI_VIDEO_MODEL_ID, description="Model id")
+    prompt: str = Field(..., description="Video prompt")
+    duration: int = Field(5, description="Duration in seconds")
+    aspect_ratio: str = Field("16:9", description="Aspect ratio")
+    resolution: str = Field("720p", description="Resolution")
+    image: Optional[Any] = Field(None, description="Optional image reference")
 
 
 def _raise_validation_error(exc: ValidationError) -> None:
@@ -132,6 +146,17 @@ def _normalize_quality(quality: Optional[str]) -> Tuple[str, str]:
     return value, resolution
 
 
+def _normalize_ratio(aspect_ratio: Optional[str]) -> str:
+    value = str(aspect_ratio or "16:9").strip()
+    if value not in ALLOWED_ASPECT_RATIOS:
+        raise ValidationException(
+            message=f"aspect_ratio must be one of {sorted(ALLOWED_ASPECT_RATIOS)}",
+            param="aspect_ratio",
+            code="invalid_aspect_ratio",
+        )
+    return value
+
+
 def _normalize_seconds(seconds: Optional[int], *, model: str) -> int:
     value = int(seconds or 6)
     min_seconds = 1 if model == XAI_VIDEO_MODEL_ID else MIN_SECONDS
@@ -143,6 +168,15 @@ def _normalize_seconds(seconds: Optional[int], *, model: str) -> int:
             code="invalid_seconds",
         )
     return value
+
+
+def _require_xai_api_key() -> None:
+    if not str(get_config("xai.api_key", "") or "").strip():
+        raise ValidationException(
+            message="xai.api_key is not configured for xAI direct endpoints",
+            param="model",
+            code="xai_api_key_missing",
+        )
 
 
 def _validate_reference_value(value: str, param: str) -> str:
@@ -211,6 +245,30 @@ def _parse_image_reference(value: Any) -> Optional[str]:
         )
 
     return _validate_reference_value(image_url, "image_reference.image_url")
+
+
+def _parse_xai_image_reference(value: Any) -> Optional[str]:
+    if value is None or value == "":
+        return None
+
+    if isinstance(value, str):
+        return _validate_reference_value(value, "image.url")
+
+    if not isinstance(value, dict):
+        raise ValidationException(
+            message="image must be an object with a `url` field or a direct URL string",
+            param="image",
+            code="invalid_reference",
+        )
+
+    url = value.get("url")
+    if not isinstance(url, str) or not url.strip():
+        raise ValidationException(
+            message="image.url is required when image is provided",
+            param="image.url",
+            code="invalid_reference",
+        )
+    return _validate_reference_value(url, "image.url")
 
 
 async def _upload_to_data_uri(file: UploadFile, param: str) -> str:
@@ -471,4 +529,58 @@ async def create_video(request: Request):
     return await _create_video_from_payload(payload, references)
 
 
-__all__ = ["router", "create_video"]
+@router.post("/videos/generations")
+async def create_xai_video_generation(request: XAIVideoGenerationRequest):
+    """Official-style xAI video generation start endpoint."""
+    _require_xai_api_key()
+    model = _normalize_model(request.model)
+    if model != XAI_VIDEO_MODEL_ID:
+        raise ValidationException(
+            message=f"model must be `{XAI_VIDEO_MODEL_ID}` for /videos/generations",
+            param="model",
+            code="model_not_supported",
+        )
+
+    prompt = (request.prompt or "").strip()
+    if not prompt:
+        raise ValidationException(
+            message="prompt is required",
+            param="prompt",
+            code="invalid_request_error",
+        )
+
+    duration = _normalize_seconds(request.duration, model=model)
+    aspect_ratio = _normalize_ratio(request.aspect_ratio)
+    resolution = str(request.resolution or "720p").strip()
+    if resolution not in {"480p", "720p"}:
+        raise ValidationException(
+            message="resolution must be one of ['480p', '720p']",
+            param="resolution",
+            code="invalid_resolution",
+        )
+    image_url = _parse_xai_image_reference(request.image)
+
+    return await XAIVideoService().start_generation(
+        prompt=prompt,
+        model=model,
+        duration=duration,
+        aspect_ratio=aspect_ratio,
+        resolution=resolution,
+        image_url=image_url,
+    )
+
+
+@router.get("/videos/{request_id}")
+async def get_xai_video_generation(request_id: str):
+    """Official-style xAI video generation status endpoint."""
+    _require_xai_api_key()
+    return await XAIVideoService().get_generation(request_id)
+
+
+__all__ = [
+    "router",
+    "create_video",
+    "create_xai_video_generation",
+    "get_xai_video_generation",
+    "XAIVideoGenerationRequest",
+]

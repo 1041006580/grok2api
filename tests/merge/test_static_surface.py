@@ -38,3 +38,17 @@ def test_video_scripts_send_selected_model_and_public_page_handles_xai_mode():
     assert "function setLengthOptions(" in public_js
     assert "function updatePublicVideoModelState()" in public_js
     assert "const XAI_VIDEO_MODEL_ID = 'grok-imagine-video';" in public_js
+
+
+def test_video_page_css_assigns_model_hint_a_dedicated_grid_slot():
+    function_css = Path("_public/static/function/css/video.css").read_text(encoding="utf-8")
+    public_css = Path("app/static/public/css/video.css").read_text(encoding="utf-8")
+
+    for css in (function_css, public_css):
+        assert ".model-block {" in css
+        assert "grid-column: 2 / span 2;" in css
+        assert "grid-row: 3;" in css
+        assert ".upload-block {" in css
+        assert "grid-row: 4;" in css
+        assert ".clear-block {" in css
+        assert "#modelRuleHint {" in css
