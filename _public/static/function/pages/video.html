@@ -53,6 +53,14 @@
               <label class="field-label" for="promptInput" data-i18n="video.prompt">提示词</label>
               <textarea id="promptInput" class="geist-input video-textarea" placeholder="例如：街头霓虹雨夜，慢镜头，胶片质感" data-i18n-placeholder="video.promptPlaceholder"></textarea>
             </div>
+            <div class="settings-block model-block">
+              <label class="field-label" for="modelSelect">视频模型</label>
+              <select id="modelSelect" class="geist-input">
+                <option value="grok-imagine-1.0-video" selected>grok-imagine-1.0-video (Legacy SSO)</option>
+                <option value="grok-imagine-1.0-video-super">grok-imagine-1.0-video-super (Legacy SSO)</option>
+                <option value="grok-imagine-video">grok-imagine-video (xAI API)</option>
+              </select>
+            </div>
             <div class="settings-block ref-block">
               <label class="field-label" for="imageUrlInput" data-i18n="video.referenceImage">参考图</label>
               <div class="ref-controls">
