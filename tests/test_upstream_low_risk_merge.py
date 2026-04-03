@@ -366,6 +366,19 @@ class CfRefreshControlsTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("async function triggerCfRefresh()", js)
 
 
+class VideoPageModelRulesTests(unittest.TestCase):
+    def test_function_video_page_mentions_xai_duration_limit(self):
+        html = (ROOT / "_public/static/function/pages/video.html").read_text(encoding="utf-8")
+        self.assertIn("1-15s", html)
+        self.assertIn("单张参考图", html)
+
+    def test_public_video_page_mentions_xai_duration_limit(self):
+        html = (ROOT / "app/static/public/pages/video.html").read_text(encoding="utf-8")
+        self.assertIn("1-15s", html)
+        self.assertIn("单张参考图", html)
+        self.assertIn("xAI API", html)
+
+
 class VideosApiTests(unittest.IsolatedAsyncioTestCase):
     def test_app_registers_videos_route(self):
         from main import app
