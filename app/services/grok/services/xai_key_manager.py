@@ -58,6 +58,6 @@ class XAIKeyManager:
 
     def acquire_key(self) -> Optional[XAIKeyInfo]:
         for key in self._keys:
-            if key.enabled:
+            if key.enabled and key.status == XAIKeyStatus.ACTIVE:
                 return key
         return None

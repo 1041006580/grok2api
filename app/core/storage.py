@@ -157,6 +157,30 @@ class BaseStorage(abc.ABC):
         return True
 
 
+def _escape_toml_string(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("\n", "\\n").replace('"', '\\"')
+
+
+def _format_toml_value(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, str):
+        return f'"{_escape_toml_string(value)}"'
+    if value is None:
+        return '""'
+    if isinstance(value, dict):
+        parts = []
+        for item_key, item_value in value.items():
+            parts.append(f"{item_key} = {_format_toml_value(item_value)}")
+        return "{" + ", ".join(parts) + "}"
+    if isinstance(value, list):
+        inner = ", ".join(_format_toml_value(item) for item in value)
+        return f"[{inner}]"
+    return f'"{_escape_toml_string(str(value))}"'
+
+
 class LocalStorage(BaseStorage):
     """
     本地文件存储
@@ -239,17 +263,7 @@ class LocalStorage(BaseStorage):
                     continue
                 lines.append(f"[{section}]")
                 for key, val in items.items():
-                    if isinstance(val, bool):
-                        val_str = "true" if val else "false"
-                    elif isinstance(val, str):
-                        escaped = val.replace('"', '\\"')
-                        val_str = f'"{escaped}"'
-                    elif isinstance(val, (int, float)):
-                        val_str = str(val)
-                    elif isinstance(val, (list, dict)):
-                        val_str = json_dumps(val)
-                    else:
-                        val_str = f'"{str(val)}"'
+                    val_str = _format_toml_value(val)
                     lines.append(f"{key} = {val_str}")
                 lines.append("")
 

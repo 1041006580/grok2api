@@ -1,5 +1,10 @@
+import asyncio
+import shutil
+import uuid
 from pathlib import Path
 
+from app.core import storage as core_storage
+from app.core.storage import LocalStorage
 from app.services.grok.services.xai_key_manager import XAIKeyManager
 
 
@@ -33,3 +38,28 @@ def test_config_defaults_exposes_xai_keys_pool():
     xai_section = config_text.split("[xai]", 1)[1].split("[voice]", 1)[0]
     assert "keys = []" in config_text
     assert "api_key =" not in xai_section
+
+
+def test_local_storage_roundtrip_preserves_xai_keys(monkeypatch):
+    tmp_dir = core_storage.DATA_DIR / f"tmp-config-{uuid.uuid4().hex}"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    config_path = tmp_dir / "config.toml"
+    monkeypatch.setattr(core_storage, "CONFIG_FILE", config_path)
+
+    storage = LocalStorage()
+    payload = {
+        "xai": {
+            "keys": [
+                {"id": "k1", "key": "xai-key-1", "name": "key-1", "enabled": True},
+                {"id": "k2", "key": "xai-key-2", "name": "key-2", "enabled": False},
+            ]
+        }
+    }
+
+    async def roundtrip():
+        await storage.save_config(payload)
+        return await storage.load_config()
+
+    loaded = asyncio.run(roundtrip())
+    assert loaded == payload
+    shutil.rmtree(tmp_dir, ignore_errors=True)
