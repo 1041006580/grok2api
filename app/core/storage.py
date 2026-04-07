@@ -37,6 +37,7 @@ DATA_DIR = Path(os.getenv("DATA_DIR", str(DEFAULT_DATA_DIR))).expanduser()
 CONFIG_FILE = DATA_DIR / "config.toml"
 TOKEN_FILE = DATA_DIR / "token.json"
 LOCK_DIR = DATA_DIR / ".locks"
+_TOML_NULL_SENTINEL_KEY = "__grok2api_null__"
 
 
 # JSON 序列化优化助手函数
@@ -169,7 +170,7 @@ def _format_toml_value(value: Any) -> str:
     if isinstance(value, str):
         return f'"{_escape_toml_string(value)}"'
     if value is None:
-        return '""'
+        return "{ " + f"{_TOML_NULL_SENTINEL_KEY} = true" + " }"
     if isinstance(value, dict):
         parts = []
         for item_key, item_value in value.items():
@@ -179,6 +180,16 @@ def _format_toml_value(value: Any) -> str:
         inner = ", ".join(_format_toml_value(item) for item in value)
         return f"[{inner}]"
     return f'"{_escape_toml_string(str(value))}"'
+
+
+def _restore_toml_value(value: Any) -> Any:
+    if isinstance(value, list):
+        return [_restore_toml_value(item) for item in value]
+    if isinstance(value, dict):
+        if value.get(_TOML_NULL_SENTINEL_KEY) is True and len(value) == 1:
+            return None
+        return {key: _restore_toml_value(item) for key, item in value.items()}
+    return value
 
 
 class LocalStorage(BaseStorage):
@@ -250,7 +261,15 @@ class LocalStorage(BaseStorage):
         try:
             async with aiofiles.open(CONFIG_FILE, "rb") as f:
                 content = await f.read()
-                return tomllib.loads(content.decode("utf-8"))
+                raw = tomllib.loads(content.decode("utf-8"))
+                return {
+                    section: {
+                        key: _restore_toml_value(val)
+                        for key, val in items.items()
+                    }
+                    for section, items in raw.items()
+                    if isinstance(items, dict)
+                }
         except Exception as e:
             logger.error(f"LocalStorage: 加载配置失败: {e}")
             return {}

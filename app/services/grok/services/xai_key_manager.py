@@ -41,7 +41,7 @@ class XAIKeyManager:
             try:
                 status = XAIKeyStatus(raw_status or XAIKeyStatus.ACTIVE.value)
             except ValueError:
-                status = XAIKeyStatus.ACTIVE
+                status = XAIKeyStatus.INVALID
             parsed.append(
                 XAIKeyInfo(
                     id=key_id,
