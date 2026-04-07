@@ -42,3 +42,12 @@ def test_route_surface_contains_upstream_alias_endpoints():
     assert "/v1/function/video/sse" in paths
     assert "/health" in paths
     assert "/favicon.ico" in paths
+
+
+def test_route_surface_contains_xai_keys_admin_endpoints():
+    app = create_app()
+    paths = {route.path for route in app.routes}
+
+    assert "/admin/xai-keys" in paths
+    assert "/v1/admin/xai-keys" in paths
+    assert "/v1/admin/xai-keys/{key_id}" in paths

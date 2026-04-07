@@ -52,3 +52,13 @@ def test_video_page_css_assigns_model_hint_a_dedicated_grid_slot():
         assert "grid-row: 4;" in css
         assert ".clear-block {" in css
         assert "#modelRuleHint {" in css
+
+
+def test_admin_surface_exposes_xai_keys_page_and_nav():
+    header = Path("_public/static/common/html/header.html").read_text(encoding="utf-8")
+    public_page = Path("app/static/admin/pages/xai-keys.html").read_text(encoding="utf-8")
+    function_page = Path("_public/static/admin/pages/xai-keys.html").read_text(encoding="utf-8")
+
+    assert "/admin/xai-keys" in header
+    assert "xAI Keys" in public_page
+    assert "xAI Keys" in function_page
