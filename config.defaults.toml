@@ -165,8 +165,8 @@ default_aspect_ratio = "16:9"
 
 # ==================== xAI API ====================
 [xai]
-# x.ai API Key（用于官方视频生成接口）
-api_key = ""
+# x.ai API Key 池（用于官方视频生成接口）
+keys = []
 # x.ai API 基础地址
 base_url = "https://api.x.ai/v1"
 # x.ai 请求超时时间（秒）
