@@ -1648,6 +1648,47 @@ class XAIKeysAdminApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["status"], "success")
         self.assertFalse(state["xai"]["keys"][0]["enabled"])
 
+    async def test_admin_xai_keys_patch_can_update_name(self):
+        from app.api.v1.admin_api import xai_keys as module
+
+        state = {
+            "xai": {
+                "keys": [
+                    {"id": "k1", "key": "xai-secret-12345678", "name": "primary", "enabled": True}
+                ]
+            }
+        }
+
+        async def fake_update(data):
+            state["xai"]["keys"] = data["xai"]["keys"]
+
+        with patch.object(module.config, "_config", state, create=True):
+            with patch.object(module.config, "update", new=AsyncMock(side_effect=fake_update)):
+                payload = await module.update_xai_key("k1", {"name": "secondary"})
+
+        self.assertEqual(payload["status"], "success")
+        self.assertEqual(state["xai"]["keys"][0]["name"], "secondary")
+
+    async def test_admin_xai_keys_create_and_delete_roundtrip(self):
+        from app.api.v1.admin_api import xai_keys as module
+
+        state = {"xai": {"keys": []}}
+
+        async def fake_update(data):
+            state["xai"]["keys"] = data["xai"]["keys"]
+
+        with patch.object(module.config, "_config", state, create=True):
+            with patch.object(module.config, "update", new=AsyncMock(side_effect=fake_update)):
+                created = await module.create_xai_key(
+                    {"id": "k1", "key": "xai-secret-12345678", "name": "primary", "enabled": True}
+                )
+                deleted = await module.delete_xai_key("k1")
+
+        self.assertEqual(created["status"], "success")
+        self.assertEqual(created["key"]["value"], "xai-****5678")
+        self.assertEqual(deleted["status"], "success")
+        self.assertEqual(state["xai"]["keys"], [])
+
 
 def test_admin_api_router_includes_xai_keys_module():
     import app.api.v1.admin_api.xai_keys  # noqa: F401

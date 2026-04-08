@@ -33,8 +33,6 @@ def _collect_keys() -> list[dict[str, Any]]:
     for raw in keys:
         if isinstance(raw, Mapping):
             normalized.append(dict(raw))
-        elif isinstance(raw, str):
-            normalized.append({"id": raw, "key": raw, "enabled": False})
     return normalized
 
 
