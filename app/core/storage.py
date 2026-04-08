@@ -159,7 +159,12 @@ class BaseStorage(abc.ABC):
 
 
 def _escape_toml_string(value: str) -> str:
-    return value.replace("\\", "\\\\").replace("\n", "\\n").replace('"', '\\"')
+    return (
+        value.replace("\\", "\\\\")
+        .replace("\r", "\\r")
+        .replace("\n", "\\n")
+        .replace('"', '\\"')
+    )
 
 
 def _format_toml_value(value: Any) -> str:
