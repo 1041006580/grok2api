@@ -499,6 +499,8 @@ class VideosApiTests(unittest.IsolatedAsyncioTestCase):
         fake_key = SimpleNamespace(key="xai-test-key")
         fake_manager = SimpleNamespace(acquire_key=lambda: fake_key)
         with patch.object(video_module, "load_runtime_manager", return_value=fake_manager):
+            captured_kwargs = []
+
             class FakeXAIVideoService:
                 generate = AsyncMock(
                     return_value={
@@ -509,13 +511,8 @@ class VideosApiTests(unittest.IsolatedAsyncioTestCase):
                 )
 
                 def __init__(self, *args, **kwargs):
-                    pass
+                    captured_kwargs.append(kwargs)
 
-            fake_service = type(
-                "Ignored",
-                (),
-                {},
-            )
             with patch.object(video_module, "XAIVideoService", FakeXAIVideoService, create=True):
                 mock_generate = FakeXAIVideoService.generate
                 response = await create_video(FakeRequest())
@@ -526,6 +523,8 @@ class VideosApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(body["seconds"], "10")
         self.assertEqual(body["quality"], "high")
         self.assertEqual(body["url"], "https://example.com/xai-generated.mp4")
+        self.assertIs(captured_kwargs[0]["key_manager"], fake_manager)
+        self.assertIs(captured_kwargs[0]["key_record"], fake_key)
         mock_generate.assert_awaited_once_with(
             prompt="launch a rocket over mars",
             model="grok-imagine-video",
@@ -555,6 +554,8 @@ class VideosApiTests(unittest.IsolatedAsyncioTestCase):
         fake_key = SimpleNamespace(key="xai-test-key")
         fake_manager = SimpleNamespace(acquire_key=lambda: fake_key)
         with patch.object(video_module, "load_runtime_manager", return_value=fake_manager):
+            captured_kwargs = []
+
             class FakeXAIVideoService:
                 generate = AsyncMock(
                     return_value={
@@ -565,7 +566,7 @@ class VideosApiTests(unittest.IsolatedAsyncioTestCase):
                 )
 
                 def __init__(self, *args, **kwargs):
-                    pass
+                    captured_kwargs.append(kwargs)
 
             with patch.object(video_module, "XAIVideoService", FakeXAIVideoService, create=True):
                 mock_generate = FakeXAIVideoService.generate
@@ -574,6 +575,8 @@ class VideosApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200)
         body = orjson.loads(response.body)
         self.assertEqual(body["url"], "https://example.com/xai-image-video.mp4")
+        self.assertIs(captured_kwargs[0]["key_manager"], fake_manager)
+        self.assertIs(captured_kwargs[0]["key_record"], fake_key)
         mock_generate.assert_awaited_once_with(
             prompt="animate the still image into a calm timelapse",
             model="grok-imagine-video",
@@ -600,6 +603,8 @@ class VideosApiTests(unittest.IsolatedAsyncioTestCase):
         fake_key = SimpleNamespace(key="xai-test-key")
         fake_manager = SimpleNamespace(acquire_key=lambda: fake_key)
         with patch.object(video_module, "load_runtime_manager", return_value=fake_manager):
+            captured_kwargs = []
+
             class FakeXAIVideoService:
                 generate = AsyncMock(
                     return_value={
@@ -610,7 +615,7 @@ class VideosApiTests(unittest.IsolatedAsyncioTestCase):
                 )
 
                 def __init__(self, *args, **kwargs):
-                    pass
+                    captured_kwargs.append(kwargs)
 
             with patch.object(video_module, "XAIVideoService", FakeXAIVideoService, create=True):
                 response = await create_video(FakeRequest())
@@ -618,6 +623,8 @@ class VideosApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200)
         body = orjson.loads(response.body)
         self.assertEqual(body["seconds"], "5")
+        self.assertIs(captured_kwargs[0]["key_manager"], fake_manager)
+        self.assertIs(captured_kwargs[0]["key_record"], fake_key)
 
 
 class ChatVideoValidationTests(unittest.TestCase):

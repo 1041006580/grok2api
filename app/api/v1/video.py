@@ -2,6 +2,7 @@
 Videos API route (OpenAI-compatible create endpoint).
 """
 
+import asyncio
 import base64
 import re
 import time
@@ -40,6 +41,9 @@ QUALITY_TO_RESOLUTION = {
 MIN_SECONDS = 6
 MAX_SECONDS = 30
 ALLOWED_ASPECT_RATIOS = {"16:9", "9:16", "3:2", "2:3", "1:1"}
+_XAI_REQUEST_KEY_TTL_SECONDS = 3600
+_XAI_REQUEST_KEYS: dict[str, tuple[float, object]] = {}
+_XAI_REQUEST_KEYS_LOCK = asyncio.Lock()
 
 
 class VideoCreateRequest(BaseModel):
@@ -181,6 +185,36 @@ def _select_xai_key_manager_and_record():
             code="xai_api_key_missing",
         )
     return manager, key_record
+
+
+async def _remember_xai_request_key(request_id: str, key_record: object) -> None:
+    request_id = str(request_id or "").strip()
+    if not request_id:
+        return
+    now = time.monotonic()
+    async with _XAI_REQUEST_KEYS_LOCK:
+        expired = [
+            key
+            for key, (created_at, _) in _XAI_REQUEST_KEYS.items()
+            if now - created_at > _XAI_REQUEST_KEY_TTL_SECONDS
+        ]
+        for key in expired:
+            _XAI_REQUEST_KEYS.pop(key, None)
+        _XAI_REQUEST_KEYS[request_id] = (now, key_record)
+
+
+async def _get_bound_xai_request_key(request_id: str):
+    request_id = str(request_id or "").strip()
+    now = time.monotonic()
+    async with _XAI_REQUEST_KEYS_LOCK:
+        record = _XAI_REQUEST_KEYS.get(request_id)
+        if not record:
+            return None
+        created_at, key_record = record
+        if now - created_at > _XAI_REQUEST_KEY_TTL_SECONDS:
+            _XAI_REQUEST_KEYS.pop(request_id, None)
+            return None
+        return key_record
 
 
 def _validate_reference_value(value: str, param: str) -> str:
@@ -561,7 +595,7 @@ async def create_xai_video_generation(request: XAIVideoGenerationRequest):
     image_url = _parse_xai_image_reference(request.image)
 
     service = XAIVideoService(key_manager=manager, key_record=key_record)
-    return await service.start_generation(
+    result = await service.start_generation(
         prompt=prompt,
         model=model,
         duration=duration,
@@ -569,12 +603,21 @@ async def create_xai_video_generation(request: XAIVideoGenerationRequest):
         resolution=resolution,
         image_url=image_url,
     )
+    await _remember_xai_request_key(result.get("request_id", ""), key_record)
+    return result
 
 
 @router.get("/videos/{request_id}")
 async def get_xai_video_generation(request_id: str):
     """Official-style xAI video generation status endpoint."""
-    manager, key_record = _select_xai_key_manager_and_record()
+    key_record = await _get_bound_xai_request_key(request_id)
+    if not key_record:
+        raise ValidationException(
+            message="request_id is not available for current xAI key session",
+            param="request_id",
+            code="invalid_request_error",
+        )
+    manager = load_runtime_manager()
     service = XAIVideoService(key_manager=manager, key_record=key_record)
     return await service.get_generation(request_id)
 
