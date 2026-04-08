@@ -1607,5 +1607,51 @@ class TokenTierDetectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(token.quota, 80)
 
 
+class XAIKeysAdminApiTests(unittest.IsolatedAsyncioTestCase):
+    async def test_admin_xai_keys_get_returns_masked_keys(self):
+        from app.api.v1.admin_api import xai_keys as module
+
+        state = {
+            "xai": {
+                "keys": [
+                    {"id": "k1", "key": "xai-secret-12345678", "name": "primary", "enabled": True}
+                ]
+            }
+        }
+        with patch.object(module.config, "_config", state, create=True):
+            response = await module.get_xai_keys()
+
+        self.assertIn("keys", response)
+        self.assertEqual(response["keys"][0]["id"], "k1")
+        self.assertEqual(response["keys"][0]["name"], "primary")
+        self.assertTrue(response["keys"][0]["enabled"])
+        self.assertEqual(response["keys"][0]["value"], "xai-****5678")
+
+    async def test_admin_xai_keys_patch_can_toggle_enabled(self):
+        from app.api.v1.admin_api import xai_keys as module
+
+        state = {
+            "xai": {
+                "keys": [
+                    {"id": "k1", "key": "xai-secret-12345678", "name": "primary", "enabled": True}
+                ]
+            }
+        }
+
+        async def fake_update(data):
+            state["xai"]["keys"] = data["xai"]["keys"]
+
+        with patch.object(module.config, "_config", state, create=True):
+            with patch.object(module.config, "update", new=AsyncMock(side_effect=fake_update)):
+                payload = await module.update_xai_key("k1", {"enabled": False})
+
+        self.assertEqual(payload["status"], "success")
+        self.assertFalse(state["xai"]["keys"][0]["enabled"])
+
+
+def test_admin_api_router_includes_xai_keys_module():
+    import app.api.v1.admin_api.xai_keys  # noqa: F401
+
+
 if __name__ == "__main__":
     unittest.main()
