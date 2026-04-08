@@ -1623,6 +1623,10 @@ class XAIKeysAdminApiTests(unittest.IsolatedAsyncioTestCase):
         }
 
         class DummyStorage:
+            @asynccontextmanager
+            async def acquire_lock(self, *_args, **_kwargs):
+                yield
+
             async def load_config(self):
                 return copy.deepcopy(state)
 
@@ -1791,6 +1795,16 @@ class XAIKeysAdminApiTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(getattr(ctx.exception, "status_code", None), 400)
 
+        with self.assertRaises(Exception) as ctx_unknown:
+            await module.create_xai_key({"key": "xai-secret-12345678", "enbaled": False})
+
+        self.assertEqual(getattr(ctx_unknown.exception, "status_code", None), 400)
+
+        with self.assertRaises(Exception) as ctx_none:
+            await module.create_xai_key({"key": "xai-secret-12345678", "enabled": None})
+
+        self.assertEqual(getattr(ctx_none.exception, "status_code", None), 400)
+
     async def test_admin_xai_keys_rejects_invalid_update_payload_types(self):
         from app.api.v1.admin_api import xai_keys as module
 
@@ -1839,6 +1853,10 @@ class XAIKeysAdminApiTests(unittest.IsolatedAsyncioTestCase):
         stale_local_state = {"xai": {"keys": []}}
 
         class DummyStorage:
+            @asynccontextmanager
+            async def acquire_lock(self, *_args, **_kwargs):
+                yield
+
             async def load_config(self):
                 return copy.deepcopy(persisted_state)
 
@@ -1883,9 +1901,12 @@ class XAIKeysAdminApiTests(unittest.IsolatedAsyncioTestCase):
                             await module.update_xai_key("k1", {})
                         with self.assertRaises(Exception) as ctx_unknown:
                             await module.update_xai_key("k1", {"enbaled": False})
+                        with self.assertRaises(Exception) as ctx_none:
+                            await module.update_xai_key("k1", {"enabled": None})
 
         self.assertEqual(getattr(ctx_empty.exception, "status_code", None), 400)
         self.assertEqual(getattr(ctx_unknown.exception, "status_code", None), 400)
+        self.assertEqual(getattr(ctx_none.exception, "status_code", None), 400)
 
     async def test_admin_xai_keys_concurrent_creates_preserve_all_entries(self):
         from app.api.v1.admin_api import xai_keys as module

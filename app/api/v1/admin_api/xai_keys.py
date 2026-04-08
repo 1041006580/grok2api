@@ -32,7 +32,8 @@ def _collect_keys() -> list[dict[str, Any]]:
 
 async def _collect_latest_keys() -> list[dict[str, Any]]:
     storage = get_storage()
-    persisted = await storage.load_config()
+    async with storage.acquire_lock("config_save", timeout=10):
+        persisted = await storage.load_config()
     if not isinstance(persisted, Mapping):
         persisted = getattr(config, "_config", None) or {}
     base = _deep_merge(getattr(config, "_defaults", {}) or {}, persisted or {})
@@ -62,8 +63,6 @@ def _normalize_enabled(value: Any, default: bool = False) -> bool:
             return True
         if lowered == "false":
             return False
-    if value is None:
-        return default
     raise HTTPException(status_code=400, detail="enabled must be a boolean")
 
 
@@ -156,11 +155,20 @@ async def get_xai_keys():
 @router.post("/xai-keys", dependencies=[Depends(verify_app_key)])
 async def create_xai_key(data: dict[str, Any]):
     """Create a new xAI key entry."""
+    allowed_fields = {"id", "key", "name", "enabled"}
+    provided_fields = set(data.keys())
+    unknown_fields = provided_fields - allowed_fields
+    if unknown_fields:
+        raise HTTPException(status_code=400, detail=f"unsupported fields: {sorted(unknown_fields)}")
+
     key_value = _required_string(data.get("key"), "xAI key")
 
-    key_id = str(data.get("id") or uuid4())
     if "id" in data:
         key_id = _required_string(data.get("id"), "id")
+    else:
+        key_id = str(uuid4())
+    enabled = _normalize_enabled(data["enabled"]) if "enabled" in data else True
+
     def mutate(keys: list[dict[str, Any]]):
         if _find_key_index(keys, key_id) >= 0:
             raise HTTPException(status_code=400, detail="xAI key already exists")
@@ -168,7 +176,7 @@ async def create_xai_key(data: dict[str, Any]):
             "id": key_id,
             "key": key_value,
             "name": _optional_string(data.get("name"), "name"),
-            "enabled": _normalize_enabled(data.get("enabled"), True),
+            "enabled": enabled,
         }
         keys.append(new_entry)
         return new_entry
