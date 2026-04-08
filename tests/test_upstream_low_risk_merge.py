@@ -421,7 +421,8 @@ class VideosApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(getattr(exc, "code", None), "model_not_supported")
 
     async def test_videos_route_requires_available_xai_key_pool(self):
-        from app.api.v1.video import create_video
+        from app.api.v1 import video as video_module
+        create_video = video_module.create_video
 
         class FakeRequest:
             headers = {"content-type": "application/json"}
@@ -429,8 +430,10 @@ class VideosApiTests(unittest.IsolatedAsyncioTestCase):
             async def json(self):
                 return {"model": "grok-imagine-video", "prompt": "test"}
 
-        with self.assertRaises(Exception) as ctx:
-            await create_video(FakeRequest())
+        fake_manager = SimpleNamespace(acquire_key=lambda: None)
+        with patch.object(video_module, "load_runtime_manager", return_value=fake_manager):
+            with self.assertRaises(Exception) as ctx:
+                await create_video(FakeRequest())
 
         self.assertEqual(getattr(ctx.exception, "code", None), "xai_api_key_missing")
 

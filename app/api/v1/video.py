@@ -171,7 +171,7 @@ def _normalize_seconds(seconds: Optional[int], *, model: str) -> int:
     return value
 
 
-def _select_xai_key_record():
+def _select_xai_key_manager_and_record():
     manager = load_runtime_manager()
     key_record = manager.acquire_key()
     if not key_record:
@@ -180,7 +180,7 @@ def _select_xai_key_record():
             param="model",
             code="xai_api_key_missing",
         )
-    return key_record
+    return manager, key_record
 
 
 def _validate_reference_value(value: str, param: str) -> str:
@@ -415,8 +415,8 @@ async def _create_video_from_payload(payload: BaseModel, references: List[str]) 
                 param="image_reference",
                 code="invalid_reference",
             )
-        key_record = _select_xai_key_record()
-        service = XAIVideoService(key_record=key_record)
+        manager, key_record = _select_xai_key_manager_and_record()
+        service = XAIVideoService(key_manager=manager, key_record=key_record)
         direct_result = await service.generate(
             prompt=prompt,
             model=model,
@@ -532,7 +532,7 @@ async def create_video(request: Request):
 @router.post("/videos/generations")
 async def create_xai_video_generation(request: XAIVideoGenerationRequest):
     """Official-style xAI video generation start endpoint."""
-    key_record = _select_xai_key_record()
+    manager, key_record = _select_xai_key_manager_and_record()
     model = _normalize_model(request.model)
     if model != XAI_VIDEO_MODEL_ID:
         raise ValidationException(
@@ -560,7 +560,7 @@ async def create_xai_video_generation(request: XAIVideoGenerationRequest):
         )
     image_url = _parse_xai_image_reference(request.image)
 
-    service = XAIVideoService(key_record=key_record)
+    service = XAIVideoService(key_manager=manager, key_record=key_record)
     return await service.start_generation(
         prompt=prompt,
         model=model,
@@ -574,8 +574,8 @@ async def create_xai_video_generation(request: XAIVideoGenerationRequest):
 @router.get("/videos/{request_id}")
 async def get_xai_video_generation(request_id: str):
     """Official-style xAI video generation status endpoint."""
-    key_record = _select_xai_key_record()
-    service = XAIVideoService(key_record=key_record)
+    manager, key_record = _select_xai_key_manager_and_record()
+    service = XAIVideoService(key_manager=manager, key_record=key_record)
     return await service.get_generation(request_id)
 
 
