@@ -1,5 +1,6 @@
 import asyncio
 import shutil
+import tomllib
 import uuid
 from pathlib import Path
 
@@ -50,15 +51,16 @@ def test_xai_key_manager_does_not_select_unknown_status_keys():
     )
 
     items = manager.list_keys()
-    assert items[0].status == "invalid"
+    assert items[0].status == "cooldown"
     assert manager.acquire_key() is None
 
 
 def test_config_defaults_exposes_xai_keys_pool():
-    config_text = Path("config.defaults.toml").read_text(encoding="utf-8")
-    xai_section = config_text.split("[xai]", 1)[1].split("[voice]", 1)[0]
-    assert "keys = []" in config_text
-    assert "api_key =" not in xai_section
+    with Path("config.defaults.toml").open("rb") as f:
+        config = tomllib.load(f)
+
+    assert config["xai"]["keys"] == []
+    assert "api_key" not in config["xai"]
 
 
 def test_local_storage_roundtrip_preserves_xai_keys(monkeypatch):
@@ -81,9 +83,11 @@ def test_local_storage_roundtrip_preserves_xai_keys(monkeypatch):
         await storage.save_config(payload)
         return await storage.load_config()
 
-    loaded = asyncio.run(roundtrip())
-    assert loaded == payload
-    shutil.rmtree(tmp_dir, ignore_errors=True)
+    try:
+        loaded = asyncio.run(roundtrip())
+        assert loaded == payload
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 def test_local_storage_roundtrip_preserves_none_metadata(monkeypatch):
@@ -111,6 +115,34 @@ def test_local_storage_roundtrip_preserves_none_metadata(monkeypatch):
         await storage.save_config(payload)
         return await storage.load_config()
 
-    loaded = asyncio.run(roundtrip())
-    assert loaded == payload
-    shutil.rmtree(tmp_dir, ignore_errors=True)
+    try:
+        loaded = asyncio.run(roundtrip())
+        assert loaded == payload
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def test_xai_key_manager_preserves_runtime_metadata_fields():
+    manager = XAIKeyManager.from_config(
+        {
+            "xai": {
+                "keys": [
+                    {
+                        "id": "k1",
+                        "key": "xai-key-1",
+                        "enabled": True,
+                        "status": "blocked",
+                        "last_error": "rate limited",
+                        "blocked_until": 12345,
+                        "last_used_at": 67890,
+                    }
+                ]
+            }
+        }
+    )
+
+    item = manager.list_keys()[0]
+    assert item.status == "blocked"
+    assert item.last_error == "rate limited"
+    assert item.blocked_until == 12345
+    assert item.last_used_at == 67890

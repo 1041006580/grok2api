@@ -15,7 +15,10 @@ class XAIKeyInfo:
     key: str
     name: Optional[str] = None
     enabled: bool = False
-    status: XAIKeyStatus = XAIKeyStatus.ACTIVE
+    status: Optional[str] = XAIKeyStatus.ACTIVE.value
+    last_error: Optional[str] = None
+    blocked_until: Optional[object] = None
+    last_used_at: Optional[object] = None
 
 
 class XAIKeyManager:
@@ -37,18 +40,17 @@ class XAIKeyManager:
             key_value = str(key_data.get("key", "") or "").strip()
             if not key_id or not key_value:
                 continue
-            raw_status = str(key_data.get("status", XAIKeyStatus.ACTIVE.value) or "").strip()
-            try:
-                status = XAIKeyStatus(raw_status or XAIKeyStatus.ACTIVE.value)
-            except ValueError:
-                status = XAIKeyStatus.INVALID
+            raw_status = str(key_data.get("status", XAIKeyStatus.ACTIVE.value) or "").strip() or XAIKeyStatus.ACTIVE.value
             parsed.append(
                 XAIKeyInfo(
                     id=key_id,
                     key=key_value,
                     name=str(key_data.get("name", "") or "").strip() or None,
                     enabled=bool(key_data.get("enabled", False)),
-                    status=status,
+                    status=raw_status,
+                    last_error=str(key_data.get("last_error", "") or "").strip() or None,
+                    blocked_until=key_data.get("blocked_until"),
+                    last_used_at=key_data.get("last_used_at"),
                 )
             )
         return cls(parsed)
@@ -58,6 +60,6 @@ class XAIKeyManager:
 
     def acquire_key(self) -> Optional[XAIKeyInfo]:
         for key in self._keys:
-            if key.enabled and key.status == XAIKeyStatus.ACTIVE:
+            if key.enabled and (key.status is None or key.status == XAIKeyStatus.ACTIVE.value):
                 return key
         return None
