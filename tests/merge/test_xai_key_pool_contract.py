@@ -7,6 +7,7 @@ from pathlib import Path
 from app.core import storage as core_storage
 from app.core.storage import LocalStorage
 from app.services.grok.services.xai_key_manager import XAIKeyManager
+from app.services.grok.services.xai_video import XAIVideoService
 
 
 def test_xai_key_manager_loads_from_xai_keys_config():
@@ -186,3 +187,10 @@ def test_xai_key_manager_preserves_runtime_metadata_fields():
     assert item.last_error == "rate limited"
     assert item.blocked_until == 12345
     assert item.last_used_at == 67890
+
+
+def test_xai_video_service_builds_headers_from_manager_key():
+    service = XAIVideoService()
+    service._key_record = type("KeyRef", (), {"key": "xai-key-1"})()
+    headers = service._headers()
+    assert headers["Authorization"] == "Bearer xai-key-1"

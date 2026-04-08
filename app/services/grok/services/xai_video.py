@@ -11,6 +11,7 @@ import orjson
 
 from app.core.config import get_config
 from app.core.exceptions import UpstreamException, ValidationException
+from app.services.grok.services.xai_key_manager import load_runtime_manager
 
 
 DEFAULT_XAI_BASE_URL = "https://api.x.ai/v1"
@@ -20,7 +21,8 @@ class XAIVideoService:
     """Direct x.ai video generation via API key."""
 
     def __init__(self):
-        self.api_key = str(get_config("xai.api_key", "") or "").strip()
+        self._key_manager = load_runtime_manager()
+        self._key_record = None
         self.base_url = (
             str(get_config("xai.base_url", DEFAULT_XAI_BASE_URL) or DEFAULT_XAI_BASE_URL)
             .strip()
@@ -53,14 +55,16 @@ class XAIVideoService:
         return ""
 
     def _headers(self) -> Dict[str, str]:
-        if not self.api_key:
+        if not self._key_record:
+            self._key_record = self._key_manager.acquire_key()
+        if not self._key_record:
             raise ValidationException(
-                message="xai.api_key is not configured for direct video generation",
+                message="xAI key pool is not configured with any enabled key",
                 param="model",
                 code="xai_api_key_missing",
             )
         return {
-            "Authorization": f"Bearer {self.api_key}",
+            "Authorization": f"Bearer {self._key_record.key}",
             "Content-Type": "application/json",
         }
 

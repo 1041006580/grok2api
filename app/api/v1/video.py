@@ -18,6 +18,7 @@ from app.core.config import get_config
 from app.core.exceptions import UpstreamException, ValidationException
 from app.services.grok.services.model import ModelService
 from app.services.grok.services.video import VideoService
+from app.services.grok.services.xai_key_manager import load_runtime_manager
 from app.services.grok.services.xai_video import XAIVideoService
 
 
@@ -170,13 +171,16 @@ def _normalize_seconds(seconds: Optional[int], *, model: str) -> int:
     return value
 
 
-def _require_xai_api_key() -> None:
-    if not str(get_config("xai.api_key", "") or "").strip():
+def _select_xai_key_record():
+    manager = load_runtime_manager()
+    key_record = manager.acquire_key()
+    if not key_record:
         raise ValidationException(
-            message="xai.api_key is not configured for xAI direct endpoints",
+            message="xAI key pool is not configured with any enabled key",
             param="model",
             code="xai_api_key_missing",
         )
+    return key_record
 
 
 def _validate_reference_value(value: str, param: str) -> str:
@@ -399,12 +403,6 @@ async def _create_video_from_payload(payload: BaseModel, references: List[str]) 
     seconds = _normalize_seconds(payload.seconds, model=model)
 
     if model == XAI_VIDEO_MODEL_ID:
-        if not str(get_config("xai.api_key", "") or "").strip():
-            raise ValidationException(
-                message="xai.api_key is not configured for model `grok-imagine-video`",
-                param="model",
-                code="xai_api_key_missing",
-            )
         if seconds > 15:
             raise ValidationException(
                 message="seconds must be between 1 and 15 for model `grok-imagine-video`",
@@ -417,7 +415,10 @@ async def _create_video_from_payload(payload: BaseModel, references: List[str]) 
                 param="image_reference",
                 code="invalid_reference",
             )
-        direct_result = await XAIVideoService().generate(
+        key_record = _select_xai_key_record()
+        service = XAIVideoService()
+        service._key_record = key_record
+        direct_result = await service.generate(
             prompt=prompt,
             model=model,
             duration=seconds,
@@ -532,7 +533,7 @@ async def create_video(request: Request):
 @router.post("/videos/generations")
 async def create_xai_video_generation(request: XAIVideoGenerationRequest):
     """Official-style xAI video generation start endpoint."""
-    _require_xai_api_key()
+    key_record = _select_xai_key_record()
     model = _normalize_model(request.model)
     if model != XAI_VIDEO_MODEL_ID:
         raise ValidationException(
@@ -560,7 +561,9 @@ async def create_xai_video_generation(request: XAIVideoGenerationRequest):
         )
     image_url = _parse_xai_image_reference(request.image)
 
-    return await XAIVideoService().start_generation(
+    service = XAIVideoService()
+    service._key_record = key_record
+    return await service.start_generation(
         prompt=prompt,
         model=model,
         duration=duration,
@@ -573,8 +576,10 @@ async def create_xai_video_generation(request: XAIVideoGenerationRequest):
 @router.get("/videos/{request_id}")
 async def get_xai_video_generation(request_id: str):
     """Official-style xAI video generation status endpoint."""
-    _require_xai_api_key()
-    return await XAIVideoService().get_generation(request_id)
+    key_record = _select_xai_key_record()
+    service = XAIVideoService()
+    service._key_record = key_record
+    return await service.get_generation(request_id)
 
 
 __all__ = [

@@ -2,6 +2,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Iterable, List, Mapping, Optional
 
+from app.core.config import get_config
+
 
 class XAIKeyStatus(str, Enum):
     ACTIVE = "active"
@@ -75,3 +77,7 @@ class XAIKeyManager:
             if key.enabled and (key.status is None or key.status == XAIKeyStatus.ACTIVE.value):
                 return key
         return None
+
+
+def load_runtime_manager() -> XAIKeyManager:
+    return XAIKeyManager.from_config({"xai": get_config("xai", {}) or {}})

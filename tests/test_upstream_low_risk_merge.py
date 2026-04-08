@@ -420,6 +420,20 @@ class VideosApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(getattr(exc, "status_code", None), 400)
         self.assertEqual(getattr(exc, "code", None), "model_not_supported")
 
+    async def test_videos_route_requires_available_xai_key_pool(self):
+        from app.api.v1.video import create_video
+
+        class FakeRequest:
+            headers = {"content-type": "application/json"}
+
+            async def json(self):
+                return {"model": "grok-imagine-video", "prompt": "test"}
+
+        with self.assertRaises(Exception) as ctx:
+            await create_video(FakeRequest())
+
+        self.assertEqual(getattr(ctx.exception, "code", None), "xai_api_key_missing")
+
     async def test_videos_route_returns_openai_compatible_payload(self):
         from app.api.v1.video import create_video
 
@@ -479,11 +493,9 @@ class VideosApiTests(unittest.IsolatedAsyncioTestCase):
                     "quality": "high",
                 }
 
-        with patch(
-            "app.api.v1.video.get_config",
-            side_effect=lambda key, default=None: {"xai.api_key": "xai-test-key"}.get(key, default),
-            create=True,
-        ):
+        fake_key = SimpleNamespace(key="xai-test-key")
+        fake_manager = SimpleNamespace(acquire_key=lambda: fake_key)
+        with patch.object(video_module, "load_runtime_manager", return_value=fake_manager):
             fake_service = type(
                 "FakeXAIVideoService",
                 (),
@@ -533,11 +545,9 @@ class VideosApiTests(unittest.IsolatedAsyncioTestCase):
                     "seconds": 12,
                 }
 
-        with patch(
-            "app.api.v1.video.get_config",
-            side_effect=lambda key, default=None: {"xai.api_key": "xai-test-key"}.get(key, default),
-            create=True,
-        ):
+        fake_key = SimpleNamespace(key="xai-test-key")
+        fake_manager = SimpleNamespace(acquire_key=lambda: fake_key)
+        with patch.object(video_module, "load_runtime_manager", return_value=fake_manager):
             fake_service = type(
                 "FakeXAIVideoService",
                 (),
@@ -581,11 +591,9 @@ class VideosApiTests(unittest.IsolatedAsyncioTestCase):
                     "seconds": 5,
                 }
 
-        with patch(
-            "app.api.v1.video.get_config",
-            side_effect=lambda key, default=None: {"xai.api_key": "xai-test-key"}.get(key, default),
-            create=True,
-        ):
+        fake_key = SimpleNamespace(key="xai-test-key")
+        fake_manager = SimpleNamespace(acquire_key=lambda: fake_key)
+        with patch.object(video_module, "load_runtime_manager", return_value=fake_manager):
             fake_service = type(
                 "FakeXAIVideoService",
                 (),
