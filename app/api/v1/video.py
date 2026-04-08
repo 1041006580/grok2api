@@ -708,7 +708,10 @@ async def create_xai_video_generation(request: XAIVideoGenerationRequest):
         resolution=resolution,
         image_url=image_url,
     )
-    await _remember_xai_request_key(result.get("request_id", ""), key_record)
+    try:
+        await _remember_xai_request_key(result.get("request_id", ""), key_record)
+    except Exception:
+        pass
     return result
 
 
@@ -717,11 +720,21 @@ async def get_xai_video_generation(request_id: str):
     """Official-style xAI video generation status endpoint."""
     binding = await _get_bound_xai_request_key(request_id)
     if not binding:
-        raise ValidationException(
-            message="request_id is not available for current xAI key session",
-            param="request_id",
-            code="invalid_request_error",
-        )
+        manager = load_runtime_manager()
+        active_keys = [
+            key
+            for key in manager.list_keys()
+            if key.enabled and (key.status is None or key.status == "active")
+        ]
+        if len(active_keys) != 1:
+            raise ValidationException(
+                message="request_id is not available for current xAI key session",
+                param="request_id",
+                code="invalid_request_error",
+            )
+        key_record = active_keys[0]
+        service = XAIVideoService(key_manager=manager, key_record=key_record)
+        return await service.get_generation(request_id)
     cached_result = binding.get("result")
     if isinstance(cached_result, Mapping):
         return cached_result

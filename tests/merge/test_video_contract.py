@@ -269,7 +269,7 @@ def test_official_xai_video_generation_start_returns_request_id():
     assert state["xai"]["request_key_bindings"]["vidreq_123"]["key"] == "xai-test-key"
 
 
-def test_official_xai_video_generation_start_fails_when_binding_persistence_fails():
+def test_official_xai_video_generation_start_still_returns_request_id_when_binding_persistence_fails():
     from app.api.v1 import video as video_module
 
     async def scenario():
@@ -305,18 +305,18 @@ def test_official_xai_video_generation_start_fails_when_binding_persistence_fail
         with patch.object(video_module, "load_runtime_manager", return_value=fake_manager):
             with patch.object(video_module, "get_storage", return_value=DummyStorage()):
                 with patch.object(video_module, "XAIVideoService", FakeXAIVideoService, create=True):
-                    with pytest.raises(RuntimeError):
-                        await video_module.create_xai_video_generation(
-                            video_module.XAIVideoGenerationRequest(
-                                model="grok-imagine-video",
-                                prompt="launch a rocket over mars",
-                                duration=10,
-                                aspect_ratio="16:9",
-                                resolution="720p",
-                            )
+                    return await video_module.create_xai_video_generation(
+                        video_module.XAIVideoGenerationRequest(
+                            model="grok-imagine-video",
+                            prompt="launch a rocket over mars",
+                            duration=10,
+                            aspect_ratio="16:9",
+                            resolution="720p",
                         )
+                    )
 
-    asyncio.run(scenario())
+    result = asyncio.run(scenario())
+    assert result["request_id"] == "vidreq_123"
 
 
 def test_official_xai_video_generation_status_returns_upstream_payload():
@@ -325,7 +325,10 @@ def test_official_xai_video_generation_status_returns_upstream_payload():
     async def scenario():
         fake_key = SimpleNamespace(key="xai-test-key")
         fake_key.id = "k1"
-        fake_manager = SimpleNamespace(acquire_key=lambda: SimpleNamespace(key="other-key"))
+        fake_manager = SimpleNamespace(
+            acquire_key=lambda: SimpleNamespace(key="other-key"),
+            list_keys=lambda: [fake_key],
+        )
         captured_kwargs = []
         state = {
             "xai": {
@@ -384,6 +387,61 @@ def test_official_xai_video_generation_status_returns_upstream_payload():
     assert second["request_id"] == "vidreq_123"
     assert state["xai"]["request_key_bindings"]["vidreq_123"]["key_id"] == "k1"
     assert state["xai"]["request_key_bindings"]["vidreq_123"]["result"]["status"] == "done"
+
+
+def test_official_xai_video_generation_status_falls_back_to_single_active_key_when_binding_missing():
+    from app.api.v1 import video as video_module
+
+    async def scenario():
+        fake_key = SimpleNamespace(key="xai-test-key", id="k1", enabled=True, status="active")
+        fake_manager = SimpleNamespace(
+            acquire_key=lambda: fake_key,
+            list_keys=lambda: [fake_key],
+        )
+        captured_kwargs = []
+        state = {"xai": {"keys": []}}
+        lock = asyncio.Lock()
+
+        class FakeXAIVideoService:
+            get_generation = AsyncMock(
+                return_value={
+                    "request_id": "vidreq_123",
+                    "status": "pending",
+                    "video": {"url": "https://example.com/video.mp4"},
+                }
+            )
+
+            def __init__(self, *args, **kwargs):
+                captured_kwargs.append(kwargs)
+
+        class DummyStorage:
+            async def load_config(self):
+                return state
+
+            async def save_config(self, data):
+                state.clear()
+                state.update(data)
+
+            class _Lock:
+                async def __aenter__(self):
+                    await lock.acquire()
+
+                async def __aexit__(self, exc_type, exc, tb):
+                    lock.release()
+
+            def acquire_lock(self, *_args, **_kwargs):
+                return self._Lock()
+
+        with patch.object(video_module, "load_runtime_manager", return_value=fake_manager):
+            with patch.object(video_module, "get_storage", return_value=DummyStorage()):
+                with patch.object(video_module, "XAIVideoService", FakeXAIVideoService, create=True):
+                    result = await video_module.get_xai_video_generation("vidreq_123")
+        return result, captured_kwargs, fake_key, fake_manager
+
+    result, captured_kwargs, fake_key, fake_manager = asyncio.run(scenario())
+    assert result["request_id"] == "vidreq_123"
+    assert captured_kwargs[0]["key_manager"] is fake_manager
+    assert captured_kwargs[0]["key_record"] is fake_key
 
 
 def test_official_xai_video_generation_start_rejects_empty_pool():
