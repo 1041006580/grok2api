@@ -144,7 +144,7 @@ def test_local_storage_roundtrip_preserves_request_key_bindings(monkeypatch):
                 {"id": "k1", "key": "xai-key-1", "enabled": True},
             ],
             "request_key_bindings": {
-                "vidreq_123": {"key_id": "k1"},
+                "vidreq_123": {"key_id": "k1", "key": "xai-key-1"},
             },
         }
     }

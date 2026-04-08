@@ -266,6 +266,7 @@ def test_official_xai_video_generation_start_returns_request_id():
     assert result["request_id"] == "vidreq_123"
     assert result["status"] == "pending"
     assert state["xai"]["request_key_bindings"]["vidreq_123"]["key_id"] == "k1"
+    assert state["xai"]["request_key_bindings"]["vidreq_123"]["key"] == "xai-test-key"
 
 
 def test_official_xai_video_generation_status_returns_upstream_payload():
@@ -278,8 +279,8 @@ def test_official_xai_video_generation_status_returns_upstream_payload():
         captured_kwargs = []
         state = {
             "xai": {
-                "keys": [{"id": "k1", "key": "xai-test-key", "enabled": True}],
-                "request_key_bindings": {"vidreq_123": {"key_id": "k1"}},
+                "keys": [{"id": "k1", "key": "rotated-key", "enabled": True}],
+                "request_key_bindings": {"vidreq_123": {"key_id": "k1", "key": "xai-test-key"}},
             }
         }
         lock = asyncio.Lock()

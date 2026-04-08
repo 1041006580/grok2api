@@ -190,23 +190,29 @@ async def _remember_xai_request_key(request_id: str, key_record: object) -> None
     if not request_id:
         return
     key_id = str(getattr(key_record, "id", "") or "").strip()
+    key_value = str(getattr(key_record, "key", "") or "").strip()
     if not key_id:
+        return
+    if not key_value:
         return
 
     storage = get_storage()
     async with storage.acquire_lock("config_save", timeout=10):
         config._ensure_defaults()
         persisted = await storage.load_config()
-        if not isinstance(persisted, Mapping):
-            persisted = getattr(config, "_config", {}) or {}
-        base = _deep_merge(getattr(config, "_defaults", {}) or {}, persisted or {})
+        current_config = getattr(config, "_config", {}) or {}
+        if isinstance(persisted, Mapping) and (persisted or not current_config):
+            source = persisted
+        else:
+            source = current_config
+        base = _deep_merge(getattr(config, "_defaults", {}) or {}, source or {})
         section = base.get("xai", {}) or {}
         if not isinstance(section, Mapping):
             section = {}
         section = dict(section)
         raw_bindings = section.get("request_key_bindings", {}) or {}
         bindings = dict(raw_bindings) if isinstance(raw_bindings, Mapping) else {}
-        bindings[request_id] = {"key_id": key_id}
+        bindings[request_id] = {"key_id": key_id, "key": key_value}
         section["request_key_bindings"] = bindings
         base["xai"] = section
         await storage.save_config(base)
@@ -219,9 +225,12 @@ async def _get_bound_xai_request_key(request_id: str):
     async with storage.acquire_lock("config_save", timeout=10):
         config._ensure_defaults()
         persisted = await storage.load_config()
-        if not isinstance(persisted, Mapping):
-            persisted = getattr(config, "_config", {}) or {}
-        base = _deep_merge(getattr(config, "_defaults", {}) or {}, persisted or {})
+        current_config = getattr(config, "_config", {}) or {}
+        if isinstance(persisted, Mapping) and (persisted or not current_config):
+            source = persisted
+        else:
+            source = current_config
+        base = _deep_merge(getattr(config, "_defaults", {}) or {}, source or {})
         section = base.get("xai", {}) or {}
         if not isinstance(section, Mapping):
             return None
@@ -232,25 +241,14 @@ async def _get_bound_xai_request_key(request_id: str):
         if not isinstance(binding, Mapping):
             return None
         key_id = str(binding.get("key_id", "") or "").strip()
-        if not key_id:
+        key_value = str(binding.get("key", "") or "").strip()
+        if not key_id or not key_value:
             return None
-
-        keys = section.get("keys", []) or []
-        if not isinstance(keys, list):
-            return None
-        for item in keys:
-            if not isinstance(item, Mapping):
-                continue
-            if str(item.get("id", "") or "").strip() != key_id:
-                continue
-            if not str(item.get("key", "") or "").strip():
-                return None
-            return type(
-                "BoundKeyRecord",
-                (),
-                {"id": key_id, "key": str(item.get("key")).strip()},
-            )()
-        return None
+        return type(
+            "BoundKeyRecord",
+            (),
+            {"id": key_id, "key": key_value},
+        )()
 
 
 async def _drop_bound_xai_request_key(request_id: str) -> None:
@@ -262,9 +260,12 @@ async def _drop_bound_xai_request_key(request_id: str) -> None:
     async with storage.acquire_lock("config_save", timeout=10):
         config._ensure_defaults()
         persisted = await storage.load_config()
-        if not isinstance(persisted, Mapping):
-            persisted = getattr(config, "_config", {}) or {}
-        base = _deep_merge(getattr(config, "_defaults", {}) or {}, persisted or {})
+        current_config = getattr(config, "_config", {}) or {}
+        if isinstance(persisted, Mapping) and (persisted or not current_config):
+            source = persisted
+        else:
+            source = current_config
+        base = _deep_merge(getattr(config, "_defaults", {}) or {}, source or {})
         section = base.get("xai", {}) or {}
         if not isinstance(section, Mapping):
             return
@@ -632,7 +633,6 @@ async def create_video(request: Request):
 @router.post("/videos/generations")
 async def create_xai_video_generation(request: XAIVideoGenerationRequest):
     """Official-style xAI video generation start endpoint."""
-    manager, key_record = _select_xai_key_manager_and_record()
     model = _normalize_model(request.model)
     if model != XAI_VIDEO_MODEL_ID:
         raise ValidationException(
@@ -660,6 +660,7 @@ async def create_xai_video_generation(request: XAIVideoGenerationRequest):
         )
     image_url = _parse_xai_image_reference(request.image)
 
+    manager, key_record = _select_xai_key_manager_and_record()
     service = XAIVideoService(key_manager=manager, key_record=key_record)
     result = await service.start_generation(
         prompt=prompt,
@@ -669,7 +670,10 @@ async def create_xai_video_generation(request: XAIVideoGenerationRequest):
         resolution=resolution,
         image_url=image_url,
     )
-    await _remember_xai_request_key(result.get("request_id", ""), key_record)
+    try:
+        await _remember_xai_request_key(result.get("request_id", ""), key_record)
+    except Exception:
+        pass
     return result
 
 
@@ -688,7 +692,10 @@ async def get_xai_video_generation(request_id: str):
     result = await service.get_generation(request_id)
     status = str(result.get("status", "")).strip().lower()
     if status in {"done", "completed", "succeeded", "failed", "error", "expired", "cancelled"}:
-        await _drop_bound_xai_request_key(request_id)
+        try:
+            await _drop_bound_xai_request_key(request_id)
+        except Exception:
+            pass
     return result
 
 
