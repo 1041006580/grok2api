@@ -42,7 +42,6 @@ QUALITY_TO_RESOLUTION = {
 MIN_SECONDS = 6
 MAX_SECONDS = 30
 ALLOWED_ASPECT_RATIOS = {"16:9", "9:16", "3:2", "2:3", "1:1"}
-_XAI_REQUEST_KEY_TTL_SECONDS = 3600
 
 
 class VideoCreateRequest(BaseModel):
@@ -207,8 +206,7 @@ async def _remember_xai_request_key(request_id: str, key_record: object) -> None
         section = dict(section)
         raw_bindings = section.get("request_key_bindings", {}) or {}
         bindings = dict(raw_bindings) if isinstance(raw_bindings, Mapping) else {}
-        expires_at = int(time.time()) + _XAI_REQUEST_KEY_TTL_SECONDS
-        bindings[request_id] = {"key_id": key_id, "expires_at": expires_at}
+        bindings[request_id] = {"key_id": key_id}
         section["request_key_bindings"] = bindings
         base["xai"] = section
         await storage.save_config(base)
@@ -234,12 +232,7 @@ async def _get_bound_xai_request_key(request_id: str):
         if not isinstance(binding, Mapping):
             return None
         key_id = str(binding.get("key_id", "") or "").strip()
-        expires_at = binding.get("expires_at")
-        try:
-            expires_at = int(expires_at)
-        except (TypeError, ValueError):
-            expires_at = 0
-        if not key_id or (expires_at and expires_at < int(time.time())):
+        if not key_id:
             return None
 
         keys = section.get("keys", []) or []
@@ -258,6 +251,36 @@ async def _get_bound_xai_request_key(request_id: str):
                 {"id": key_id, "key": str(item.get("key")).strip()},
             )()
         return None
+
+
+async def _drop_bound_xai_request_key(request_id: str) -> None:
+    request_id = str(request_id or "").strip()
+    if not request_id:
+        return
+
+    storage = get_storage()
+    async with storage.acquire_lock("config_save", timeout=10):
+        config._ensure_defaults()
+        persisted = await storage.load_config()
+        if not isinstance(persisted, Mapping):
+            persisted = getattr(config, "_config", {}) or {}
+        base = _deep_merge(getattr(config, "_defaults", {}) or {}, persisted or {})
+        section = base.get("xai", {}) or {}
+        if not isinstance(section, Mapping):
+            return
+        section = dict(section)
+        raw_bindings = section.get("request_key_bindings", {}) or {}
+        bindings = dict(raw_bindings) if isinstance(raw_bindings, Mapping) else {}
+        if request_id not in bindings:
+            return
+        bindings.pop(request_id, None)
+        if bindings:
+            section["request_key_bindings"] = bindings
+        else:
+            section.pop("request_key_bindings", None)
+        base["xai"] = section
+        await storage.save_config(base)
+        config._config = base
 
 
 def _validate_reference_value(value: str, param: str) -> str:
@@ -659,10 +682,14 @@ async def get_xai_video_generation(request_id: str):
             message="request_id is not available for current xAI key session",
             param="request_id",
             code="invalid_request_error",
-        )
+    )
     manager = load_runtime_manager()
     service = XAIVideoService(key_manager=manager, key_record=key_record)
-    return await service.get_generation(request_id)
+    result = await service.get_generation(request_id)
+    status = str(result.get("status", "")).strip().lower()
+    if status in {"done", "completed", "succeeded", "failed", "error", "expired", "cancelled"}:
+        await _drop_bound_xai_request_key(request_id)
+    return result
 
 
 __all__ = [

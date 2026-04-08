@@ -287,7 +287,7 @@ class LocalStorage(BaseStorage):
                     continue
                 lines.append(f"[{section}]")
                 for key, val in items.items():
-                    if section == "xai" and key == "keys":
+                    if section == "xai" and key in {"keys", "request_key_bindings"}:
                         val_str = _format_toml_value(val)
                     elif isinstance(val, bool):
                         val_str = "true" if val else "false"

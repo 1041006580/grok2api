@@ -279,7 +279,7 @@ def test_official_xai_video_generation_status_returns_upstream_payload():
         state = {
             "xai": {
                 "keys": [{"id": "k1", "key": "xai-test-key", "enabled": True}],
-                "request_key_bindings": {"vidreq_123": {"key_id": "k1", "expires_at": 4102444800}},
+                "request_key_bindings": {"vidreq_123": {"key_id": "k1"}},
             }
         }
         lock = asyncio.Lock()
@@ -318,9 +318,9 @@ def test_official_xai_video_generation_status_returns_upstream_payload():
             with patch.object(video_module, "get_storage", return_value=DummyStorage()):
                 with patch.object(video_module, "XAIVideoService", FakeXAIVideoService, create=True):
                     result = await video_module.get_xai_video_generation("vidreq_123")
-        return FakeXAIVideoService.get_generation, result, captured_kwargs, fake_key, fake_manager
+        return FakeXAIVideoService.get_generation, result, captured_kwargs, fake_key, fake_manager, state
 
-    mock_get, result, captured_kwargs, fake_key, fake_manager = asyncio.run(scenario())
+    mock_get, result, captured_kwargs, fake_key, fake_manager, state = asyncio.run(scenario())
 
     mock_get.assert_awaited_once_with("vidreq_123")
     assert captured_kwargs[0]["key_manager"] is fake_manager
@@ -329,6 +329,7 @@ def test_official_xai_video_generation_status_returns_upstream_payload():
     assert result["request_id"] == "vidreq_123"
     assert result["status"] == "done"
     assert result["video"]["url"] == "https://example.com/video.mp4"
+    assert "request_key_bindings" not in state["xai"]
 
 
 def test_official_xai_video_generation_start_rejects_empty_pool():

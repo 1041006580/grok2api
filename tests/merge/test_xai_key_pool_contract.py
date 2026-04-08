@@ -131,6 +131,35 @@ def test_local_storage_roundtrip_preserves_none_metadata(monkeypatch):
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
+def test_local_storage_roundtrip_preserves_request_key_bindings(monkeypatch):
+    tmp_dir = core_storage.DATA_DIR / f"tmp-config-{uuid.uuid4().hex}"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    config_path = tmp_dir / "config.toml"
+    monkeypatch.setattr(core_storage, "CONFIG_FILE", config_path)
+
+    storage = LocalStorage()
+    payload = {
+        "xai": {
+            "keys": [
+                {"id": "k1", "key": "xai-key-1", "enabled": True},
+            ],
+            "request_key_bindings": {
+                "vidreq_123": {"key_id": "k1"},
+            },
+        }
+    }
+
+    async def roundtrip():
+        await storage.save_config(payload)
+        return await storage.load_config()
+
+    try:
+        loaded = asyncio.run(roundtrip())
+        assert loaded == payload
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
 def test_local_storage_roundtrip_preserves_control_characters(monkeypatch):
     tmp_dir = core_storage.DATA_DIR / f"tmp-config-{uuid.uuid4().hex}"
     tmp_dir.mkdir(parents=True, exist_ok=True)
