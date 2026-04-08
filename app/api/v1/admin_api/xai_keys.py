@@ -30,6 +30,18 @@ def _collect_keys() -> list[dict[str, Any]]:
     return _collect_keys_from_section(section)
 
 
+async def _collect_latest_keys() -> list[dict[str, Any]]:
+    storage = get_storage()
+    persisted = await storage.load_config()
+    if not isinstance(persisted, Mapping):
+        persisted = getattr(config, "_config", None) or {}
+    base = _deep_merge(getattr(config, "_defaults", {}) or {}, persisted or {})
+    section = base.get("xai", {}) or {}
+    if not isinstance(section, Mapping):
+        return []
+    return _collect_keys_from_section(section)
+
+
 def _collect_keys_from_section(section: Mapping[str, Any]) -> list[dict[str, Any]]:
     keys = section.get("keys", [])
     normalized: list[dict[str, Any]] = []
@@ -137,7 +149,7 @@ async def _mutate_xai_keys(mutator):
 @router.get("/xai-keys", dependencies=[Depends(verify_app_key)])
 async def get_xai_keys():
     """Retrieve all configured xAI keys with masked values."""
-    keys = _collect_keys()
+    keys = await _collect_latest_keys()
     return {"status": "success", "keys": [_format_key_payload(key) for key in keys]}
 
 
@@ -168,6 +180,14 @@ async def create_xai_key(data: dict[str, Any]):
 @router.patch("/xai-keys/{key_id}", dependencies=[Depends(verify_app_key)])
 async def update_xai_key(key_id: str, data: dict[str, Any]):
     """Update metadata or enablement for a specific xAI key."""
+    allowed_fields = {"name", "enabled", "key"}
+    provided_fields = set(data.keys())
+    if not provided_fields:
+        raise HTTPException(status_code=400, detail="at least one field must be provided")
+    unknown_fields = provided_fields - allowed_fields
+    if unknown_fields:
+        raise HTTPException(status_code=400, detail=f"unsupported fields: {sorted(unknown_fields)}")
+
     def mutate(keys: list[dict[str, Any]]):
         idx = _find_key_index(keys, key_id)
         if idx < 0:

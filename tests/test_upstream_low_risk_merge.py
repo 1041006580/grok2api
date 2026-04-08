@@ -1621,8 +1621,15 @@ class XAIKeysAdminApiTests(unittest.IsolatedAsyncioTestCase):
                 ]
             }
         }
+
+        class DummyStorage:
+            async def load_config(self):
+                return copy.deepcopy(state)
+
         with patch.object(module.config, "_config", state, create=True):
-            response = await module.get_xai_keys()
+            with patch.object(module.config, "_defaults", {"xai": {"keys": []}}, create=True):
+                with patch.object(module, "get_storage", return_value=DummyStorage()):
+                    response = await module.get_xai_keys()
 
         self.assertIn("keys", response)
         self.assertEqual(response["keys"][0]["id"], "k1")
@@ -1818,6 +1825,67 @@ class XAIKeysAdminApiTests(unittest.IsolatedAsyncioTestCase):
                             await module.update_xai_key("k1", {"name": {"bad": 1}})
 
         self.assertEqual(getattr(ctx.exception, "status_code", None), 400)
+
+    async def test_admin_xai_keys_get_prefers_latest_persisted_state(self):
+        from app.api.v1.admin_api import xai_keys as module
+
+        persisted_state = {
+            "xai": {
+                "keys": [
+                    {"id": "k1", "key": "xai-secret-12345678", "name": "primary", "enabled": True}
+                ]
+            }
+        }
+        stale_local_state = {"xai": {"keys": []}}
+
+        class DummyStorage:
+            async def load_config(self):
+                return copy.deepcopy(persisted_state)
+
+        with patch.object(module.config, "_config", stale_local_state, create=True):
+            with patch.object(module.config, "_defaults", {"xai": {"keys": []}}, create=True):
+                with patch.object(module, "get_storage", return_value=DummyStorage()):
+                    payload = await module.get_xai_keys()
+
+        self.assertEqual(payload["keys"][0]["id"], "k1")
+
+    async def test_admin_xai_keys_rejects_empty_or_unknown_patch_payload(self):
+        from app.api.v1.admin_api import xai_keys as module
+
+        state = {
+            "xai": {
+                "keys": [
+                    {"id": "k1", "key": "xai-secret-12345678", "name": "primary", "enabled": True}
+                ]
+            }
+        }
+        defaults = {"xai": {"keys": []}}
+        lock = asyncio.Lock()
+
+        class DummyStorage:
+            @asynccontextmanager
+            async def acquire_lock(self, *_args, **_kwargs):
+                async with lock:
+                    yield
+
+            async def save_config(self, data):
+                state.clear()
+                state.update(data)
+
+            async def load_config(self):
+                return copy.deepcopy(state)
+
+        with patch.object(module.config, "_config", state, create=True):
+            with patch.object(module.config, "_defaults", defaults, create=True):
+                with patch.object(module.config, "_ensure_defaults", Mock(return_value=None)):
+                    with patch.object(module, "get_storage", return_value=DummyStorage()):
+                        with self.assertRaises(Exception) as ctx_empty:
+                            await module.update_xai_key("k1", {})
+                        with self.assertRaises(Exception) as ctx_unknown:
+                            await module.update_xai_key("k1", {"enbaled": False})
+
+        self.assertEqual(getattr(ctx_empty.exception, "status_code", None), 400)
+        self.assertEqual(getattr(ctx_unknown.exception, "status_code", None), 400)
 
     async def test_admin_xai_keys_concurrent_creates_preserve_all_entries(self):
         from app.api.v1.admin_api import xai_keys as module
