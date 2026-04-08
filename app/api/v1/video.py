@@ -2,11 +2,11 @@
 Videos API route (OpenAI-compatible create endpoint).
 """
 
-import asyncio
 import base64
 import re
 import time
 import uuid
+from collections.abc import Mapping
 from typing import Any, Dict, List, Optional, Tuple
 
 import orjson
@@ -15,8 +15,9 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
-from app.core.config import get_config
+from app.core.config import _deep_merge, config, get_config
 from app.core.exceptions import UpstreamException, ValidationException
+from app.core.storage import get_storage
 from app.services.grok.services.model import ModelService
 from app.services.grok.services.video import VideoService
 from app.services.grok.services.xai_key_manager import load_runtime_manager
@@ -42,8 +43,6 @@ MIN_SECONDS = 6
 MAX_SECONDS = 30
 ALLOWED_ASPECT_RATIOS = {"16:9", "9:16", "3:2", "2:3", "1:1"}
 _XAI_REQUEST_KEY_TTL_SECONDS = 3600
-_XAI_REQUEST_KEYS: dict[str, tuple[float, object]] = {}
-_XAI_REQUEST_KEYS_LOCK = asyncio.Lock()
 
 
 class VideoCreateRequest(BaseModel):
@@ -191,30 +190,74 @@ async def _remember_xai_request_key(request_id: str, key_record: object) -> None
     request_id = str(request_id or "").strip()
     if not request_id:
         return
-    now = time.monotonic()
-    async with _XAI_REQUEST_KEYS_LOCK:
-        expired = [
-            key
-            for key, (created_at, _) in _XAI_REQUEST_KEYS.items()
-            if now - created_at > _XAI_REQUEST_KEY_TTL_SECONDS
-        ]
-        for key in expired:
-            _XAI_REQUEST_KEYS.pop(key, None)
-        _XAI_REQUEST_KEYS[request_id] = (now, key_record)
+    key_id = str(getattr(key_record, "id", "") or "").strip()
+    if not key_id:
+        return
+
+    storage = get_storage()
+    async with storage.acquire_lock("config_save", timeout=10):
+        config._ensure_defaults()
+        persisted = await storage.load_config()
+        if not isinstance(persisted, Mapping):
+            persisted = getattr(config, "_config", {}) or {}
+        base = _deep_merge(getattr(config, "_defaults", {}) or {}, persisted or {})
+        section = base.get("xai", {}) or {}
+        if not isinstance(section, Mapping):
+            section = {}
+        section = dict(section)
+        raw_bindings = section.get("request_key_bindings", {}) or {}
+        bindings = dict(raw_bindings) if isinstance(raw_bindings, Mapping) else {}
+        expires_at = int(time.time()) + _XAI_REQUEST_KEY_TTL_SECONDS
+        bindings[request_id] = {"key_id": key_id, "expires_at": expires_at}
+        section["request_key_bindings"] = bindings
+        base["xai"] = section
+        await storage.save_config(base)
+        config._config = base
 
 
 async def _get_bound_xai_request_key(request_id: str):
     request_id = str(request_id or "").strip()
-    now = time.monotonic()
-    async with _XAI_REQUEST_KEYS_LOCK:
-        record = _XAI_REQUEST_KEYS.get(request_id)
-        if not record:
+    storage = get_storage()
+    async with storage.acquire_lock("config_save", timeout=10):
+        config._ensure_defaults()
+        persisted = await storage.load_config()
+        if not isinstance(persisted, Mapping):
+            persisted = getattr(config, "_config", {}) or {}
+        base = _deep_merge(getattr(config, "_defaults", {}) or {}, persisted or {})
+        section = base.get("xai", {}) or {}
+        if not isinstance(section, Mapping):
             return None
-        created_at, key_record = record
-        if now - created_at > _XAI_REQUEST_KEY_TTL_SECONDS:
-            _XAI_REQUEST_KEYS.pop(request_id, None)
+
+        raw_bindings = section.get("request_key_bindings", {}) or {}
+        bindings = dict(raw_bindings) if isinstance(raw_bindings, Mapping) else {}
+        binding = bindings.get(request_id)
+        if not isinstance(binding, Mapping):
             return None
-        return key_record
+        key_id = str(binding.get("key_id", "") or "").strip()
+        expires_at = binding.get("expires_at")
+        try:
+            expires_at = int(expires_at)
+        except (TypeError, ValueError):
+            expires_at = 0
+        if not key_id or (expires_at and expires_at < int(time.time())):
+            return None
+
+        keys = section.get("keys", []) or []
+        if not isinstance(keys, list):
+            return None
+        for item in keys:
+            if not isinstance(item, Mapping):
+                continue
+            if str(item.get("id", "") or "").strip() != key_id:
+                continue
+            if not str(item.get("key", "") or "").strip():
+                return None
+            return type(
+                "BoundKeyRecord",
+                (),
+                {"id": key_id, "key": str(item.get("key")).strip()},
+            )()
+        return None
 
 
 def _validate_reference_value(value: str, param: str) -> str:
