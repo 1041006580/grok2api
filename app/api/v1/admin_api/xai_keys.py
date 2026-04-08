@@ -50,7 +50,23 @@ def _normalize_enabled(value: Any, default: bool = False) -> bool:
             return True
         if lowered == "false":
             return False
-    return default
+    if value is None:
+        return default
+    raise HTTPException(status_code=400, detail="enabled must be a boolean")
+
+
+def _optional_string(value: Any, field_name: str) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    raise HTTPException(status_code=400, detail=f"{field_name} must be a string")
+
+
+def _required_string(value: Any, field_name: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise HTTPException(status_code=400, detail=f"{field_name} is required")
+    return value.strip()
 
 
 def _mask_key_value(value: Any) -> str:
@@ -113,18 +129,18 @@ async def get_xai_keys():
 @router.post("/xai-keys", dependencies=[Depends(verify_app_key)])
 async def create_xai_key(data: dict[str, Any]):
     """Create a new xAI key entry."""
-    key_value = str(data.get("key", "") or "").strip()
-    if not key_value:
-        raise HTTPException(status_code=400, detail="xAI key is required")
+    key_value = _required_string(data.get("key"), "xAI key")
 
     key_id = str(data.get("id") or uuid4())
+    if "id" in data:
+        key_id = _required_string(data.get("id"), "id")
     def mutate(keys: list[dict[str, Any]]):
         if _find_key_index(keys, key_id) >= 0:
             raise HTTPException(status_code=400, detail="xAI key already exists")
         new_entry = {
             "id": key_id,
             "key": key_value,
-            "name": data.get("name"),
+            "name": _optional_string(data.get("name"), "name"),
             "enabled": _normalize_enabled(data.get("enabled"), True),
         }
         keys.append(new_entry)
@@ -144,13 +160,11 @@ async def update_xai_key(key_id: str, data: dict[str, Any]):
 
         entry = dict(keys[idx])
         if "name" in data:
-            entry["name"] = data.get("name")
+            entry["name"] = _optional_string(data.get("name"), "name")
         if "enabled" in data:
             entry["enabled"] = _normalize_enabled(data.get("enabled"), entry.get("enabled", False))
         if "key" in data:
-            key_value = str(data.get("key", "") or "").strip()
-            if key_value:
-                entry["key"] = key_value
+            entry["key"] = _required_string(data.get("key"), "xAI key")
 
         keys[idx] = entry
         return entry

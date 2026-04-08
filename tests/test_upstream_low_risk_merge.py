@@ -1724,6 +1724,46 @@ class XAIKeysAdminApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(deleted["status"], "success")
         self.assertEqual(state["xai"]["keys"], [])
 
+    async def test_admin_xai_keys_rejects_invalid_create_payload_types(self):
+        from app.api.v1.admin_api import xai_keys as module
+
+        with self.assertRaises(Exception) as ctx:
+            await module.create_xai_key({"key": {"bad": 1}, "enabled": 0})
+
+        self.assertEqual(getattr(ctx.exception, "status_code", None), 400)
+
+    async def test_admin_xai_keys_rejects_invalid_update_payload_types(self):
+        from app.api.v1.admin_api import xai_keys as module
+
+        state = {
+            "xai": {
+                "keys": [
+                    {"id": "k1", "key": "xai-secret-12345678", "name": "primary", "enabled": True}
+                ]
+            }
+        }
+        defaults = {"xai": {"keys": []}}
+        lock = asyncio.Lock()
+
+        class DummyStorage:
+            @asynccontextmanager
+            async def acquire_lock(self, *_args, **_kwargs):
+                async with lock:
+                    yield
+
+            async def save_config(self, data):
+                state.clear()
+                state.update(data)
+
+        with patch.object(module.config, "_config", state, create=True):
+            with patch.object(module.config, "_defaults", defaults, create=True):
+                with patch.object(module.config, "_ensure_defaults", Mock(return_value=None)):
+                    with patch.object(module, "get_storage", return_value=DummyStorage()):
+                        with self.assertRaises(Exception) as ctx:
+                            await module.update_xai_key("k1", {"name": {"bad": 1}})
+
+        self.assertEqual(getattr(ctx.exception, "status_code", None), 400)
+
     async def test_admin_xai_keys_concurrent_creates_preserve_all_entries(self):
         from app.api.v1.admin_api import xai_keys as module
 
@@ -1759,7 +1799,16 @@ class XAIKeysAdminApiTests(unittest.IsolatedAsyncioTestCase):
 
 
 def test_admin_api_router_includes_xai_keys_module():
-    import app.api.v1.admin_api.xai_keys  # noqa: F401
+    from app.api.v1.admin import router as admin_router
+    from app.api.v1.admin_api import router as admin_api_router
+
+    admin_paths = {route.path for route in admin_router.routes}
+    admin_api_paths = {route.path for route in admin_api_router.routes}
+
+    assert "/xai-keys" in admin_paths
+    assert "/xai-keys/{key_id}" in admin_paths
+    assert "/xai-keys" in admin_api_paths
+    assert "/xai-keys/{key_id}" in admin_api_paths
 
 
 if __name__ == "__main__":
