@@ -496,21 +496,25 @@ class VideosApiTests(unittest.IsolatedAsyncioTestCase):
         fake_key = SimpleNamespace(key="xai-test-key")
         fake_manager = SimpleNamespace(acquire_key=lambda: fake_key)
         with patch.object(video_module, "load_runtime_manager", return_value=fake_manager):
+            class FakeXAIVideoService:
+                generate = AsyncMock(
+                    return_value={
+                        "url": "https://example.com/xai-generated.mp4",
+                        "duration": 10,
+                        "model": "grok-imagine-video",
+                    }
+                )
+
+                def __init__(self, *args, **kwargs):
+                    pass
+
             fake_service = type(
-                "FakeXAIVideoService",
+                "Ignored",
                 (),
-                {
-                    "generate": AsyncMock(
-                        return_value={
-                            "url": "https://example.com/xai-generated.mp4",
-                            "duration": 10,
-                            "model": "grok-imagine-video",
-                        }
-                    )
-                },
+                {},
             )
-            with patch.object(video_module, "XAIVideoService", fake_service, create=True):
-                mock_generate = fake_service.generate
+            with patch.object(video_module, "XAIVideoService", FakeXAIVideoService, create=True):
+                mock_generate = FakeXAIVideoService.generate
                 response = await create_video(FakeRequest())
 
         self.assertEqual(response.status_code, 200)
@@ -548,21 +552,20 @@ class VideosApiTests(unittest.IsolatedAsyncioTestCase):
         fake_key = SimpleNamespace(key="xai-test-key")
         fake_manager = SimpleNamespace(acquire_key=lambda: fake_key)
         with patch.object(video_module, "load_runtime_manager", return_value=fake_manager):
-            fake_service = type(
-                "FakeXAIVideoService",
-                (),
-                {
-                    "generate": AsyncMock(
-                        return_value={
-                            "url": "https://example.com/xai-image-video.mp4",
-                            "duration": 12,
-                            "model": "grok-imagine-video",
-                        }
-                    )
-                },
-            )
-            with patch.object(video_module, "XAIVideoService", fake_service, create=True):
-                mock_generate = fake_service.generate
+            class FakeXAIVideoService:
+                generate = AsyncMock(
+                    return_value={
+                        "url": "https://example.com/xai-image-video.mp4",
+                        "duration": 12,
+                        "model": "grok-imagine-video",
+                    }
+                )
+
+                def __init__(self, *args, **kwargs):
+                    pass
+
+            with patch.object(video_module, "XAIVideoService", FakeXAIVideoService, create=True):
+                mock_generate = FakeXAIVideoService.generate
                 response = await create_video(FakeRequest())
 
         self.assertEqual(response.status_code, 200)
@@ -594,20 +597,19 @@ class VideosApiTests(unittest.IsolatedAsyncioTestCase):
         fake_key = SimpleNamespace(key="xai-test-key")
         fake_manager = SimpleNamespace(acquire_key=lambda: fake_key)
         with patch.object(video_module, "load_runtime_manager", return_value=fake_manager):
-            fake_service = type(
-                "FakeXAIVideoService",
-                (),
-                {
-                    "generate": AsyncMock(
-                        return_value={
-                            "url": "https://example.com/xai-5s.mp4",
-                            "duration": 5,
-                            "model": "grok-imagine-video",
-                        }
-                    )
-                },
-            )
-            with patch.object(video_module, "XAIVideoService", fake_service, create=True):
+            class FakeXAIVideoService:
+                generate = AsyncMock(
+                    return_value={
+                        "url": "https://example.com/xai-5s.mp4",
+                        "duration": 5,
+                        "model": "grok-imagine-video",
+                    }
+                )
+
+                def __init__(self, *args, **kwargs):
+                    pass
+
+            with patch.object(video_module, "XAIVideoService", FakeXAIVideoService, create=True):
                 response = await create_video(FakeRequest())
 
         self.assertEqual(response.status_code, 200)

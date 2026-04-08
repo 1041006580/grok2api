@@ -416,8 +416,7 @@ async def _create_video_from_payload(payload: BaseModel, references: List[str]) 
                 code="invalid_reference",
             )
         key_record = _select_xai_key_record()
-        service = XAIVideoService()
-        service._key_record = key_record
+        service = XAIVideoService(key_record=key_record)
         direct_result = await service.generate(
             prompt=prompt,
             model=model,
@@ -561,8 +560,7 @@ async def create_xai_video_generation(request: XAIVideoGenerationRequest):
         )
     image_url = _parse_xai_image_reference(request.image)
 
-    service = XAIVideoService()
-    service._key_record = key_record
+    service = XAIVideoService(key_record=key_record)
     return await service.start_generation(
         prompt=prompt,
         model=model,
@@ -577,8 +575,7 @@ async def create_xai_video_generation(request: XAIVideoGenerationRequest):
 async def get_xai_video_generation(request_id: str):
     """Official-style xAI video generation status endpoint."""
     key_record = _select_xai_key_record()
-    service = XAIVideoService()
-    service._key_record = key_record
+    service = XAIVideoService(key_record=key_record)
     return await service.get_generation(request_id)
 
 

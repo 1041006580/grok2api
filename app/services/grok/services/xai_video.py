@@ -11,7 +11,7 @@ import orjson
 
 from app.core.config import get_config
 from app.core.exceptions import UpstreamException, ValidationException
-from app.services.grok.services.xai_key_manager import load_runtime_manager
+from app.services.grok.services.xai_key_manager import XAIKeyInfo, XAIKeyManager, load_runtime_manager
 
 
 DEFAULT_XAI_BASE_URL = "https://api.x.ai/v1"
@@ -20,9 +20,14 @@ DEFAULT_XAI_BASE_URL = "https://api.x.ai/v1"
 class XAIVideoService:
     """Direct x.ai video generation via API key."""
 
-    def __init__(self):
-        self._key_manager = load_runtime_manager()
-        self._key_record = None
+    def __init__(
+        self,
+        *,
+        key_manager: Optional[XAIKeyManager] = None,
+        key_record: Optional[XAIKeyInfo] = None,
+    ):
+        self._key_manager = key_manager or load_runtime_manager()
+        self._key_record = key_record
         self.base_url = (
             str(get_config("xai.base_url", DEFAULT_XAI_BASE_URL) or DEFAULT_XAI_BASE_URL)
             .strip()

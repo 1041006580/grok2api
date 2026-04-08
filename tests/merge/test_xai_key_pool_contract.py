@@ -190,7 +190,8 @@ def test_xai_key_manager_preserves_runtime_metadata_fields():
 
 
 def test_xai_video_service_builds_headers_from_manager_key():
-    service = XAIVideoService()
-    service._key_record = type("KeyRef", (), {"key": "xai-key-1"})()
+    fake_key = type("KeyRef", (), {"key": "xai-key-1"})()
+    fake_manager = type("Mgr", (), {"acquire_key": staticmethod(lambda: fake_key)})()
+    service = XAIVideoService(key_manager=fake_manager)
     headers = service._headers()
     assert headers["Authorization"] == "Bearer xai-key-1"
