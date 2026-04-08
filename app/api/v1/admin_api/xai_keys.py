@@ -55,6 +55,18 @@ def _normalize_enabled(value: Any, default: bool = False) -> bool:
     raise HTTPException(status_code=400, detail="enabled must be a boolean")
 
 
+def _display_enabled(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered == "true":
+            return True
+        if lowered == "false":
+            return False
+    return False
+
+
 def _optional_string(value: Any, field_name: str) -> str | None:
     if value is None:
         return None
@@ -85,7 +97,7 @@ def _format_key_payload(entry: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "id": entry.get("id"),
         "name": entry.get("name"),
-        "enabled": _normalize_enabled(entry.get("enabled"), False),
+        "enabled": _display_enabled(entry.get("enabled")),
         "value": _mask_key_value(entry.get("key")),
     }
 
@@ -105,7 +117,10 @@ async def _mutate_xai_keys(mutator):
     storage = get_storage()
     async with storage.acquire_lock("config_save", timeout=10):
         config._ensure_defaults()
-        base = _deep_merge(getattr(config, "_defaults", {}) or {}, getattr(config, "_config", {}) or {})
+        persisted = await storage.load_config()
+        if not isinstance(persisted, Mapping):
+            persisted = getattr(config, "_config", {}) or {}
+        base = _deep_merge(getattr(config, "_defaults", {}) or {}, persisted or {})
         section = base.get("xai", {}) or {}
         if not isinstance(section, Mapping):
             section = {}

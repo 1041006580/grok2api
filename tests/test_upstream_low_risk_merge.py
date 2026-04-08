@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import pathlib
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
@@ -1652,6 +1653,30 @@ class XAIKeysAdminApiTests(unittest.IsolatedAsyncioTestCase):
                 state.clear()
                 state.update(data)
 
+            async def load_config(self):
+                return copy.deepcopy(state)
+
+            async def load_config(self):
+                return copy.deepcopy(state)
+
+            async def load_config(self):
+                return copy.deepcopy(state)
+
+            async def load_config(self):
+                return copy.deepcopy(state)
+
+            async def load_config(self):
+                return copy.deepcopy(state)
+
+            async def load_config(self):
+                return copy.deepcopy(state)
+
+            async def load_config(self):
+                return copy.deepcopy(state)
+
+            async def load_config(self):
+                return copy.deepcopy(state)
+
         with patch.object(module.config, "_config", state, create=True):
             with patch.object(module.config, "_defaults", defaults, create=True):
                 with patch.object(module.config, "_ensure_defaults", Mock(return_value=None)):
@@ -1684,6 +1709,30 @@ class XAIKeysAdminApiTests(unittest.IsolatedAsyncioTestCase):
                 state.clear()
                 state.update(data)
 
+            async def load_config(self):
+                return copy.deepcopy(state)
+
+            async def load_config(self):
+                return copy.deepcopy(state)
+
+            async def load_config(self):
+                return copy.deepcopy(state)
+
+            async def load_config(self):
+                return copy.deepcopy(state)
+
+            async def load_config(self):
+                return copy.deepcopy(state)
+
+            async def load_config(self):
+                return copy.deepcopy(state)
+
+            async def load_config(self):
+                return copy.deepcopy(state)
+
+            async def load_config(self):
+                return copy.deepcopy(state)
+
         with patch.object(module.config, "_config", state, create=True):
             with patch.object(module.config, "_defaults", defaults, create=True):
                 with patch.object(module.config, "_ensure_defaults", Mock(return_value=None)):
@@ -1709,6 +1758,9 @@ class XAIKeysAdminApiTests(unittest.IsolatedAsyncioTestCase):
             async def save_config(self, data):
                 state.clear()
                 state.update(data)
+
+            async def load_config(self):
+                return copy.deepcopy(state)
 
         with patch.object(module.config, "_config", state, create=True):
             with patch.object(module.config, "_defaults", defaults, create=True):
@@ -1755,6 +1807,9 @@ class XAIKeysAdminApiTests(unittest.IsolatedAsyncioTestCase):
                 state.clear()
                 state.update(data)
 
+            async def load_config(self):
+                return copy.deepcopy(state)
+
         with patch.object(module.config, "_config", state, create=True):
             with patch.object(module.config, "_defaults", defaults, create=True):
                 with patch.object(module.config, "_ensure_defaults", Mock(return_value=None)):
@@ -1781,6 +1836,9 @@ class XAIKeysAdminApiTests(unittest.IsolatedAsyncioTestCase):
                 state.clear()
                 state.update(data)
 
+            async def load_config(self):
+                return copy.deepcopy(state)
+
         with patch.object(module.config, "_config", state, create=True):
             with patch.object(module.config, "_defaults", defaults, create=True):
                 with patch.object(module.config, "_ensure_defaults", Mock(return_value=None)):
@@ -1795,6 +1853,44 @@ class XAIKeysAdminApiTests(unittest.IsolatedAsyncioTestCase):
                         )
 
         ids = sorted(item["id"] for item in state["xai"]["keys"])
+        self.assertEqual(ids, ["k1", "k2"])
+
+    async def test_admin_xai_keys_create_uses_latest_persisted_state_over_stale_local_config(self):
+        from app.api.v1.admin_api import xai_keys as module
+
+        persisted_state = {
+            "xai": {
+                "keys": [
+                    {"id": "k1", "key": "xai-secret-12345678", "name": "primary", "enabled": True}
+                ]
+            }
+        }
+        stale_local_state = {"xai": {"keys": []}}
+        defaults = {"xai": {"keys": []}}
+        lock = asyncio.Lock()
+
+        class DummyStorage:
+            @asynccontextmanager
+            async def acquire_lock(self, *_args, **_kwargs):
+                async with lock:
+                    yield
+
+            async def save_config(self, data):
+                persisted_state.clear()
+                persisted_state.update(copy.deepcopy(data))
+
+            async def load_config(self):
+                return copy.deepcopy(persisted_state)
+
+        with patch.object(module.config, "_config", stale_local_state, create=True):
+            with patch.object(module.config, "_defaults", defaults, create=True):
+                with patch.object(module.config, "_ensure_defaults", Mock(return_value=None)):
+                    with patch.object(module, "get_storage", return_value=DummyStorage()):
+                        await module.create_xai_key(
+                            {"id": "k2", "key": "xai-secret-87654321", "name": "secondary", "enabled": True}
+                        )
+
+        ids = sorted(item["id"] for item in persisted_state["xai"]["keys"])
         self.assertEqual(ids, ["k1", "k2"])
 
 
