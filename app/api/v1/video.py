@@ -240,15 +240,53 @@ async def _get_bound_xai_request_key(request_id: str):
         binding = bindings.get(request_id)
         if not isinstance(binding, Mapping):
             return None
+        cached_result = binding.get("result")
+        if isinstance(cached_result, Mapping):
+            return {"result": dict(cached_result)}
         key_id = str(binding.get("key_id", "") or "").strip()
         key_value = str(binding.get("key", "") or "").strip()
         if not key_id or not key_value:
             return None
-        return type(
-            "BoundKeyRecord",
-            (),
-            {"id": key_id, "key": key_value},
-        )()
+        return {
+            "key_record": type(
+                "BoundKeyRecord",
+                (),
+                {"id": key_id, "key": key_value},
+            )()
+        }
+
+
+async def _cache_bound_xai_request_result(request_id: str, result: Dict[str, Any]) -> None:
+    request_id = str(request_id or "").strip()
+    if not request_id:
+        return
+
+    storage = get_storage()
+    async with storage.acquire_lock("config_save", timeout=10):
+        config._ensure_defaults()
+        persisted = await storage.load_config()
+        current_config = getattr(config, "_config", {}) or {}
+        if isinstance(persisted, Mapping) and (persisted or not current_config):
+            source = persisted
+        else:
+            source = current_config
+        base = _deep_merge(getattr(config, "_defaults", {}) or {}, source or {})
+        section = base.get("xai", {}) or {}
+        if not isinstance(section, Mapping):
+            return
+        section = dict(section)
+        raw_bindings = section.get("request_key_bindings", {}) or {}
+        bindings = dict(raw_bindings) if isinstance(raw_bindings, Mapping) else {}
+        binding = bindings.get(request_id)
+        if not isinstance(binding, Mapping):
+            return
+        binding = dict(binding)
+        binding["result"] = result
+        bindings[request_id] = binding
+        section["request_key_bindings"] = bindings
+        base["xai"] = section
+        await storage.save_config(base)
+        config._config = base
 
 
 async def _drop_bound_xai_request_key(request_id: str) -> None:
@@ -670,32 +708,31 @@ async def create_xai_video_generation(request: XAIVideoGenerationRequest):
         resolution=resolution,
         image_url=image_url,
     )
-    try:
-        await _remember_xai_request_key(result.get("request_id", ""), key_record)
-    except Exception:
-        pass
+    await _remember_xai_request_key(result.get("request_id", ""), key_record)
     return result
 
 
 @router.get("/videos/{request_id}")
 async def get_xai_video_generation(request_id: str):
     """Official-style xAI video generation status endpoint."""
-    key_record = await _get_bound_xai_request_key(request_id)
-    if not key_record:
+    binding = await _get_bound_xai_request_key(request_id)
+    if not binding:
         raise ValidationException(
             message="request_id is not available for current xAI key session",
             param="request_id",
             code="invalid_request_error",
-    )
+        )
+    cached_result = binding.get("result")
+    if isinstance(cached_result, Mapping):
+        return cached_result
+
+    key_record = binding["key_record"]
     manager = load_runtime_manager()
     service = XAIVideoService(key_manager=manager, key_record=key_record)
     result = await service.get_generation(request_id)
     status = str(result.get("status", "")).strip().lower()
     if status in {"done", "completed", "succeeded", "failed", "error", "expired", "cancelled"}:
-        try:
-            await _drop_bound_xai_request_key(request_id)
-        except Exception:
-            pass
+        await _cache_bound_xai_request_result(request_id, result)
     return result
 
 

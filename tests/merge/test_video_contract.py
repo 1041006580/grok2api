@@ -374,7 +374,7 @@ def test_official_xai_video_generation_status_returns_upstream_payload():
 
     mock_get, result, second, captured_kwargs, fake_key, fake_manager, state = asyncio.run(scenario())
 
-    assert mock_get.await_count == 2
+    assert mock_get.await_count == 1
     assert captured_kwargs[0]["key_manager"] is fake_manager
     assert captured_kwargs[0]["key_record"].id == fake_key.id
     assert captured_kwargs[0]["key_record"].key == fake_key.key
@@ -383,6 +383,7 @@ def test_official_xai_video_generation_status_returns_upstream_payload():
     assert result["video"]["url"] == "https://example.com/video.mp4"
     assert second["request_id"] == "vidreq_123"
     assert state["xai"]["request_key_bindings"]["vidreq_123"]["key_id"] == "k1"
+    assert state["xai"]["request_key_bindings"]["vidreq_123"]["result"]["status"] == "done"
 
 
 def test_official_xai_video_generation_start_rejects_empty_pool():
