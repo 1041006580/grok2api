@@ -280,9 +280,7 @@ async def _cache_bound_xai_request_result(request_id: str, result: Dict[str, Any
         binding = bindings.get(request_id)
         if not isinstance(binding, Mapping):
             return
-        binding = dict(binding)
-        binding["result"] = result
-        bindings[request_id] = binding
+        bindings[request_id] = {"result": result}
         section["request_key_bindings"] = bindings
         base["xai"] = section
         await storage.save_config(base)
@@ -726,15 +724,27 @@ async def get_xai_video_generation(request_id: str):
             for key in manager.list_keys()
             if key.enabled and (key.status is None or key.status == "active")
         ]
-        if len(active_keys) != 1:
-            raise ValidationException(
-                message="request_id is not available for current xAI key session",
-                param="request_id",
-                code="invalid_request_error",
-            )
-        key_record = active_keys[0]
-        service = XAIVideoService(key_manager=manager, key_record=key_record)
-        return await service.get_generation(request_id)
+        for key_record in active_keys:
+            service = XAIVideoService(key_manager=manager, key_record=key_record)
+            try:
+                result = await service.get_generation(request_id)
+            except Exception:
+                continue
+
+            status = str(result.get("status", "")).strip().lower()
+            try:
+                await _remember_xai_request_key(request_id, key_record)
+                if status in {"done", "completed", "succeeded", "failed", "error", "expired", "cancelled"}:
+                    await _cache_bound_xai_request_result(request_id, result)
+            except Exception:
+                pass
+            return result
+
+        raise ValidationException(
+            message="request_id is not available for current xAI key session",
+            param="request_id",
+            code="invalid_request_error",
+        )
     cached_result = binding.get("result")
     if isinstance(cached_result, Mapping):
         return cached_result
