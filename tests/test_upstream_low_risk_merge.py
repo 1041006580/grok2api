@@ -1,9 +1,11 @@
+import asyncio
 import pathlib
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 import orjson
 from types import SimpleNamespace
 import json
+from contextlib import asynccontextmanager
 
 from app.core.exceptions import UpstreamException
 from app.services.reverse.app_chat import AppChatReverse
@@ -1637,13 +1639,24 @@ class XAIKeysAdminApiTests(unittest.IsolatedAsyncioTestCase):
                 ]
             }
         }
+        defaults = {"xai": {"keys": []}}
+        lock = asyncio.Lock()
 
-        async def fake_update(data):
-            state["xai"]["keys"] = data["xai"]["keys"]
+        class DummyStorage:
+            @asynccontextmanager
+            async def acquire_lock(self, *_args, **_kwargs):
+                async with lock:
+                    yield
+
+            async def save_config(self, data):
+                state.clear()
+                state.update(data)
 
         with patch.object(module.config, "_config", state, create=True):
-            with patch.object(module.config, "update", new=AsyncMock(side_effect=fake_update)):
-                payload = await module.update_xai_key("k1", {"enabled": False})
+            with patch.object(module.config, "_defaults", defaults, create=True):
+                with patch.object(module.config, "_ensure_defaults", Mock(return_value=None)):
+                    with patch.object(module, "get_storage", return_value=DummyStorage()):
+                        payload = await module.update_xai_key("k1", {"enabled": False})
 
         self.assertEqual(payload["status"], "success")
         self.assertFalse(state["xai"]["keys"][0]["enabled"])
@@ -1658,13 +1671,24 @@ class XAIKeysAdminApiTests(unittest.IsolatedAsyncioTestCase):
                 ]
             }
         }
+        defaults = {"xai": {"keys": []}}
+        lock = asyncio.Lock()
 
-        async def fake_update(data):
-            state["xai"]["keys"] = data["xai"]["keys"]
+        class DummyStorage:
+            @asynccontextmanager
+            async def acquire_lock(self, *_args, **_kwargs):
+                async with lock:
+                    yield
+
+            async def save_config(self, data):
+                state.clear()
+                state.update(data)
 
         with patch.object(module.config, "_config", state, create=True):
-            with patch.object(module.config, "update", new=AsyncMock(side_effect=fake_update)):
-                payload = await module.update_xai_key("k1", {"name": "secondary"})
+            with patch.object(module.config, "_defaults", defaults, create=True):
+                with patch.object(module.config, "_ensure_defaults", Mock(return_value=None)):
+                    with patch.object(module, "get_storage", return_value=DummyStorage()):
+                        payload = await module.update_xai_key("k1", {"name": "secondary"})
 
         self.assertEqual(payload["status"], "success")
         self.assertEqual(state["xai"]["keys"][0]["name"], "secondary")
@@ -1673,21 +1697,65 @@ class XAIKeysAdminApiTests(unittest.IsolatedAsyncioTestCase):
         from app.api.v1.admin_api import xai_keys as module
 
         state = {"xai": {"keys": []}}
+        defaults = {"xai": {"keys": []}}
+        lock = asyncio.Lock()
 
-        async def fake_update(data):
-            state["xai"]["keys"] = data["xai"]["keys"]
+        class DummyStorage:
+            @asynccontextmanager
+            async def acquire_lock(self, *_args, **_kwargs):
+                async with lock:
+                    yield
+
+            async def save_config(self, data):
+                state.clear()
+                state.update(data)
 
         with patch.object(module.config, "_config", state, create=True):
-            with patch.object(module.config, "update", new=AsyncMock(side_effect=fake_update)):
-                created = await module.create_xai_key(
-                    {"id": "k1", "key": "xai-secret-12345678", "name": "primary", "enabled": True}
-                )
-                deleted = await module.delete_xai_key("k1")
+            with patch.object(module.config, "_defaults", defaults, create=True):
+                with patch.object(module.config, "_ensure_defaults", Mock(return_value=None)):
+                    with patch.object(module, "get_storage", return_value=DummyStorage()):
+                        created = await module.create_xai_key(
+                            {"id": "k1", "key": "xai-secret-12345678", "name": "primary", "enabled": True}
+                        )
+                        deleted = await module.delete_xai_key("k1")
 
         self.assertEqual(created["status"], "success")
         self.assertEqual(created["key"]["value"], "xai-****5678")
         self.assertEqual(deleted["status"], "success")
         self.assertEqual(state["xai"]["keys"], [])
+
+    async def test_admin_xai_keys_concurrent_creates_preserve_all_entries(self):
+        from app.api.v1.admin_api import xai_keys as module
+
+        state = {"xai": {"keys": []}}
+        defaults = {"xai": {"keys": []}}
+        lock = asyncio.Lock()
+
+        class DummyStorage:
+            @asynccontextmanager
+            async def acquire_lock(self, *_args, **_kwargs):
+                async with lock:
+                    yield
+
+            async def save_config(self, data):
+                state.clear()
+                state.update(data)
+
+        with patch.object(module.config, "_config", state, create=True):
+            with patch.object(module.config, "_defaults", defaults, create=True):
+                with patch.object(module.config, "_ensure_defaults", Mock(return_value=None)):
+                    with patch.object(module, "get_storage", return_value=DummyStorage()):
+                        await asyncio.gather(
+                            module.create_xai_key(
+                                {"id": "k1", "key": "xai-secret-12345678", "name": "primary", "enabled": True}
+                            ),
+                            module.create_xai_key(
+                                {"id": "k2", "key": "xai-secret-87654321", "name": "secondary", "enabled": True}
+                            ),
+                        )
+
+        ids = sorted(item["id"] for item in state["xai"]["keys"])
+        self.assertEqual(ids, ["k1", "k2"])
 
 
 def test_admin_api_router_includes_xai_keys_module():

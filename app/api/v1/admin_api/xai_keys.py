@@ -5,7 +5,8 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.core.auth import verify_app_key
-from app.core.config import config
+from app.core.config import _deep_merge, config
+from app.core.storage import get_storage
 
 router = APIRouter()
 
@@ -26,6 +27,10 @@ def _resolve_xai_section() -> Mapping[str, Any]:
 
 def _collect_keys() -> list[dict[str, Any]]:
     section = _resolve_xai_section()
+    return _collect_keys_from_section(section)
+
+
+def _collect_keys_from_section(section: Mapping[str, Any]) -> list[dict[str, Any]]:
     keys = section.get("keys", [])
     normalized: list[dict[str, Any]] = []
     if not isinstance(keys, list):
@@ -80,6 +85,24 @@ async def _persist_keys(keys: list[dict[str, Any]]) -> None:
     await config.update({"xai": {"keys": keys}})
 
 
+async def _mutate_xai_keys(mutator):
+    storage = get_storage()
+    async with storage.acquire_lock("config_save", timeout=10):
+        config._ensure_defaults()
+        base = _deep_merge(getattr(config, "_defaults", {}) or {}, getattr(config, "_config", {}) or {})
+        section = base.get("xai", {}) or {}
+        if not isinstance(section, Mapping):
+            section = {}
+        keys = _collect_keys_from_section(section)
+        result = mutator(keys)
+        updated_section = dict(section)
+        updated_section["keys"] = keys
+        base["xai"] = updated_section
+        await storage.save_config(base)
+        config._config = base
+        return result
+
+
 @router.get("/xai-keys", dependencies=[Depends(verify_app_key)])
 async def get_xai_keys():
     """Retrieve all configured xAI keys with masked values."""
@@ -94,52 +117,56 @@ async def create_xai_key(data: dict[str, Any]):
     if not key_value:
         raise HTTPException(status_code=400, detail="xAI key is required")
 
-    keys = _collect_keys()
     key_id = str(data.get("id") or uuid4())
-    if _find_key_index(keys, key_id) >= 0:
-        raise HTTPException(status_code=400, detail="xAI key already exists")
+    def mutate(keys: list[dict[str, Any]]):
+        if _find_key_index(keys, key_id) >= 0:
+            raise HTTPException(status_code=400, detail="xAI key already exists")
+        new_entry = {
+            "id": key_id,
+            "key": key_value,
+            "name": data.get("name"),
+            "enabled": _normalize_enabled(data.get("enabled"), True),
+        }
+        keys.append(new_entry)
+        return new_entry
 
-    new_entry = {
-        "id": key_id,
-        "key": key_value,
-        "name": data.get("name"),
-        "enabled": _normalize_enabled(data.get("enabled"), True),
-    }
-    keys.append(new_entry)
-    await _persist_keys(keys)
+    new_entry = await _mutate_xai_keys(mutate)
     return {"status": "success", "key": _format_key_payload(new_entry)}
 
 
 @router.patch("/xai-keys/{key_id}", dependencies=[Depends(verify_app_key)])
 async def update_xai_key(key_id: str, data: dict[str, Any]):
     """Update metadata or enablement for a specific xAI key."""
-    keys = _collect_keys()
-    idx = _find_key_index(keys, key_id)
-    if idx < 0:
-        raise HTTPException(status_code=404, detail="xAI key not found")
+    def mutate(keys: list[dict[str, Any]]):
+        idx = _find_key_index(keys, key_id)
+        if idx < 0:
+            raise HTTPException(status_code=404, detail="xAI key not found")
 
-    entry = dict(keys[idx])
-    if "name" in data:
-        entry["name"] = data.get("name")
-    if "enabled" in data:
-        entry["enabled"] = _normalize_enabled(data.get("enabled"), entry.get("enabled", False))
-    if "key" in data:
-        key_value = str(data.get("key", "") or "").strip()
-        if key_value:
-            entry["key"] = key_value
+        entry = dict(keys[idx])
+        if "name" in data:
+            entry["name"] = data.get("name")
+        if "enabled" in data:
+            entry["enabled"] = _normalize_enabled(data.get("enabled"), entry.get("enabled", False))
+        if "key" in data:
+            key_value = str(data.get("key", "") or "").strip()
+            if key_value:
+                entry["key"] = key_value
 
-    keys[idx] = entry
-    await _persist_keys(keys)
+        keys[idx] = entry
+        return entry
+
+    entry = await _mutate_xai_keys(mutate)
     return {"status": "success", "key": _format_key_payload(entry)}
 
 
 @router.delete("/xai-keys/{key_id}", dependencies=[Depends(verify_app_key)])
 async def delete_xai_key(key_id: str):
     """Remove an xAI key from the pool."""
-    keys = _collect_keys()
-    idx = _find_key_index(keys, key_id)
-    if idx < 0:
-        raise HTTPException(status_code=404, detail="xAI key not found")
-    keys.pop(idx)
-    await _persist_keys(keys)
+    def mutate(keys: list[dict[str, Any]]):
+        idx = _find_key_index(keys, key_id)
+        if idx < 0:
+            raise HTTPException(status_code=404, detail="xAI key not found")
+        keys.pop(idx)
+
+    await _mutate_xai_keys(mutate)
     return {"status": "success"}
