@@ -25,6 +25,18 @@ class XAIKeyManager:
     def __init__(self, keys: Iterable[XAIKeyInfo]):
         self._keys: List[XAIKeyInfo] = list(keys)
 
+    @staticmethod
+    def _parse_enabled(value: object) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            lowered = value.strip().lower()
+            if lowered == "true":
+                return True
+            if lowered == "false":
+                return False
+        return False
+
     @classmethod
     def from_config(cls, cfg: Mapping[str, object]) -> "XAIKeyManager":
         raw_keys = []
@@ -46,7 +58,7 @@ class XAIKeyManager:
                     id=key_id,
                     key=key_value,
                     name=str(key_data.get("name", "") or "").strip() or None,
-                    enabled=bool(key_data.get("enabled", False)),
+                    enabled=cls._parse_enabled(key_data.get("enabled", False)),
                     status=raw_status,
                     last_error=str(key_data.get("last_error", "") or "").strip() or None,
                     blocked_until=key_data.get("blocked_until"),

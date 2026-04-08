@@ -34,6 +34,14 @@ def test_xai_key_manager_selects_only_enabled_keys():
     assert manager.acquire_key() is None
 
 
+def test_xai_key_manager_treats_string_false_as_disabled():
+    manager = XAIKeyManager.from_config(
+        {"xai": {"keys": [{"id": "k1", "key": "xai-key-1", "enabled": "false"}]}}
+    )
+    assert manager.list_keys()[0].enabled is False
+    assert manager.acquire_key() is None
+
+
 def test_xai_key_manager_does_not_select_unknown_status_keys():
     manager = XAIKeyManager.from_config(
         {

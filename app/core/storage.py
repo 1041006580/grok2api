@@ -282,7 +282,19 @@ class LocalStorage(BaseStorage):
                     continue
                 lines.append(f"[{section}]")
                 for key, val in items.items():
-                    val_str = _format_toml_value(val)
+                    if section == "xai" and key == "keys":
+                        val_str = _format_toml_value(val)
+                    elif isinstance(val, bool):
+                        val_str = "true" if val else "false"
+                    elif isinstance(val, str):
+                        escaped = val.replace('"', '\\"')
+                        val_str = f'"{escaped}"'
+                    elif isinstance(val, (int, float)):
+                        val_str = str(val)
+                    elif isinstance(val, (list, dict)):
+                        val_str = json_dumps(val)
+                    else:
+                        val_str = f'"{str(val)}"'
                     lines.append(f"{key} = {val_str}")
                 lines.append("")
 
