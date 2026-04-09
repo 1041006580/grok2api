@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from fastapi import HTTPException
 
 
 def test_video_extend_service_requires_reference_id():
@@ -50,21 +51,32 @@ async def _collect_streaming_body(response) -> str:
     return "".join(chunks)
 
 
+def _manager_with_xai_key():
+    return SimpleNamespace(
+        acquire_key=lambda: SimpleNamespace(key="xai-test-key", id="fake-xai-id")
+    )
+
+
 def test_function_video_start_accepts_five_second_xai_payload():
     from app.api.v1.function.video import VideoStartRequest, function_video_start
 
-    result = asyncio.run(
-        function_video_start(
-            VideoStartRequest(
-                prompt="make a five second cinematic clip",
-                model="grok-imagine-video",
-                aspect_ratio="16:9",
-                video_length=5,
-                resolution_name="480p",
-                preset="normal",
+    with patch(
+        "app.api.v1.function.video.load_runtime_manager",
+        return_value=_manager_with_xai_key(),
+        create=True,
+    ):
+        result = asyncio.run(
+            function_video_start(
+                VideoStartRequest(
+                    prompt="make a five second cinematic clip",
+                    model="grok-imagine-video",
+                    aspect_ratio="16:9",
+                    video_length=5,
+                    resolution_name="480p",
+                    preset="normal",
+                )
             )
         )
-    )
 
     assert "task_id" in result
     assert result["aspect_ratio"] == "16:9"
@@ -73,21 +85,82 @@ def test_function_video_start_accepts_five_second_xai_payload():
 def test_public_video_start_accepts_five_second_xai_payload():
     from app.api.v1.public_api.video import VideoStartRequest, public_video_start
 
-    result = asyncio.run(
-        public_video_start(
-            VideoStartRequest(
-                prompt="make a five second public clip",
-                model="grok-imagine-video",
-                aspect_ratio="16:9",
-                video_length=5,
-                resolution_name="480p",
-                preset="normal",
+    with patch(
+        "app.api.v1.public_api.video.load_runtime_manager",
+        return_value=_manager_with_xai_key(),
+        create=True,
+    ):
+        result = asyncio.run(
+            public_video_start(
+                VideoStartRequest(
+                    prompt="make a five second public clip",
+                    model="grok-imagine-video",
+                    aspect_ratio="16:9",
+                    video_length=5,
+                    resolution_name="480p",
+                    preset="normal",
+                )
             )
         )
-    )
 
     assert "task_id" in result
     assert result["aspect_ratio"] == "16:9"
+
+
+def test_function_video_start_rejects_xai_when_pool_empty():
+    from app.api.v1.function import video as video_module
+
+    async def scenario():
+        fake_manager = SimpleNamespace(acquire_key=lambda: None)
+        request = video_module.VideoStartRequest(
+            prompt="pool check",
+            model="grok-imagine-video",
+            aspect_ratio="16:9",
+            video_length=5,
+            resolution_name="480p",
+            preset="normal",
+        )
+        with patch.object(
+            video_module,
+            "load_runtime_manager",
+            return_value=fake_manager,
+            create=True,
+        ):
+            with pytest.raises(HTTPException) as exc_info:
+                await video_module.function_video_start(request)
+        return exc_info.value
+
+    exc = asyncio.run(scenario())
+    assert exc.status_code == 503
+    assert "xAI key pool" in str(exc.detail)
+
+
+def test_public_video_start_rejects_xai_when_pool_empty():
+    from app.api.v1.public_api import video as video_module
+
+    async def scenario():
+        fake_manager = SimpleNamespace(acquire_key=lambda: None)
+        request = video_module.VideoStartRequest(
+            prompt="pool check",
+            model="grok-imagine-video",
+            aspect_ratio="16:9",
+            video_length=5,
+            resolution_name="480p",
+            preset="normal",
+        )
+        with patch.object(
+            video_module,
+            "load_runtime_manager",
+            return_value=fake_manager,
+            create=True,
+        ):
+            with pytest.raises(HTTPException) as exc_info:
+                await video_module.public_video_start(request)
+        return exc_info.value
+
+    exc = asyncio.run(scenario())
+    assert exc.status_code == 503
+    assert "xAI key pool" in str(exc.detail)
 
 
 def test_function_video_sse_uses_selected_super_model():
@@ -136,20 +209,80 @@ def test_function_video_sse_uses_selected_super_model():
     assert "https://example.com/super.mp4" in body
 
 
+def test_function_video_sse_uses_xai_service_for_xai_model():
+    from app.api.v1.function import video as video_module
+
+    async def scenario():
+        request = SimpleNamespace(is_disconnected=AsyncMock(return_value=False))
+
+        fake_service = type(
+            "FakeXAIVideoService",
+            (),
+            {
+                "generate": AsyncMock(
+                    return_value={
+                        "url": "https://example.com/function-xai.mp4",
+                        "duration": 10,
+                        "model": "grok-imagine-video",
+                    }
+                )
+            },
+        )
+
+        legacy_completions = AsyncMock(side_effect=AssertionError("legacy path should not run"))
+        fake_manager = _manager_with_xai_key()
+        with patch.object(
+            video_module,
+            "load_runtime_manager",
+            return_value=fake_manager,
+            create=True,
+        ):
+            started = await video_module.function_video_start(
+                video_module.VideoStartRequest(
+                    prompt="make a short function xai clip",
+                    model="grok-imagine-video",
+                    aspect_ratio="16:9",
+                    video_length=10,
+                    resolution_name="720p",
+                    preset="normal",
+                )
+            )
+            with patch.object(
+                video_module,
+                "XAIVideoService",
+                fake_service,
+                create=True,
+            ):
+                with patch(
+                    "app.api.v1.function.video.VideoService.completions",
+                    new=legacy_completions,
+                ):
+                    response = await video_module.function_video_sse(
+                        request=request,
+                        task_id=started["task_id"],
+                    )
+                    body = await _collect_streaming_body(response)
+        return fake_service.generate, legacy_completions, body
+
+    mock_generate, legacy_completions, body = asyncio.run(scenario())
+
+    mock_generate.assert_awaited_once_with(
+        prompt="make a short function xai clip",
+        model="grok-imagine-video",
+        duration=10,
+        aspect_ratio="16:9",
+        resolution="720p",
+        image_url=None,
+    )
+    legacy_completions.assert_not_called()
+    assert "https://example.com/function-xai.mp4" in body
+    assert "[DONE]" in body
+
+
 def test_public_video_sse_uses_xai_service_for_xai_model():
     from app.api.v1.public_api import video as video_module
 
     async def scenario():
-        started = await video_module.public_video_start(
-            video_module.VideoStartRequest(
-                prompt="make a short xai clip",
-                model="grok-imagine-video",
-                aspect_ratio="16:9",
-                video_length=10,
-                resolution_name="720p",
-                preset="normal",
-            )
-        )
         request = SimpleNamespace(
             headers={},
             query_params={},
@@ -171,18 +304,40 @@ def test_public_video_sse_uses_xai_service_for_xai_model():
         )
 
         legacy_completions = AsyncMock(side_effect=AssertionError("legacy path should not run"))
-        with patch("app.api.v1.public_api.video.get_public_api_key", return_value=""):
-            with patch("app.api.v1.public_api.video.is_public_enabled", return_value=True):
-                with patch.object(video_module, "XAIVideoService", fake_service, create=True):
-                    with patch(
-                        "app.api.v1.public_api.video.VideoService.completions",
-                        new=legacy_completions,
+        fake_manager = _manager_with_xai_key()
+        with patch.object(
+            video_module,
+            "load_runtime_manager",
+            return_value=fake_manager,
+            create=True,
+        ):
+            started = await video_module.public_video_start(
+                video_module.VideoStartRequest(
+                    prompt="make a short xai clip",
+                    model="grok-imagine-video",
+                    aspect_ratio="16:9",
+                    video_length=10,
+                    resolution_name="720p",
+                    preset="normal",
+                )
+            )
+            with patch("app.api.v1.public_api.video.get_public_api_key", return_value=""):
+                with patch("app.api.v1.public_api.video.is_public_enabled", return_value=True):
+                    with patch.object(
+                        video_module,
+                        "XAIVideoService",
+                        fake_service,
+                        create=True,
                     ):
-                        response = await video_module.public_video_sse(
-                            request=request,
-                            task_id=started["task_id"],
-                        )
-                        body = await _collect_streaming_body(response)
+                        with patch(
+                            "app.api.v1.public_api.video.VideoService.completions",
+                            new=legacy_completions,
+                        ):
+                            response = await video_module.public_video_sse(
+                                request=request,
+                                task_id=started["task_id"],
+                            )
+                            body = await _collect_streaming_body(response)
         return fake_service.generate, legacy_completions, body
 
     mock_generate, legacy_completions, body = asyncio.run(scenario())

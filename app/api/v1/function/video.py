@@ -12,6 +12,7 @@ from app.core.auth import verify_function_key
 from app.core.logger import logger
 from app.services.grok.services.video import VideoService
 from app.services.grok.services.model import ModelService
+from app.services.grok.services.xai_key_manager import load_runtime_manager
 from app.services.grok.services.xai_video import XAIVideoService
 
 router = APIRouter()
@@ -25,6 +26,7 @@ LEGACY_VIDEO_MODEL_IDS = (
 )
 XAI_VIDEO_MODEL_ID = "grok-imagine-video"
 DEFAULT_VIDEO_MODEL_ID = LEGACY_VIDEO_MODEL_IDS[0]
+XAI_POOL_ERROR_MESSAGE = "xAI key pool is not configured with any enabled key"
 
 _VIDEO_RATIO_MAP = {
     "1280x720": "16:9",
@@ -131,6 +133,12 @@ def _normalize_model(value: Optional[str]) -> str:
     )
 
 
+def _ensure_xai_key_available() -> None:
+    manager = load_runtime_manager()
+    if manager.acquire_key() is None:
+        raise HTTPException(status_code=503, detail=XAI_POOL_ERROR_MESSAGE)
+
+
 def _build_sse_chunk(content: str) -> str:
     payload = {
         "choices": [
@@ -189,6 +197,7 @@ async def function_video_start(data: VideoStartRequest):
                 status_code=400,
                 detail="video_length must be between 1 and 15 seconds for grok-imagine-video",
             )
+        _ensure_xai_key_available()
     elif video_length < 6 or video_length > 30:
         raise HTTPException(
             status_code=400, detail="video_length must be between 6 and 30 seconds"
