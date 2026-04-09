@@ -141,7 +141,7 @@ def _normalize_model(value: Optional[str]) -> str:
 def _ensure_xai_key_available() -> None:
     manager = load_runtime_manager()
     if manager.acquire_key() is None:
-        raise HTTPException(status_code=503, detail=XAI_POOL_ERROR_MESSAGE)
+        raise HTTPException(status_code=400, detail=XAI_POOL_ERROR_MESSAGE)
 
 
 def _build_sse_chunk(content: str) -> str:

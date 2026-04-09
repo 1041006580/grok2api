@@ -131,7 +131,7 @@ def test_function_video_start_rejects_xai_when_pool_empty():
         return exc_info.value
 
     exc = asyncio.run(scenario())
-    assert exc.status_code == 503
+    assert exc.status_code == 400
     assert "xAI key pool" in str(exc.detail)
 
 
@@ -159,7 +159,7 @@ def test_public_video_start_rejects_xai_when_pool_empty():
         return exc_info.value
 
     exc = asyncio.run(scenario())
-    assert exc.status_code == 503
+    assert exc.status_code == 400
     assert "xAI key pool" in str(exc.detail)
 
 
