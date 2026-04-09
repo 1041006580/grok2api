@@ -130,12 +130,21 @@ def setup_logging(
     # 文件输出
     if file_logging:
         if _prepare_log_dir():
-            logger.add(
-                _file_json_sink,
-                level=level,
-                format="{message}",
-                enqueue=True,
-            )
+            try:
+                logger.add(
+                    _file_json_sink,
+                    level=level,
+                    format="{message}",
+                    enqueue=True,
+                )
+            except Exception:
+                logger.add(
+                    _file_json_sink,
+                    level=level,
+                    format="{message}",
+                    enqueue=False,
+                )
+                logger.warning("File logging queue disabled: falling back to direct writes.")
         else:
             logger.warning("File logging disabled: no writable log directory.")
 
