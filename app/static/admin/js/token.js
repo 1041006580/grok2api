@@ -106,6 +106,20 @@ function getPaginationData() {
   return { filteredTokens, totalCount, totalPages, visibleTokens };
 }
 
+function captureScrollPosition() {
+  return {
+    x: window.scrollX || 0,
+    y: window.scrollY || 0,
+  };
+}
+
+function restoreScrollPosition(position) {
+  if (!position) return;
+  requestAnimationFrame(() => {
+    window.scrollTo(position.x || 0, position.y || 0);
+  });
+}
+
 async function init() {
   apiKey = await ensureAdminKey();
   if (apiKey === null) return;
@@ -114,7 +128,8 @@ async function init() {
   loadData();
 }
 
-async function loadData() {
+async function loadData(options = {}) {
+  const scrollPosition = options && options.preserveScroll ? captureScrollPosition() : null;
   try {
     const res = await fetch('/v1/admin/tokens', {
       headers: buildAuthHeaders(apiKey)
@@ -132,6 +147,8 @@ async function loadData() {
     }
   } catch (e) {
     showToast('加载失败: ' + e.message, 'error');
+  } finally {
+    restoreScrollPosition(scrollPosition);
   }
 }
 
@@ -711,7 +728,7 @@ async function refreshStatus(token) {
 
     if (res.ok && data.status === 'success') {
       const isSuccess = data.results && data.results[token];
-      loadData();
+      await loadData({ preserveScroll: true });
 
       if (isSuccess) {
         showToast('刷新成功', 'success');

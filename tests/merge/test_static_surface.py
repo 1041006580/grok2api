@@ -64,3 +64,16 @@ def test_admin_surface_exposes_xai_keys_page_and_nav():
     assert "/admin/xai-keys" in function_header
     assert "xAI Keys" in public_page
     assert "xAI Keys" in function_page
+
+
+def test_token_admin_scripts_preserve_scroll_position_on_row_refresh():
+    app_js = Path("app/static/admin/js/token.js").read_text(encoding="utf-8")
+    public_js = Path("_public/static/admin/js/token.js").read_text(encoding="utf-8")
+
+    assert "captureScrollPosition(" in app_js
+    assert "restoreScrollPosition(" in app_js
+    assert "await loadData({ preserveScroll: true })" in app_js
+
+    assert "captureScrollPosition(" in public_js
+    assert "restoreScrollPosition(" in public_js
+    assert "await loadData({ preserveScroll: true })" in public_js
