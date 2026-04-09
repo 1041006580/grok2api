@@ -7,25 +7,45 @@ function maskBoolean(enabled) {
   return enabled ? 'Enabled' : 'Disabled';
 }
 
+function resetCreateForm() {
+  const nameInput = xaiById('xai-key-name');
+  const keyInput = xaiById('xai-key-value');
+  const enabledInput = xaiById('xai-key-enabled');
+
+  if (nameInput) nameInput.value = '';
+  if (keyInput) keyInput.value = '';
+  if (enabledInput) enabledInput.checked = true;
+}
+
 async function openCreateModal() {
   const modal = xaiById('xai-key-modal');
   if (!modal) return;
+  resetCreateForm();
   modal.classList.remove('hidden');
+  requestAnimationFrame(() => {
+    modal.classList.add('is-open');
+  });
 }
 
 function closeCreateModal() {
   const modal = xaiById('xai-key-modal');
   if (!modal) return;
-  modal.classList.add('hidden');
+  modal.classList.remove('is-open');
+  setTimeout(() => {
+    modal.classList.add('hidden');
+  }, 200);
 }
 
 function renderXAIKeys() {
   const tbody = xaiById('xai-keys-table-body');
-  const empty = xaiById('xai-keys-empty');
+  const loading = xaiById('loading');
+  const empty = xaiById('empty-state');
   if (!tbody) return;
 
+  if (loading) loading.classList.add('hidden');
+
   if (!Array.isArray(xaiKeys) || xaiKeys.length === 0) {
-    tbody.innerHTML = '';
+    tbody.replaceChildren();
     if (empty) empty.classList.remove('hidden');
     return;
   }
@@ -33,10 +53,10 @@ function renderXAIKeys() {
   if (empty) empty.classList.add('hidden');
   tbody.innerHTML = xaiKeys.map((item) => `
     <tr>
-      <td class="text-left px-4 py-3">${item.name || '-'}</td>
-      <td class="text-left px-4 py-3 font-mono text-xs">${item.value || ''}</td>
-      <td class="text-center px-4 py-3">${maskBoolean(item.enabled)}</td>
-      <td class="text-center px-4 py-3">
+      <td class="text-left">${item.name || '-'}</td>
+      <td class="text-left font-mono text-xs break-all">${item.value || ''}</td>
+      <td>${maskBoolean(item.enabled)}</td>
+      <td>
         <div class="flex items-center justify-center gap-2">
           <button type="button" class="geist-button-outline text-xs px-3" onclick="toggleXAIKeyEnabled('${item.id}', ${item.enabled ? 'false' : 'true'})">
             ${item.enabled ? 'Disable' : 'Enable'}
@@ -49,6 +69,11 @@ function renderXAIKeys() {
 }
 
 async function loadXAIKeys() {
+  const loading = xaiById('loading');
+  const empty = xaiById('empty-state');
+  if (loading) loading.classList.remove('hidden');
+  if (empty) empty.classList.add('hidden');
+
   const res = await fetch('/v1/admin/xai-keys', {
     headers: buildAuthHeaders(xaiAdminKey)
   });

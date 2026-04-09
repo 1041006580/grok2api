@@ -224,3 +224,25 @@ def test_xai_video_service_builds_headers_from_manager_key():
     service = XAIVideoService(key_manager=fake_manager)
     headers = service._headers()
     assert headers["Authorization"] == "Bearer xai-key-1"
+
+
+def test_app_xai_keys_page_reuses_token_layout_shell():
+    html = Path("app/static/admin/pages/xai-keys.html").read_text(encoding="utf-8")
+
+    assert '/static/admin/css/token.css' in html
+    assert 'text-2xl font-semibold tracking-tight' in html
+    assert 'id="loading"' in html
+    assert 'id="empty-state"' in html
+    assert 'modal-overlay hidden' in html
+    assert 'modal-content modal-md' in html
+
+
+def test_public_xai_keys_page_reuses_token_layout_shell():
+    html = Path("_public/static/admin/pages/xai-keys.html").read_text(encoding="utf-8")
+
+    assert '/static/admin/css/token.css' in html
+    assert 'text-2xl font-semibold tracking-tight' in html
+    assert 'id="loading"' in html
+    assert 'id="empty-state"' in html
+    assert 'modal-overlay hidden' in html
+    assert 'modal-content modal-md' in html
