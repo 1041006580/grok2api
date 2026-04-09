@@ -706,8 +706,9 @@ async def create_xai_video_generation(request: XAIVideoGenerationRequest):
         resolution=resolution,
         image_url=image_url,
     )
+    actual_key_record = getattr(service, "_key_record", None) or key_record
     try:
-        await _remember_xai_request_key(result.get("request_id", ""), key_record)
+        await _remember_xai_request_key(result.get("request_id", ""), actual_key_record)
     except Exception:
         pass
     return result

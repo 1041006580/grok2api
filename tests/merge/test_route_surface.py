@@ -51,3 +51,27 @@ def test_route_surface_contains_xai_keys_admin_endpoints():
     assert "/admin/xai-keys" in paths
     assert "/v1/admin/xai-keys" in paths
     assert "/v1/admin/xai-keys/{key_id}" in paths
+
+
+def test_public_video_routes_use_public_api_module():
+    app = create_app()
+    route_map = {
+        route.path: route.endpoint.__module__
+        for route in app.routes
+        if hasattr(route, "endpoint")
+    }
+
+    assert route_map["/v1/public/video/start"] == "app.api.v1.public_api.video"
+    assert route_map["/v1/public/video/sse"] == "app.api.v1.public_api.video"
+
+
+def test_function_video_routes_keep_function_module():
+    app = create_app()
+    route_map = {
+        route.path: route.endpoint.__module__
+        for route in app.routes
+        if hasattr(route, "endpoint")
+    }
+
+    assert route_map["/v1/function/video/start"] == "app.api.v1.function.video"
+    assert route_map["/v1/function/video/sse"] == "app.api.v1.function.video"

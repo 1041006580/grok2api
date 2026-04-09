@@ -5,6 +5,7 @@ import uuid
 from pathlib import Path
 
 from app.core import storage as core_storage
+from app.core.exceptions import UpstreamException
 from app.core.storage import LocalStorage
 from app.services.grok.services.xai_key_manager import XAIKeyManager
 from app.services.grok.services.xai_video import XAIVideoService
@@ -246,3 +247,93 @@ def test_public_xai_keys_page_reuses_token_layout_shell():
     assert 'id="empty-state"' in html
     assert 'modal-overlay hidden' in html
     assert 'modal-content modal-md' in html
+
+
+def test_xai_video_service_start_generation_falls_back_to_next_key_on_retryable_error():
+    manager = XAIKeyManager.from_config(
+        {
+            "xai": {
+                "keys": [
+                    {"id": "k1", "key": "xai-key-1", "enabled": True, "status": "active"},
+                    {"id": "k2", "key": "xai-key-2", "enabled": True, "status": "active"},
+                ]
+            }
+        }
+    )
+    service = XAIVideoService(key_manager=manager)
+    attempted_key_ids = []
+
+    async def fake_request_json(self, session, method, url, payload=None, **kwargs):
+        key_record = kwargs.get("key_record")
+        if key_record is None:
+            self._headers()
+            key_record = self._key_record
+        attempted_key_ids.append(key_record.id)
+        if key_record.id == "k1":
+            raise UpstreamException(
+                message="xAI video API request failed with status 429",
+                details={"status": 429, "body": "rate limited"},
+            )
+        return {"request_id": "vidreq_123", "status": "pending"}
+
+    original = XAIVideoService._request_json
+    XAIVideoService._request_json = fake_request_json
+    try:
+        result = asyncio.run(
+            service.start_generation(
+                prompt="launch a rocket",
+                model="grok-imagine-video",
+                duration=10,
+                aspect_ratio="16:9",
+                resolution="720p",
+            )
+        )
+    finally:
+        XAIVideoService._request_json = original
+
+    assert result["request_id"] == "vidreq_123"
+    assert attempted_key_ids == ["k1", "k2"]
+    assert service._key_record is not None
+    assert service._key_record.id == "k2"
+
+
+def test_xai_video_service_get_generation_retries_on_same_key_without_switching():
+    manager = XAIKeyManager.from_config(
+        {
+            "xai": {
+                "keys": [
+                    {"id": "k1", "key": "xai-key-1", "enabled": True, "status": "active"},
+                    {"id": "k2", "key": "xai-key-2", "enabled": True, "status": "active"},
+                ]
+            }
+        }
+    )
+    bound_key = manager.list_keys()[0]
+    service = XAIVideoService(key_manager=manager, key_record=bound_key)
+    attempted_key_ids = []
+    attempts = {"count": 0}
+
+    async def fake_request_json(self, session, method, url, payload=None, **kwargs):
+        key_record = kwargs.get("key_record") or self._key_record
+        attempted_key_ids.append(key_record.id)
+        attempts["count"] += 1
+        if attempts["count"] < 3:
+            raise UpstreamException(
+                message="xAI video API request failed with status 429",
+                details={"status": 429, "body": "poll rate limited"},
+            )
+        return {
+            "request_id": "vidreq_123",
+            "status": "done",
+            "video": {"url": "https://example.com/video.mp4"},
+        }
+
+    original = XAIVideoService._request_json
+    XAIVideoService._request_json = fake_request_json
+    try:
+        result = asyncio.run(service.get_generation("vidreq_123"))
+    finally:
+        XAIVideoService._request_json = original
+
+    assert result["status"] == "done"
+    assert attempted_key_ids == ["k1", "k1", "k1"]

@@ -40,6 +40,7 @@ from app.api.v1.video import router as video_router  # noqa: E402
 from app.api.v1.files import router as files_router  # noqa: E402
 from app.api.v1.models import router as models_router  # noqa: E402
 from app.api.v1.response import router as responses_router  # noqa: E402
+from app.api.v1.public_api import router as public_router  # noqa: E402
 from app.services.token import get_scheduler  # noqa: E402
 from app.api.v1.admin import router as admin_router
 from app.api.v1.function import router as function_router
@@ -167,7 +168,7 @@ def create_app() -> FastAPI:
 
     # 注册管理与公共路由
     app.include_router(admin_router, prefix="/v1/admin")
-    app.include_router(function_router, prefix="/v1/public")
+    app.include_router(public_router, prefix="/v1/public")
     app.include_router(function_router, prefix="/v1/function")
     app.include_router(pages_router)
 

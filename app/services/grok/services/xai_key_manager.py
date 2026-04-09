@@ -72,10 +72,16 @@ class XAIKeyManager:
     def list_keys(self) -> List[XAIKeyInfo]:
         return list(self._keys)
 
+    def iter_active_keys(self) -> List[XAIKeyInfo]:
+        return [
+            key
+            for key in self._keys
+            if key.enabled and (key.status is None or key.status == XAIKeyStatus.ACTIVE.value)
+        ]
+
     def acquire_key(self) -> Optional[XAIKeyInfo]:
-        for key in self._keys:
-            if key.enabled and (key.status is None or key.status == XAIKeyStatus.ACTIVE.value):
-                return key
+        for key in self.iter_active_keys():
+            return key
         return None
 
 

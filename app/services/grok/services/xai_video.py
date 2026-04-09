@@ -15,6 +15,7 @@ from app.services.grok.services.xai_key_manager import XAIKeyInfo, XAIKeyManager
 
 
 DEFAULT_XAI_BASE_URL = "https://api.x.ai/v1"
+RETRYABLE_XAI_STATUS_CODES = {429, 500, 502, 503, 504}
 
 
 class XAIVideoService:
@@ -41,6 +42,14 @@ class XAIVideoService:
             self.poll_interval,
             float(get_config("xai.video_poll_timeout_seconds", 900)),
         )
+        self.poll_retry_attempts = max(
+            1,
+            int(get_config("xai.video_poll_retry_attempts", 3) or 3),
+        )
+        self.poll_retry_base_delay = max(
+            0.1,
+            float(get_config("xai.video_poll_retry_base_delay_seconds", 0.5) or 0.5),
+        )
 
     @staticmethod
     def _extract_error_message(payload: Any) -> str:
@@ -59,19 +68,68 @@ class XAIVideoService:
                 return text
         return ""
 
-    def _headers(self) -> Dict[str, str]:
-        if not self._key_record:
-            self._key_record = self._key_manager.acquire_key()
-        if not self._key_record:
+    @staticmethod
+    def _status_from_exception(exc: Exception) -> Optional[int]:
+        details = getattr(exc, "details", None)
+        if not isinstance(details, dict):
+            return None
+        status = details.get("status")
+        try:
+            return int(status)
+        except (TypeError, ValueError):
+            return None
+
+    @classmethod
+    def _is_retryable_create_error(cls, exc: Exception) -> bool:
+        status = cls._status_from_exception(exc)
+        return status in RETRYABLE_XAI_STATUS_CODES
+
+    @classmethod
+    def _is_retryable_poll_error(cls, exc: Exception) -> bool:
+        status = cls._status_from_exception(exc)
+        return status in RETRYABLE_XAI_STATUS_CODES
+
+    def _headers_for(self, key_record: Optional[XAIKeyInfo]) -> Dict[str, str]:
+        if not key_record:
             raise ValidationException(
                 message="xAI key pool is not configured with any enabled key",
                 param="model",
                 code="xai_api_key_missing",
             )
         return {
-            "Authorization": f"Bearer {self._key_record.key}",
+            "Authorization": f"Bearer {key_record.key}",
             "Content-Type": "application/json",
         }
+
+    def _headers(self) -> Dict[str, str]:
+        if not self._key_record:
+            self._key_record = self._key_manager.acquire_key()
+        return self._headers_for(self._key_record)
+
+    def _create_candidate_keys(self) -> list[XAIKeyInfo]:
+        ordered: list[XAIKeyInfo] = []
+        seen: set[tuple[str, str]] = set()
+
+        def add_key(key_record: Optional[XAIKeyInfo]) -> None:
+            if not key_record:
+                return
+            marker = (str(getattr(key_record, "id", "") or "").strip(), key_record.key)
+            if marker in seen:
+                return
+            seen.add(marker)
+            ordered.append(key_record)
+
+        add_key(self._key_record)
+
+        iter_active = getattr(self._key_manager, "iter_active_keys", None)
+        if callable(iter_active):
+            for key_record in iter_active():
+                add_key(key_record)
+
+        if not ordered:
+            add_key(self._key_manager.acquire_key())
+
+        return ordered
 
     async def _request_json(
         self,
@@ -79,8 +137,11 @@ class XAIVideoService:
         method: str,
         url: str,
         payload: Optional[Dict[str, Any]] = None,
+        key_record: Optional[XAIKeyInfo] = None,
     ) -> Dict[str, Any]:
-        kwargs: Dict[str, Any] = {"headers": self._headers()}
+        kwargs: Dict[str, Any] = {
+            "headers": self._headers_for(key_record) if key_record else self._headers()
+        }
         if payload is not None:
             kwargs["data"] = orjson.dumps(payload)
 
@@ -195,13 +256,38 @@ class XAIVideoService:
         if image_url:
             payload["image"] = {"url": image_url}
 
+        candidate_keys = self._create_candidate_keys()
+        if not candidate_keys:
+            self._headers()
+            candidate_keys = [self._key_record] if self._key_record else []
+
         timeout = aiohttp.ClientTimeout(total=self.timeout)
         async with aiohttp.ClientSession(timeout=timeout) as session:
-            return await self._request_json(
-                session,
-                "POST",
-                f"{self.base_url}/videos/generations",
-                payload,
+            last_error: Optional[Exception] = None
+            for index, candidate in enumerate(candidate_keys):
+                try:
+                    result = await self._request_json(
+                        session,
+                        "POST",
+                        f"{self.base_url}/videos/generations",
+                        payload,
+                        key_record=candidate,
+                    )
+                    self._key_record = candidate
+                    return result
+                except Exception as exc:
+                    if not self._is_retryable_create_error(exc):
+                        raise
+                    last_error = exc
+                    if index >= len(candidate_keys) - 1:
+                        raise
+
+            if last_error:
+                raise last_error
+            raise ValidationException(
+                message="xAI key pool is not configured with any enabled key",
+                param="model",
+                code="xai_api_key_missing",
             )
 
     async def get_generation(self, request_id: str) -> Dict[str, Any]:
@@ -213,13 +299,28 @@ class XAIVideoService:
                 code="invalid_request_error",
             )
 
+        bound_key = self._key_record or self._key_manager.acquire_key()
+        self._key_record = bound_key
+
         timeout = aiohttp.ClientTimeout(total=self.timeout)
         async with aiohttp.ClientSession(timeout=timeout) as session:
-            return await self._request_json(
-                session,
-                "GET",
-                f"{self.base_url}/videos/{request_id}",
-            )
+            for attempt in range(1, self.poll_retry_attempts + 1):
+                try:
+                    return await self._request_json(
+                        session,
+                        "GET",
+                        f"{self.base_url}/videos/{request_id}",
+                        key_record=bound_key,
+                    )
+                except Exception as exc:
+                    if (
+                        not self._is_retryable_poll_error(exc)
+                        or attempt >= self.poll_retry_attempts
+                    ):
+                        raise
+                    await asyncio.sleep(
+                        self.poll_retry_base_delay * (2 ** (attempt - 1))
+                    )
 
 
 __all__ = ["XAIVideoService", "DEFAULT_XAI_BASE_URL"]
