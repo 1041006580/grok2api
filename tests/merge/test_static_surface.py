@@ -66,6 +66,23 @@ def test_admin_surface_exposes_xai_keys_page_and_nav():
     assert "xAI Keys" in function_page
 
 
+def test_xai_keys_page_exposes_admin_table_and_actions():
+    html = Path("_public/static/admin/pages/xai-keys.html").read_text(encoding="utf-8")
+    js = Path("_public/static/admin/js/xai-keys.js").read_text(encoding="utf-8")
+
+    assert 'id="xai-keys-table-body"' in html
+    assert "fetch('/v1/admin/xai-keys'" in js
+    assert "async function openCreateModal()" in js
+
+
+def test_app_xai_keys_page_exposes_admin_table_and_actions():
+    html = Path("app/static/admin/pages/xai-keys.html").read_text(encoding="utf-8")
+    js = Path("app/static/admin/js/xai-keys.js").read_text(encoding="utf-8")
+
+    assert 'id="xai-keys-table-body"' in html
+    assert "async function saveXAIKey()" in js
+
+
 def test_token_admin_scripts_preserve_scroll_position_on_row_refresh():
     app_js = Path("app/static/admin/js/token.js").read_text(encoding="utf-8")
     public_js = Path("_public/static/admin/js/token.js").read_text(encoding="utf-8")

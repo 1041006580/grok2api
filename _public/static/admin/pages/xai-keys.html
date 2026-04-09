@@ -19,16 +19,67 @@
   <div id="app-header"></div>
 
   <main class="flex-1 container mx-auto max-w-5xl px-6 py-8 space-y-6 fade-in">
-    <div class="bg-white rounded-2xl border border-[var(--border)] shadow-sm p-6 space-y-4">
-      <div>
-        <h2 class="text-3xl font-semibold tracking-tight" data-i18n="xai.title">xAI Keys</h2>
-        <p class="text-[var(--accents-4)] mt-1 text-sm" data-i18n="xai.subtitle">Manage the xAI key inventory across Grok services.</p>
+    <div class="bg-white rounded-2xl border border-[var(--border)] shadow-sm p-6 space-y-6">
+      <div class="flex items-center justify-between gap-4">
+        <div>
+          <h2 class="text-3xl font-semibold tracking-tight" data-i18n="xai.title">xAI Keys</h2>
+          <p class="text-[var(--accents-4)] mt-1 text-sm">Manage xAI keys, manual enablement, and current availability.</p>
+        </div>
+        <button id="create-xai-key-btn" type="button" class="geist-button gap-2" onclick="openCreateModal()">
+          <span>New Key</span>
+        </button>
       </div>
-      <div class="text-[var(--accents-5)]">
-        <p data-i18n="xai.placeholder">This placeholder page will guide administrative access to xAI Keys once the experience is available.</p>
+
+      <div class="rounded-lg overflow-hidden bg-white border border-[var(--border)] overflow-x-auto">
+        <table class="geist-table min-w-[760px]">
+          <thead>
+            <tr>
+              <th class="text-left">Name</th>
+              <th class="text-left">Masked Value</th>
+              <th class="text-center">Enabled</th>
+              <th class="text-center">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="xai-keys-table-body">
+            <tr>
+              <td colspan="4" class="text-center py-6 text-[var(--accents-4)]">Loading...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div id="xai-keys-empty" class="hidden rounded-xl border border-dashed border-[var(--border)] px-4 py-8 text-center text-[var(--accents-4)]">
+        No xAI keys configured yet.
       </div>
     </div>
   </main>
+
+  <div id="xai-key-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+    <div class="w-full max-w-lg rounded-2xl bg-white shadow-xl border border-[var(--border)] p-6 space-y-4">
+      <div class="flex items-center justify-between">
+        <h3 class="text-xl font-semibold">Create xAI Key</h3>
+        <button type="button" class="nav-action-btn" onclick="closeCreateModal()">Close</button>
+      </div>
+      <div class="space-y-3">
+        <div class="space-y-1">
+          <label for="xai-key-name" class="block text-sm text-[var(--accents-5)]">Name</label>
+          <input id="xai-key-name" class="geist-input w-full" placeholder="Primary / Backup">
+        </div>
+        <div class="space-y-1">
+          <label for="xai-key-value" class="block text-sm text-[var(--accents-5)]">Key</label>
+          <input id="xai-key-value" class="geist-input w-full font-mono" placeholder="xai-...">
+        </div>
+        <label class="flex items-center gap-2 text-sm text-[var(--accents-5)]">
+          <input id="xai-key-enabled" type="checkbox" checked>
+          <span>Enable immediately</span>
+        </label>
+      </div>
+      <div class="flex justify-end gap-3">
+        <button type="button" class="geist-button-outline" onclick="closeCreateModal()">Cancel</button>
+        <button type="button" class="geist-button" onclick="saveXAIKey()">Save</button>
+      </div>
+    </div>
+  </div>
 
   <div id="app-footer"></div>
 
@@ -37,6 +88,7 @@
   <script src="/static/common/js/header.js?v=1.6.2"></script>
   <script src="/static/common/js/footer.js?v=1.6.2"></script>
   <script src="/static/common/js/toast.js"></script>
+  <script src="/static/admin/js/xai-keys.js?v=1.6.2"></script>
 </body>
 
 </html>

@@ -163,6 +163,12 @@ class StaticAssetTests(unittest.TestCase):
         self.assertIn('"cf_cookies"', js)
         self.assertIn('"skip_proxy_ssl_verify"', js)
 
+    def test_xai_keys_admin_page_exposes_table_and_create_action(self):
+        html = (ROOT / "app/static/admin/pages/xai-keys.html").read_text(encoding="utf-8")
+        js = (ROOT / "app/static/admin/js/xai-keys.js").read_text(encoding="utf-8")
+        self.assertIn('id="xai-keys-table-body"', html)
+        self.assertIn("async function saveXAIKey()", js)
+
 
 class ComposeConfigTests(unittest.TestCase):
     def test_docker_compose_supports_env_passthrough_for_ports_and_storage_url(self):
