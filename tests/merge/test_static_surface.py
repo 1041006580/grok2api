@@ -54,6 +54,21 @@ def test_video_page_css_assigns_model_hint_a_dedicated_grid_slot():
         assert "#modelRuleHint {" in css
 
 
+def test_xai_keys_page_uses_batch_import_without_name_input():
+    admin_page = Path("app/static/admin/pages/xai-keys.html").read_text(encoding="utf-8")
+    public_page = Path("_public/static/admin/pages/xai-keys.html").read_text(encoding="utf-8")
+    admin_js = Path("app/static/admin/js/xai-keys.js").read_text(encoding="utf-8")
+    public_js = Path("_public/static/admin/js/xai-keys.js").read_text(encoding="utf-8")
+
+    for html in (admin_page, public_page):
+        assert 'id="xai-key-name"' not in html
+        assert 'id="xai-key-import-text"' in html
+
+    for js in (admin_js, public_js):
+        assert "async function importXAIKeys()" in js
+        assert "/v1/admin/xai-keys/import" in js
+
+
 def test_admin_surface_exposes_xai_keys_page_and_nav():
     public_header = Path("app/static/common/html/header.html").read_text(encoding="utf-8")
     function_header = Path("_public/static/common/html/header.html").read_text(encoding="utf-8")

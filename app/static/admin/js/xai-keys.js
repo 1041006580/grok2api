@@ -8,11 +8,9 @@ function maskBoolean(enabled) {
 }
 
 function resetCreateForm() {
-  const nameInput = xaiById('xai-key-name');
-  const keyInput = xaiById('xai-key-value');
+  const keyInput = xaiById('xai-key-import-text');
   const enabledInput = xaiById('xai-key-enabled');
 
-  if (nameInput) nameInput.value = '';
   if (keyInput) keyInput.value = '';
   if (enabledInput) enabledInput.checked = true;
 }
@@ -85,16 +83,14 @@ async function loadXAIKeys() {
   renderXAIKeys();
 }
 
-async function saveXAIKey() {
-  const nameInput = xaiById('xai-key-name');
-  const keyInput = xaiById('xai-key-value');
+async function importXAIKeys() {
+  const keyInput = xaiById('xai-key-import-text');
   const enabledInput = xaiById('xai-key-enabled');
   const payload = {
-    name: nameInput ? nameInput.value.trim() : '',
-    key: keyInput ? keyInput.value.trim() : '',
+    text: keyInput ? keyInput.value : '',
     enabled: enabledInput ? enabledInput.checked : true,
   };
-  const res = await fetch('/v1/admin/xai-keys', {
+  const res = await fetch('/v1/admin/xai-keys/import', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -106,12 +102,16 @@ async function saveXAIKey() {
   if (!res.ok || data.status !== 'success') {
     throw new Error((data && (data.detail || data.message)) || `HTTP ${res.status}`);
   }
-  if (nameInput) nameInput.value = '';
   if (keyInput) keyInput.value = '';
   if (enabledInput) enabledInput.checked = true;
   closeCreateModal();
   await loadXAIKeys();
-  showToast('xAI Key 已保存', 'success');
+  const imported = Number(data.imported || 0);
+  showToast(`已导入 ${imported} 个 xAI Key`, 'success');
+}
+
+async function saveXAIKey() {
+  return importXAIKeys();
 }
 
 async function toggleXAIKeyEnabled(keyId, enabled) {
@@ -154,6 +154,7 @@ async function initXAIKeysPage() {
 
 window.openCreateModal = openCreateModal;
 window.closeCreateModal = closeCreateModal;
+window.importXAIKeys = importXAIKeys;
 window.saveXAIKey = saveXAIKey;
 window.toggleXAIKeyEnabled = toggleXAIKeyEnabled;
 window.deleteXAIKey = deleteXAIKey;

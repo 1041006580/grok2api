@@ -82,7 +82,8 @@ def _optional_string(value: Any, field_name: str) -> str | None:
     if value is None:
         return None
     if isinstance(value, str):
-        return value
+        stripped = value.strip()
+        return stripped or None
     raise HTTPException(status_code=400, detail=f"{field_name} must be a string")
 
 
@@ -183,6 +184,68 @@ async def create_xai_key(data: dict[str, Any]):
 
     new_entry = await _mutate_xai_keys(mutate)
     return {"status": "success", "key": _format_key_payload(new_entry)}
+
+
+def _collect_import_key_values(data: dict[str, Any]) -> list[str]:
+    values: list[str] = []
+    if isinstance(data.get("text"), str):
+        raw_text = data["text"].replace("\\r\\n", "\n").replace("\\n", "\n")
+        values.extend(line.strip() for line in raw_text.splitlines())
+    if isinstance(data.get("keys"), list):
+        values.extend(str(item).strip() for item in data["keys"])
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        normalized.append(value)
+    return normalized
+
+
+@router.post("/xai-keys/import", dependencies=[Depends(verify_app_key)])
+async def import_xai_keys(data: dict[str, Any]):
+    """Batch import xAI keys from multiline text or key list."""
+    allowed_fields = {"text", "keys", "enabled"}
+    provided_fields = set(data.keys())
+    unknown_fields = provided_fields - allowed_fields
+    if unknown_fields:
+        raise HTTPException(
+            status_code=400, detail=f"unsupported fields: {sorted(unknown_fields)}"
+        )
+
+    key_values = _collect_import_key_values(data)
+    if not key_values:
+        raise HTTPException(status_code=400, detail="at least one xAI key is required")
+    enabled = _normalize_enabled(data["enabled"]) if "enabled" in data else True
+
+    def mutate(keys: list[dict[str, Any]]):
+        existing_values = {
+            str(entry.get("key") or "").strip()
+            for entry in keys
+            if isinstance(entry, Mapping)
+        }
+        added: list[dict[str, Any]] = []
+        for key_value in key_values:
+            if key_value in existing_values:
+                continue
+            entry = {
+                "id": str(uuid4()),
+                "key": key_value,
+                "name": None,
+                "enabled": enabled,
+            }
+            keys.append(entry)
+            existing_values.add(key_value)
+            added.append(entry)
+        return added
+
+    added_entries = await _mutate_xai_keys(mutate)
+    return {
+        "status": "success",
+        "imported": len(added_entries),
+        "keys": [_format_key_payload(entry) for entry in added_entries],
+    }
 
 
 @router.patch("/xai-keys/{key_id}", dependencies=[Depends(verify_app_key)])

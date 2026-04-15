@@ -24,13 +24,13 @@
       <div class="flex justify-between items-center">
         <div>
           <h2 class="text-2xl font-semibold tracking-tight">xAI Key 列表</h2>
-          <p class="text-[var(--accents-4)] mt-1 text-sm">管理 xAI Key 池、人工启停，以及查看当前可用状态。</p>
+          <p class="text-[var(--accents-4)] mt-1 text-sm">支持批量导入 xAI Key、人工启停，以及查看当前可用状态。</p>
         </div>
         <button id="create-xai-key-btn" type="button" class="geist-button gap-2" onclick="openCreateModal()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M12 5v14M5 12h14" />
           </svg>
-          新增 Key
+          导入 Key
         </button>
       </div>
 
@@ -52,7 +52,7 @@
         </table>
         <div id="loading" class="text-center py-12 text-[var(--accents-4)]">加载中...</div>
         <div id="empty-state" class="hidden table-empty">
-          暂无 xAI Key，请先新增一条。
+          暂无 xAI Key，请先导入。
         </div>
       </div>
     </div>
@@ -61,7 +61,7 @@
   <div id="xai-key-modal" class="modal-overlay hidden">
     <div class="modal-content modal-md" id="xai-key-modal-content">
       <div class="modal-header">
-        <h3 class="modal-title">新增 xAI Key</h3>
+        <h3 class="modal-title">批量导入 xAI Key</h3>
         <button onclick="closeCreateModal()" class="modal-close">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <line x1="18" y1="6" x2="6" y2="18"></line>
@@ -71,20 +71,16 @@
       </div>
       <div class="space-y-3">
         <div>
-          <label for="xai-key-name" class="modal-label mb-1 block">名称</label>
-          <input id="xai-key-name" class="geist-input w-full" placeholder="例如：主账号 / 备用账号">
-        </div>
-        <div>
-          <label for="xai-key-value" class="modal-label mb-1 block">Key</label>
-          <input id="xai-key-value" class="geist-input w-full font-mono" placeholder="xai-...">
+          <label for="xai-key-import-text" class="modal-label mb-1 block">Key 列表（每行一个）</label>
+          <textarea id="xai-key-import-text" class="geist-input w-full font-mono h-48" placeholder="xai-...\nxai-...\n"></textarea>
         </div>
         <label class="flex items-center gap-2 text-sm text-[var(--accents-5)]">
           <input id="xai-key-enabled" type="checkbox" checked>
-          <span>创建后立即启用</span>
+          <span>导入后立即启用</span>
         </label>
         <div class="flex justify-end gap-2 pt-2">
           <button type="button" class="geist-button-outline text-xs px-3" onclick="closeCreateModal()">取消</button>
-          <button type="button" class="geist-button text-xs px-3" onclick="saveXAIKey()">保存</button>
+          <button type="button" class="geist-button text-xs px-3" onclick="importXAIKeys()">开始导入</button>
         </div>
       </div>
     </div>

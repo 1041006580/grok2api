@@ -30,6 +30,7 @@ def test_route_surface_contains_current_ui_and_public_endpoints():
     assert "/admin" in paths
     assert "/admin/login" in paths
     assert "/v1/admin/config" in paths
+    assert "/v1/admin/xai-keys/import" in paths
     assert "/v1/public/video/start" in paths
     assert "/v1/public/video/sse" in paths
 
