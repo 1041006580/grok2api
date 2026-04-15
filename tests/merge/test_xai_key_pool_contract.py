@@ -16,8 +16,8 @@ def test_xai_key_manager_loads_from_xai_keys_config():
         {
             "xai": {
                 "keys": [
-                    {"id": "k1", "key": "xai-key-1", "name": "key-1", "enabled": True},
-                    {"id": "k2", "key": "xai-key-2", "name": "key-2", "enabled": False},
+                    {"id": "k1", "key": "dummy001", "name": "key-1", "enabled": True},
+                    {"id": "k2", "key": "dummy002", "name": "key-2", "enabled": False},
                 ]
             }
         }
@@ -31,14 +31,14 @@ def test_xai_key_manager_loads_from_xai_keys_config():
 
 def test_xai_key_manager_selects_only_enabled_keys():
     manager = XAIKeyManager.from_config(
-        {"xai": {"keys": [{"id": "k1", "key": "xai-key-1", "enabled": False}]}}
+        {"xai": {"keys": [{"id": "k1", "key": "dummy001", "enabled": False}]}}
     )
     assert manager.acquire_key() is None
 
 
 def test_xai_key_manager_treats_string_false_as_disabled():
     manager = XAIKeyManager.from_config(
-        {"xai": {"keys": [{"id": "k1", "key": "xai-key-1", "enabled": "false"}]}}
+        {"xai": {"keys": [{"id": "k1", "key": "dummy001", "enabled": "false"}]}}
     )
     assert manager.list_keys()[0].enabled is False
     assert manager.acquire_key() is None
@@ -51,7 +51,7 @@ def test_xai_key_manager_does_not_select_unknown_status_keys():
                 "keys": [
                     {
                         "id": "k1",
-                        "key": "xai-key-1",
+                        "key": "dummy001",
                         "enabled": True,
                         "status": "cooldown",
                     }
@@ -83,8 +83,8 @@ def test_local_storage_roundtrip_preserves_xai_keys(monkeypatch):
     payload = {
         "xai": {
             "keys": [
-                {"id": "k1", "key": "xai-key-1", "name": "key-1", "enabled": True},
-                {"id": "k2", "key": "xai-key-2", "name": "key-2", "enabled": False},
+                {"id": "k1", "key": "dummy001", "name": "key-1", "enabled": True},
+                {"id": "k2", "key": "dummy002", "name": "key-2", "enabled": False},
             ]
         }
     }
@@ -112,7 +112,7 @@ def test_local_storage_roundtrip_preserves_none_metadata(monkeypatch):
             "keys": [
                 {
                     "id": "k1",
-                    "key": "xai-key-1",
+                    "key": "dummy001",
                     "enabled": True,
                     "last_error": None,
                     "blocked_until": None,
@@ -142,10 +142,10 @@ def test_local_storage_roundtrip_preserves_request_key_bindings(monkeypatch):
     payload = {
         "xai": {
             "keys": [
-                {"id": "k1", "key": "xai-key-1", "enabled": True},
+                {"id": "k1", "key": "dummy001", "enabled": True},
             ],
             "request_key_bindings": {
-                "vidreq_123": {"key_id": "k1", "key": "xai-key-1"},
+                "vidreq_123": {"key_id": "k1", "key": "dummy001"},
             },
         }
     }
@@ -173,7 +173,7 @@ def test_local_storage_roundtrip_preserves_control_characters(monkeypatch):
             "keys": [
                 {
                     "id": "k1",
-                    "key": "xai-key-1",
+                    "key": "dummy001",
                     "enabled": True,
                     "name": 'qa "primary" \\ node',
                     "last_error": "line1\r\nline2",
@@ -200,7 +200,7 @@ def test_xai_key_manager_preserves_runtime_metadata_fields():
                 "keys": [
                     {
                         "id": "k1",
-                        "key": "xai-key-1",
+                        "key": "dummy001",
                         "enabled": True,
                         "status": "blocked",
                         "last_error": "rate limited",
@@ -220,11 +220,11 @@ def test_xai_key_manager_preserves_runtime_metadata_fields():
 
 
 def test_xai_video_service_builds_headers_from_manager_key():
-    fake_key = type("KeyRef", (), {"key": "xai-key-1"})()
+    fake_key = type("KeyRef", (), {"key": "dummy001"})()
     fake_manager = type("Mgr", (), {"acquire_key": staticmethod(lambda: fake_key)})()
     service = XAIVideoService(key_manager=fake_manager)
     headers = service._headers()
-    assert headers["Authorization"] == "Bearer xai-key-1"
+    assert headers["Authorization"] == "Bearer dummy001"
 
 
 def test_app_xai_keys_page_reuses_token_layout_shell():
@@ -254,8 +254,8 @@ def test_xai_video_service_start_generation_falls_back_to_next_key_on_retryable_
         {
             "xai": {
                 "keys": [
-                    {"id": "k1", "key": "xai-key-1", "enabled": True, "status": "active"},
-                    {"id": "k2", "key": "xai-key-2", "enabled": True, "status": "active"},
+                    {"id": "k1", "key": "dummy001", "enabled": True, "status": "active"},
+                    {"id": "k2", "key": "dummy002", "enabled": True, "status": "active"},
                 ]
             }
         }
@@ -302,8 +302,8 @@ def test_xai_video_service_get_generation_retries_on_same_key_without_switching(
         {
             "xai": {
                 "keys": [
-                    {"id": "k1", "key": "xai-key-1", "enabled": True, "status": "active"},
-                    {"id": "k2", "key": "xai-key-2", "enabled": True, "status": "active"},
+                    {"id": "k1", "key": "dummy001", "enabled": True, "status": "active"},
+                    {"id": "k2", "key": "dummy002", "enabled": True, "status": "active"},
                 ]
             }
         }

@@ -502,7 +502,7 @@ class VideosApiTests(unittest.IsolatedAsyncioTestCase):
                     "quality": "high",
                 }
 
-        fake_key = SimpleNamespace(key="xai-test-key")
+        fake_key = SimpleNamespace(key="dummy001")
         fake_manager = SimpleNamespace(acquire_key=lambda: fake_key)
         with patch.object(video_module, "load_runtime_manager", return_value=fake_manager):
             captured_kwargs = []
@@ -557,7 +557,7 @@ class VideosApiTests(unittest.IsolatedAsyncioTestCase):
                     "seconds": 12,
                 }
 
-        fake_key = SimpleNamespace(key="xai-test-key")
+        fake_key = SimpleNamespace(key="dummy001")
         fake_manager = SimpleNamespace(acquire_key=lambda: fake_key)
         with patch.object(video_module, "load_runtime_manager", return_value=fake_manager):
             captured_kwargs = []
@@ -606,7 +606,7 @@ class VideosApiTests(unittest.IsolatedAsyncioTestCase):
                     "seconds": 5,
                 }
 
-        fake_key = SimpleNamespace(key="xai-test-key")
+        fake_key = SimpleNamespace(key="dummy001")
         fake_manager = SimpleNamespace(acquire_key=lambda: fake_key)
         with patch.object(video_module, "load_runtime_manager", return_value=fake_manager):
             captured_kwargs = []
@@ -1643,7 +1643,7 @@ class XAIKeysAdminApiTests(unittest.IsolatedAsyncioTestCase):
         state = {
             "xai": {
                 "keys": [
-                    {"id": "k1", "key": "xai-secret-12345678", "name": "primary", "enabled": True}
+                    {"id": "k1", "key": "dummy001", "name": "primary", "enabled": True}
                 ]
             }
         }
@@ -1665,7 +1665,7 @@ class XAIKeysAdminApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response["keys"][0]["id"], "k1")
         self.assertEqual(response["keys"][0]["name"], "primary")
         self.assertTrue(response["keys"][0]["enabled"])
-        self.assertEqual(response["keys"][0]["value"], "xai-****5678")
+        self.assertEqual(response["keys"][0]["value"], "du******")
 
     async def test_admin_xai_keys_patch_can_toggle_enabled(self):
         from app.api.v1.admin_api import xai_keys as module
@@ -1673,7 +1673,7 @@ class XAIKeysAdminApiTests(unittest.IsolatedAsyncioTestCase):
         state = {
             "xai": {
                 "keys": [
-                    {"id": "k1", "key": "xai-secret-12345678", "name": "primary", "enabled": True}
+                    {"id": "k1", "key": "dummy001", "name": "primary", "enabled": True}
                 ]
             }
         }
@@ -1689,27 +1689,6 @@ class XAIKeysAdminApiTests(unittest.IsolatedAsyncioTestCase):
             async def save_config(self, data):
                 state.clear()
                 state.update(data)
-
-            async def load_config(self):
-                return copy.deepcopy(state)
-
-            async def load_config(self):
-                return copy.deepcopy(state)
-
-            async def load_config(self):
-                return copy.deepcopy(state)
-
-            async def load_config(self):
-                return copy.deepcopy(state)
-
-            async def load_config(self):
-                return copy.deepcopy(state)
-
-            async def load_config(self):
-                return copy.deepcopy(state)
-
-            async def load_config(self):
-                return copy.deepcopy(state)
 
             async def load_config(self):
                 return copy.deepcopy(state)
@@ -1729,7 +1708,7 @@ class XAIKeysAdminApiTests(unittest.IsolatedAsyncioTestCase):
         state = {
             "xai": {
                 "keys": [
-                    {"id": "k1", "key": "xai-secret-12345678", "name": "primary", "enabled": True}
+                    {"id": "k1", "key": "dummy001", "name": "primary", "enabled": True}
                 ]
             }
         }
@@ -1745,27 +1724,6 @@ class XAIKeysAdminApiTests(unittest.IsolatedAsyncioTestCase):
             async def save_config(self, data):
                 state.clear()
                 state.update(data)
-
-            async def load_config(self):
-                return copy.deepcopy(state)
-
-            async def load_config(self):
-                return copy.deepcopy(state)
-
-            async def load_config(self):
-                return copy.deepcopy(state)
-
-            async def load_config(self):
-                return copy.deepcopy(state)
-
-            async def load_config(self):
-                return copy.deepcopy(state)
-
-            async def load_config(self):
-                return copy.deepcopy(state)
-
-            async def load_config(self):
-                return copy.deepcopy(state)
 
             async def load_config(self):
                 return copy.deepcopy(state)
@@ -1804,12 +1762,12 @@ class XAIKeysAdminApiTests(unittest.IsolatedAsyncioTestCase):
                 with patch.object(module.config, "_ensure_defaults", Mock(return_value=None)):
                     with patch.object(module, "get_storage", return_value=DummyStorage()):
                         created = await module.create_xai_key(
-                            {"id": "k1", "key": "xai-secret-12345678", "name": "primary", "enabled": True}
+                            {"id": "k1", "key": "dummy001", "name": "primary", "enabled": True}
                         )
                         deleted = await module.delete_xai_key("k1")
 
         self.assertEqual(created["status"], "success")
-        self.assertEqual(created["key"]["value"], "xai-****5678")
+        self.assertEqual(created["key"]["value"], "du******")
         self.assertEqual(deleted["status"], "success")
         self.assertEqual(state["xai"]["keys"], [])
 
@@ -1838,7 +1796,7 @@ class XAIKeysAdminApiTests(unittest.IsolatedAsyncioTestCase):
                 with patch.object(module.config, "_ensure_defaults", Mock(return_value=None)):
                     with patch.object(module, "get_storage", return_value=DummyStorage()):
                         created = await module.create_xai_key(
-                            {"id": "k1", "key": "xai-secret-12345678", "enabled": True}
+                            {"id": "k1", "key": "dummy001", "enabled": True}
                         )
 
         self.assertEqual(created["status"], "success")
@@ -1870,7 +1828,7 @@ class XAIKeysAdminApiTests(unittest.IsolatedAsyncioTestCase):
                     with patch.object(module, "get_storage", return_value=DummyStorage()):
                         payload = await module.import_xai_keys(
                             {
-                                "text": "xai-key-1\\n\\n xai-key-2 \\n xai-key-1\\n",
+                                "text": "dummy001\\n\\n dummy002 \\n dummy001\\n",
                                 "enabled": True,
                             }
                         )
@@ -1878,7 +1836,7 @@ class XAIKeysAdminApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["status"], "success")
         self.assertEqual(payload["imported"], 2)
         self.assertEqual(len(state["xai"]["keys"]), 2)
-        self.assertEqual([item["key"] for item in state["xai"]["keys"]], ["xai-key-1", "xai-key-2"])
+        self.assertEqual([item["key"] for item in state["xai"]["keys"]], ["dummy001", "dummy002"])
         self.assertTrue(all(item["enabled"] is True for item in state["xai"]["keys"]))
 
     async def test_admin_xai_keys_rejects_invalid_create_payload_types(self):
@@ -1890,12 +1848,12 @@ class XAIKeysAdminApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(getattr(ctx.exception, "status_code", None), 400)
 
         with self.assertRaises(Exception) as ctx_unknown:
-            await module.create_xai_key({"key": "xai-secret-12345678", "enbaled": False})
+            await module.create_xai_key({"key": "dummy001", "enbaled": False})
 
         self.assertEqual(getattr(ctx_unknown.exception, "status_code", None), 400)
 
         with self.assertRaises(Exception) as ctx_none:
-            await module.create_xai_key({"key": "xai-secret-12345678", "enabled": None})
+            await module.create_xai_key({"key": "dummy001", "enabled": None})
 
         self.assertEqual(getattr(ctx_none.exception, "status_code", None), 400)
 
@@ -1905,7 +1863,7 @@ class XAIKeysAdminApiTests(unittest.IsolatedAsyncioTestCase):
         state = {
             "xai": {
                 "keys": [
-                    {"id": "k1", "key": "xai-secret-12345678", "name": "primary", "enabled": True}
+                    {"id": "k1", "key": "dummy001", "name": "primary", "enabled": True}
                 ]
             }
         }
@@ -1940,7 +1898,7 @@ class XAIKeysAdminApiTests(unittest.IsolatedAsyncioTestCase):
         persisted_state = {
             "xai": {
                 "keys": [
-                    {"id": "k1", "key": "xai-secret-12345678", "name": "primary", "enabled": True}
+                    {"id": "k1", "key": "dummy001", "name": "primary", "enabled": True}
                 ]
             }
         }
@@ -1967,7 +1925,7 @@ class XAIKeysAdminApiTests(unittest.IsolatedAsyncioTestCase):
         state = {
             "xai": {
                 "keys": [
-                    {"id": "k1", "key": "xai-secret-12345678", "name": "primary", "enabled": True}
+                    {"id": "k1", "key": "dummy001", "name": "primary", "enabled": True}
                 ]
             }
         }
@@ -2028,10 +1986,10 @@ class XAIKeysAdminApiTests(unittest.IsolatedAsyncioTestCase):
                     with patch.object(module, "get_storage", return_value=DummyStorage()):
                         await asyncio.gather(
                             module.create_xai_key(
-                                {"id": "k1", "key": "xai-secret-12345678", "name": "primary", "enabled": True}
+                                {"id": "k1", "key": "dummy001", "name": "primary", "enabled": True}
                             ),
                             module.create_xai_key(
-                                {"id": "k2", "key": "xai-secret-87654321", "name": "secondary", "enabled": True}
+                                {"id": "k2", "key": "dummy002", "name": "secondary", "enabled": True}
                             ),
                         )
 
@@ -2044,7 +2002,7 @@ class XAIKeysAdminApiTests(unittest.IsolatedAsyncioTestCase):
         persisted_state = {
             "xai": {
                 "keys": [
-                    {"id": "k1", "key": "xai-secret-12345678", "name": "primary", "enabled": True}
+                    {"id": "k1", "key": "dummy001", "name": "primary", "enabled": True}
                 ]
             }
         }
@@ -2070,7 +2028,7 @@ class XAIKeysAdminApiTests(unittest.IsolatedAsyncioTestCase):
                 with patch.object(module.config, "_ensure_defaults", Mock(return_value=None)):
                     with patch.object(module, "get_storage", return_value=DummyStorage()):
                         await module.create_xai_key(
-                            {"id": "k2", "key": "xai-secret-87654321", "name": "secondary", "enabled": True}
+                            {"id": "k2", "key": "dummy002", "name": "secondary", "enabled": True}
                         )
 
         ids = sorted(item["id"] for item in persisted_state["xai"]["keys"])

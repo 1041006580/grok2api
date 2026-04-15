@@ -53,7 +53,7 @@ async def _collect_streaming_body(response) -> str:
 
 def _manager_with_xai_key():
     return SimpleNamespace(
-        acquire_key=lambda: SimpleNamespace(key="xai-test-key", id="fake-xai-id")
+        acquire_key=lambda: SimpleNamespace(key="dummy001", id="fake-xai-id")
     )
 
 
@@ -359,11 +359,11 @@ def test_official_xai_video_generation_start_returns_request_id():
     from app.api.v1 import video as video_module
 
     async def scenario():
-        fake_key = SimpleNamespace(key="xai-test-key")
+        fake_key = SimpleNamespace(key="dummy001")
         fake_key.id = "k1"
         fake_manager = SimpleNamespace(acquire_key=lambda: fake_key)
         captured_kwargs = []
-        state = {"xai": {"keys": [{"id": "k1", "key": "xai-test-key", "enabled": True}]}}
+        state = {"xai": {"keys": [{"id": "k1", "key": "dummy001", "enabled": True}]}}
         lock = asyncio.Lock()
 
         class FakeXAIVideoService:
@@ -421,14 +421,14 @@ def test_official_xai_video_generation_start_returns_request_id():
     assert result["request_id"] == "vidreq_123"
     assert result["status"] == "pending"
     assert state["xai"]["request_key_bindings"]["vidreq_123"]["key_id"] == "k1"
-    assert state["xai"]["request_key_bindings"]["vidreq_123"]["key"] == "xai-test-key"
+    assert state["xai"]["request_key_bindings"]["vidreq_123"]["key"] == "dummy001"
 
 
 def test_official_xai_video_generation_start_still_returns_request_id_when_binding_persistence_fails():
     from app.api.v1 import video as video_module
 
     async def scenario():
-        fake_key = SimpleNamespace(key="xai-test-key", id="k1")
+        fake_key = SimpleNamespace(key="dummy001", id="k1")
         fake_manager = SimpleNamespace(acquire_key=lambda: fake_key)
         lock = asyncio.Lock()
 
@@ -442,7 +442,7 @@ def test_official_xai_video_generation_start_still_returns_request_id_when_bindi
 
         class DummyStorage:
             async def load_config(self):
-                return {"xai": {"keys": [{"id": "k1", "key": "xai-test-key", "enabled": True}]}}
+                return {"xai": {"keys": [{"id": "k1", "key": "dummy001", "enabled": True}]}}
 
             async def save_config(self, data):
                 raise RuntimeError("persist failed")
@@ -478,14 +478,14 @@ def test_official_xai_video_generation_start_binds_request_to_actual_successful_
     from app.api.v1 import video as video_module
 
     async def scenario():
-        initial_key = SimpleNamespace(key="xai-key-1", id="k1")
-        fallback_key = SimpleNamespace(key="xai-key-2", id="k2")
+        initial_key = SimpleNamespace(key="dummy001", id="k1")
+        fallback_key = SimpleNamespace(key="dummy002", id="k2")
         fake_manager = SimpleNamespace(acquire_key=lambda: initial_key)
         state = {
             "xai": {
                 "keys": [
-                    {"id": "k1", "key": "xai-key-1", "enabled": True},
-                    {"id": "k2", "key": "xai-key-2", "enabled": True},
+                    {"id": "k1", "key": "dummy001", "enabled": True},
+                    {"id": "k2", "key": "dummy002", "enabled": True},
                 ]
             }
         }
@@ -535,19 +535,19 @@ def test_official_xai_video_generation_start_binds_request_to_actual_successful_
 
     assert result["request_id"] == "vidreq_123"
     assert state["xai"]["request_key_bindings"]["vidreq_123"]["key_id"] == "k2"
-    assert state["xai"]["request_key_bindings"]["vidreq_123"]["key"] == "xai-key-2"
+    assert state["xai"]["request_key_bindings"]["vidreq_123"]["key"] == "dummy002"
 
 
 def test_official_xai_video_generation_recovers_when_binding_persistence_fails():
     from app.api.v1 import video as video_module
 
     async def scenario():
-        fake_key = SimpleNamespace(key="xai-test-key", id="k1", enabled=True, status="active")
+        fake_key = SimpleNamespace(key="dummy001", id="k1", enabled=True, status="active")
         fake_manager = SimpleNamespace(
             acquire_key=lambda: fake_key,
             list_keys=lambda: [fake_key],
         )
-        state = {"xai": {"keys": [{"id": "k1", "key": "xai-test-key", "enabled": True}]}}
+        state = {"xai": {"keys": [{"id": "k1", "key": "dummy001", "enabled": True}]}}
         lock = asyncio.Lock()
 
         class FakeXAIVideoService:
@@ -619,7 +619,7 @@ def test_official_xai_video_generation_status_returns_upstream_payload():
     from app.api.v1 import video as video_module
 
     async def scenario():
-        fake_key = SimpleNamespace(key="xai-test-key")
+        fake_key = SimpleNamespace(key="dummy001")
         fake_key.id = "k1"
         fake_manager = SimpleNamespace(
             acquire_key=lambda: SimpleNamespace(key="other-key"),
@@ -629,7 +629,7 @@ def test_official_xai_video_generation_status_returns_upstream_payload():
         state = {
             "xai": {
                 "keys": [{"id": "k1", "key": "rotated-key", "enabled": True}],
-                "request_key_bindings": {"vidreq_123": {"key_id": "k1", "key": "xai-test-key"}},
+                "request_key_bindings": {"vidreq_123": {"key_id": "k1", "key": "dummy001"}},
             }
         }
         lock = asyncio.Lock()
@@ -689,7 +689,7 @@ def test_official_xai_video_generation_status_falls_back_to_single_active_key_wh
     from app.api.v1 import video as video_module
 
     async def scenario():
-        fake_key = SimpleNamespace(key="xai-test-key", id="k1", enabled=True, status="active")
+        fake_key = SimpleNamespace(key="dummy001", id="k1", enabled=True, status="active")
         fake_manager = SimpleNamespace(
             acquire_key=lambda: fake_key,
             list_keys=lambda: [fake_key],
