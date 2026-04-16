@@ -28,6 +28,7 @@ def test_language_models_only_return_language_capable_models():
 
     ids = {item["id"] for item in result["data"]}
     assert "grok-4" in ids
+    assert "grok-4.20-multi-agent" in ids
     assert "grok-imagine-1.0" not in ids
     assert "grok-imagine-1.0-video" not in ids
 

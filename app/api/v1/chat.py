@@ -2,14 +2,14 @@
 Chat Completions API 路由
 """
 
+from collections.abc import Mapping
 from typing import Any, AsyncGenerator, AsyncIterable, Dict, List, Optional, Union
 import base64
 import binascii
 import time
-import uuid
 
 from fastapi import APIRouter, Request
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import StreamingResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 import orjson
 
@@ -18,9 +18,12 @@ from app.services.grok.services.image import ImageGenerationService
 from app.services.grok.services.image_edit import ImageEditService
 from app.services.grok.services.model import ModelService
 from app.services.grok.services.video import VideoService
+from app.services.grok.services.xai_chat import XAIChatService
+from app.services.grok.services.xai_key_manager import load_runtime_manager
 from app.services.grok.utils.response import make_chat_response
 from app.services.token import get_token_manager
-from app.core.config import get_config
+from app.core.config import get_config, _deep_merge, config
+from app.core.storage import get_storage
 from app.core.exceptions import ValidationException, AppException, ErrorType
 from app.core.logger import logger
 from app.services.request_logger import request_logger
@@ -59,6 +62,7 @@ class ChatCompletionRequest(BaseModel):
     model: str = Field(..., description="模型名称")
     messages: List[MessageItem] = Field(..., description="消息数组")
     stream: Optional[bool] = Field(None, description="是否流式输出")
+    deferred: Optional[bool] = Field(False, description="是否延迟完成（仅 xAI 直连 chat）")
     reasoning_effort: Optional[str] = Field(None, description="推理强度: none/minimal/low/medium/high/xhigh")
     temperature: Optional[float] = Field(0.8, description="采样温度: 0-2")
     top_p: Optional[float] = Field(0.95, description="nucleus 采样: 0-1")
@@ -82,6 +86,121 @@ ALLOWED_IMAGE_SIZES = {
     "1024x1024",
 }
 IMAGINE_FAST_MODEL_ID = "grok-imagine-1.0-fast"
+
+
+def _is_xai_direct_chat_model(model: str, model_info=None) -> bool:
+    return bool(model_info and getattr(model_info, "provider", "") == "xai_api")
+
+
+def _select_xai_key_manager_and_record():
+    manager = load_runtime_manager()
+    key_record = manager.acquire_key()
+    if not key_record:
+        raise ValidationException(
+            message="xAI key pool is not configured with any enabled key",
+            param="model",
+            code="xai_api_key_missing",
+        )
+    return manager, key_record
+
+
+async def _remember_xai_chat_request_key(request_id: str, key_record: object) -> None:
+    request_id = str(request_id or "").strip()
+    if not request_id:
+        return
+    key_id = str(getattr(key_record, "id", "") or "").strip()
+    key_value = str(getattr(key_record, "key", "") or "").strip()
+    if not key_id or not key_value:
+        return
+
+    storage = get_storage()
+    async with storage.acquire_lock("config_save", timeout=10):
+        config._ensure_defaults()
+        persisted = await storage.load_config()
+        current_config = getattr(config, "_config", {}) or {}
+        if isinstance(persisted, Mapping) and (persisted or not current_config):
+            source = persisted
+        else:
+            source = current_config
+        base = _deep_merge(getattr(config, "_defaults", {}) or {}, source or {})
+        section = base.get("xai", {}) or {}
+        if not isinstance(section, Mapping):
+            section = {}
+        section = dict(section)
+        raw_bindings = section.get("chat_request_key_bindings", {}) or {}
+        bindings = dict(raw_bindings) if isinstance(raw_bindings, Mapping) else {}
+        bindings[request_id] = {"key_id": key_id, "key": key_value}
+        section["chat_request_key_bindings"] = bindings
+        base["xai"] = section
+        await storage.save_config(base)
+        config._config = base
+
+
+async def _get_bound_xai_chat_key(request_id: str):
+    request_id = str(request_id or "").strip()
+    if not request_id:
+        return None
+    storage = get_storage()
+    async with storage.acquire_lock("config_save", timeout=10):
+        config._ensure_defaults()
+        persisted = await storage.load_config()
+        current_config = getattr(config, "_config", {}) or {}
+        if isinstance(persisted, Mapping) and (persisted or not current_config):
+            source = persisted
+        else:
+            source = current_config
+        base = _deep_merge(getattr(config, "_defaults", {}) or {}, source or {})
+        section = base.get("xai", {}) or {}
+        if not isinstance(section, Mapping):
+            return None
+        raw_bindings = section.get("chat_request_key_bindings", {}) or {}
+        bindings = dict(raw_bindings) if isinstance(raw_bindings, Mapping) else {}
+        binding = bindings.get(request_id)
+        if not isinstance(binding, Mapping):
+            return None
+        key_id = str(binding.get("key_id", "") or "").strip()
+        key_value = str(binding.get("key", "") or "").strip()
+        if not key_id or not key_value:
+            return None
+        return {
+            "key_record": type(
+                "BoundKeyRecord",
+                (),
+                {"id": key_id, "key": key_value},
+            )()
+        }
+
+
+async def _drop_bound_xai_chat_key(request_id: str) -> None:
+    request_id = str(request_id or "").strip()
+    if not request_id:
+        return
+    storage = get_storage()
+    async with storage.acquire_lock("config_save", timeout=10):
+        config._ensure_defaults()
+        persisted = await storage.load_config()
+        current_config = getattr(config, "_config", {}) or {}
+        if isinstance(persisted, Mapping) and (persisted or not current_config):
+            source = persisted
+        else:
+            source = current_config
+        base = _deep_merge(getattr(config, "_defaults", {}) or {}, source or {})
+        section = base.get("xai", {}) or {}
+        if not isinstance(section, Mapping):
+            return
+        section = dict(section)
+        raw_bindings = section.get("chat_request_key_bindings", {}) or {}
+        bindings = dict(raw_bindings) if isinstance(raw_bindings, Mapping) else {}
+        if request_id not in bindings:
+            return
+        bindings.pop(request_id, None)
+        if bindings:
+            section["chat_request_key_bindings"] = bindings
+        else:
+            section.pop("chat_request_key_bindings", None)
+        base["xai"] = section
+        await storage.save_config(base)
+        config._config = base
 
 
 def _validate_media_input(value: str, field_name: str, param: str):
@@ -267,8 +386,10 @@ def _validate_image_config(image_conf: ImageConfig, *, stream: bool):
 
 def validate_request(request: ChatCompletionRequest):
     """验证请求参数"""
+    model_info = ModelService.get(request.model)
+    is_xai_direct_chat = _is_xai_direct_chat_model(request.model, model_info)
     # 验证模型
-    if not ModelService.valid(request.model):
+    if not model_info and not is_xai_direct_chat:
         raise ValidationException(
             message=f"The model `{request.model}` does not exist or you do not have access to it.",
             param="model",
@@ -576,7 +697,20 @@ def validate_request(request: ChatCompletionRequest):
                     code="invalid_tool_choice",
                 )
 
-    model_info = ModelService.get(request.model)
+    if request.deferred:
+        if request.stream:
+            raise ValidationException(
+                message="deferred chat completions do not support stream=true",
+                param="deferred",
+                code="invalid_deferred",
+            )
+        if not is_xai_direct_chat:
+            raise ValidationException(
+                message="deferred chat completions are only supported for xAI direct chat models",
+                param="deferred",
+                code="invalid_deferred",
+            )
+
     # image 验证
     if model_info and (model_info.is_image or model_info.is_image_edit):
         prompt, image_urls = _extract_prompt_images(request.messages)
@@ -712,6 +846,61 @@ async def chat_completions(request: ChatCompletionRequest, http_request: Request
     try:
         # 检测模型类型
         model_info = ModelService.get(request.model)
+        if _is_xai_direct_chat_model(request.model, model_info):
+            manager, key_record = _select_xai_key_manager_and_record()
+            service = XAIChatService(key_manager=manager, key_record=key_record)
+            is_stream = request.stream if request.stream is not None else get_config("app.stream")
+            try:
+                result = await service.create_chat_completion(
+                    model=request.model,
+                    messages=[msg.model_dump() for msg in request.messages],
+                    stream=bool(is_stream),
+                    deferred=bool(request.deferred),
+                    reasoning_effort=request.reasoning_effort,
+                    temperature=request.temperature,
+                    top_p=request.top_p,
+                    tools=request.tools,
+                    tool_choice=request.tool_choice,
+                    parallel_tool_calls=request.parallel_tool_calls,
+                )
+            except Exception as e:
+                if request.stream:
+                    return _streaming_error_response(e)
+                raise
+
+            if request.deferred and isinstance(result, dict):
+                request_id = str(result.get("request_id", "") or "").strip()
+                if request_id:
+                    actual_key_record = getattr(service, "_key_record", None) or key_record
+                    try:
+                        await _remember_xai_chat_request_key(request_id, actual_key_record)
+                    except Exception:
+                        pass
+
+            if isinstance(result, dict):
+                duration = time.time() - start_time
+                await _log_request(client_ip, request.model, duration, 200)
+                return JSONResponse(content=result)
+
+            async def stream_with_logging():
+                nonlocal status_code, error_msg
+                try:
+                    async for chunk in _safe_sse_stream(result):
+                        yield chunk
+                except Exception as e:
+                    status_code = 500
+                    error_msg = str(e)
+                    raise
+                finally:
+                    duration = time.time() - start_time
+                    await _log_request(client_ip, request.model, duration, status_code, error_msg)
+
+            return StreamingResponse(
+                stream_with_logging(),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+            )
+
         if model_info and model_info.is_image_edit:
             prompt, image_urls = _extract_prompt_images(request.messages)
             if not image_urls:
@@ -727,7 +916,6 @@ async def chat_completions(request: ChatCompletionRequest, http_request: Request
             image_conf = request.image_config or ImageConfig()
             _validate_image_config(image_conf, stream=bool(is_stream))
             response_format = _resolve_image_format(image_conf.response_format)
-            response_field = _image_field(response_format)
             n = image_conf.n or 1
 
             token_mgr = await get_token_manager()
@@ -782,7 +970,6 @@ async def chat_completions(request: ChatCompletionRequest, http_request: Request
             image_conf = _imagine_fast_server_image_config() if request.model == IMAGINE_FAST_MODEL_ID else (request.image_config or ImageConfig())
             _validate_image_config(image_conf, stream=bool(is_stream))
             response_format = _resolve_image_format(image_conf.response_format)
-            response_field = _image_field(response_format)
             n = image_conf.n or 1
             size = image_conf.size or "1024x1024"
             aspect_ratio_map = {
@@ -903,6 +1090,23 @@ async def chat_completions(request: ChatCompletionRequest, http_request: Request
         duration = time.time() - start_time
         await _log_request(client_ip, request.model, duration, 500, str(e))
         raise
+
+
+@router.get("/chat/deferred-completion/{request_id}")
+async def get_deferred_chat_completion(request_id: str):
+    binding = await _get_bound_xai_chat_key(request_id)
+    key_record = None
+    if binding and isinstance(binding, Mapping):
+        key_record = binding.get("key_record")
+    service = XAIChatService(key_record=key_record)
+    status_code, payload = await service.get_deferred_completion(request_id)
+    if status_code == 202:
+        return Response(status_code=202)
+    try:
+        await _drop_bound_xai_chat_key(request_id)
+    except Exception:
+        pass
+    return JSONResponse(status_code=status_code, content=payload or {})
 
 
 async def _log_request(ip: str, model: str, duration: float, status: int, error: str = ""):

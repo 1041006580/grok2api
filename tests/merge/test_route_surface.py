@@ -6,6 +6,7 @@ def test_route_surface_contains_current_core_endpoints():
     paths = {route.path for route in app.routes}
 
     assert "/v1/chat/completions" in paths
+    assert "/v1/chat/deferred-completion/{request_id}" in paths
     assert "/v1/images/generations" in paths
     assert "/v1/images/edits" in paths
     assert "/v1/responses" in paths

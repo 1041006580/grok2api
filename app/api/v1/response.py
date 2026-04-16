@@ -9,7 +9,9 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.core.exceptions import ValidationException
+from app.services.grok.services.model import ModelService
 from app.services.grok.services.responses import ResponsesService
+from app.services.grok.services.xai_responses import XAIResponsesService
 
 
 router = APIRouter(tags=["Responses"])
@@ -48,6 +50,22 @@ async def create_response(request: ResponseCreateRequest):
     reasoning_effort = None
     if isinstance(request.reasoning, dict):
         reasoning_effort = request.reasoning.get("effort") or request.reasoning.get("reasoning_effort")
+
+    model_info = ModelService.get(request.model)
+    is_xai_direct_response = bool(
+        model_info and getattr(model_info, "provider", "") == "xai_api"
+    )
+
+    if is_xai_direct_response:
+        payload = request.model_dump(exclude_none=True)
+        result = await XAIResponsesService().create_response(payload)
+        if request.stream:
+            return StreamingResponse(
+                result,
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+            )
+        return JSONResponse(content=result)
 
     result = await ResponsesService.create(
         model=request.model,

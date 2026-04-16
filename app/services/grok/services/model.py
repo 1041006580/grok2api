@@ -29,6 +29,7 @@ class ModelInfo(BaseModel):
     model_id: str
     grok_model: str
     model_mode: str
+    provider: str = Field(default="reverse")
     tier: Tier = Field(default=Tier.BASIC)
     cost: Cost = Field(default=Cost.LOW)
     display_name: str
@@ -182,6 +183,19 @@ class ModelService:
             tier=Tier.BASIC,
             cost=Cost.LOW,
             display_name="GROK-4.20-BETA",
+            is_image=False,
+            is_image_edit=False,
+            is_video=False,
+        ),
+        ModelInfo(
+            model_id="grok-4.20-multi-agent",
+            grok_model="grok-4.20-multi-agent",
+            model_mode="MODEL_MODE_XAI_API",
+            provider="xai_api",
+            tier=Tier.BASIC,
+            cost=Cost.HIGH,
+            display_name="GROK-4.20-MULTI-AGENT",
+            description="Official xAI multi-agent research model",
             is_image=False,
             is_image_edit=False,
             is_video=False,
