@@ -74,10 +74,12 @@ def test_chat_pages_load_models_with_auth_headers_after_auth_bootstrap():
     function_js = Path("_public/static/function/js/chat.js").read_text(encoding="utf-8")
 
     assert "async function loadModels(authHeader)" in public_js
+    assert "fetch('/v1/public/models'" in public_js
     assert "headers: buildAuthHeaders(authHeader)" in public_js
     assert "await loadModels(authResult);" in public_js
 
     assert "async function loadModels(authHeader)" in function_js
+    assert "fetch('/v1/function/models'" in function_js
     assert "headers: buildAuthHeaders(authHeader)" in function_js
     assert "await loadModels(authResult);" in function_js
 

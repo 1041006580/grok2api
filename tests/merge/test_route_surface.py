@@ -32,6 +32,7 @@ def test_route_surface_contains_current_ui_and_public_endpoints():
     assert "/admin/login" in paths
     assert "/v1/admin/config" in paths
     assert "/v1/admin/xai-keys/import" in paths
+    assert "/v1/public/models" in paths
     assert "/v1/public/video/start" in paths
     assert "/v1/public/video/sse" in paths
 
@@ -40,6 +41,7 @@ def test_route_surface_contains_upstream_alias_endpoints():
     app = create_app()
     paths = {route.path for route in app.routes}
 
+    assert "/v1/function/models" in paths
     assert "/v1/function/video/start" in paths
     assert "/v1/function/video/sse" in paths
     assert "/health" in paths
