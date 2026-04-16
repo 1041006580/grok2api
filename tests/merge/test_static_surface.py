@@ -69,6 +69,19 @@ def test_xai_keys_page_uses_batch_import_without_name_input():
         assert "/v1/admin/xai-keys/import" in js
 
 
+def test_chat_pages_load_models_with_auth_headers_after_auth_bootstrap():
+    public_js = Path("app/static/public/js/chat.js").read_text(encoding="utf-8")
+    function_js = Path("_public/static/function/js/chat.js").read_text(encoding="utf-8")
+
+    assert "async function loadModels(authHeader)" in public_js
+    assert "headers: buildAuthHeaders(authHeader)" in public_js
+    assert "await loadModels(authResult);" in public_js
+
+    assert "async function loadModels(authHeader)" in function_js
+    assert "headers: buildAuthHeaders(authHeader)" in function_js
+    assert "await loadModels(authResult);" in function_js
+
+
 def test_admin_surface_exposes_xai_keys_page_and_nav():
     public_header = Path("app/static/common/html/header.html").read_text(encoding="utf-8")
     function_header = Path("_public/static/common/html/header.html").read_text(encoding="utf-8")

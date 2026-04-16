@@ -1331,12 +1331,15 @@
     modelChip.classList.toggle('open', !visible);
   }
 
-  async function loadModels() {
+  async function loadModels(authHeader) {
     if (!modelDropdown) return;
     const fallback = ['grok-4.1-fast', 'grok-4', 'grok-3', 'grok-3-mini', 'grok-3-thinking', 'grok-4.20-beta', 'grok-imagine-1.0-fast'];
     const preferred = 'grok-4.20-beta';
     try {
-      const res = await fetch('/v1/models', { cache: 'no-store' });
+      const res = await fetch('/v1/models', {
+        cache: 'no-store',
+        headers: buildAuthHeaders(authHeader)
+      });
       if (!res.ok) throw new Error('models fetch failed');
       const data = await res.json();
       const items = Array.isArray(data && data.data) ? data.data : [];
@@ -1802,7 +1805,6 @@
   }
 
   updateRangeValues();
-  loadModels();
   bindEvents();
   restoreSidebarState();
 
@@ -1813,6 +1815,7 @@
         window.location.href = '/login';
         return;
       }
+      await loadModels(authResult);
     } catch (e) {
       window.location.href = '/login';
       return;
