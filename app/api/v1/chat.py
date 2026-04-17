@@ -885,7 +885,8 @@ async def chat_completions(request: ChatCompletionRequest, http_request: Request
             async def stream_with_logging():
                 nonlocal status_code, error_msg
                 try:
-                    async for chunk in _safe_sse_stream(result):
+                    # xAI API already returns SSE format, don't wrap with _safe_sse_stream
+                    async for chunk in result:
                         yield chunk
                 except Exception as e:
                     status_code = 500
