@@ -82,6 +82,18 @@ class XAIResponsesService:
             "Content-Type": "application/json",
         }
 
+    @staticmethod
+    def _normalize_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+        normalized = dict(payload or {})
+        model = str(normalized.get("model") or "").strip()
+        include = normalized.get("include")
+        include_list = list(include) if isinstance(include, list) else []
+        if model == "grok-4.20-multi-agent" and "verbose_streaming" not in include_list:
+            include_list.append("verbose_streaming")
+        if include_list:
+            normalized["include"] = include_list
+        return normalized
+
     def _create_candidate_keys(self) -> list[XAIKeyInfo]:
         ordered: list[XAIKeyInfo] = []
         seen: set[tuple[str, str]] = set()
@@ -173,6 +185,7 @@ class XAIResponsesService:
         return response
 
     async def create_response(self, payload: Dict[str, Any]):
+        payload = self._normalize_payload(payload)
         timeout = aiohttp.ClientTimeout(total=self.timeout)
         candidate_keys = self._create_candidate_keys()
         if not candidate_keys:

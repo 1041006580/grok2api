@@ -41,6 +41,7 @@ def test_responses_route_uses_xai_direct_service_for_multi_agent_model():
     assert payload["input"] == "Research this topic"
     assert payload["reasoning"] == {"effort": "high"}
     assert payload["tools"] == [{"type": "web_search"}]
+    assert payload["include"] == ["verbose_streaming"]
     assert response.status_code == 200
     assert b"resp_xai" in response.body
 
@@ -74,4 +75,6 @@ def test_responses_route_streams_xai_direct_service_for_multi_agent_model():
     mock_create, response = asyncio.run(scenario())
 
     mock_create.assert_awaited_once()
+    payload = mock_create.await_args.args[0]
+    assert payload["include"] == ["verbose_streaming"]
     assert response.media_type == "text/event-stream"

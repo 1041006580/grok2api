@@ -17,6 +17,18 @@ from app.services.grok.services.xai_responses import XAIResponsesService
 router = APIRouter(tags=["Responses"])
 
 
+def _augment_multi_agent_payload(payload: dict) -> dict:
+    normalized = dict(payload or {})
+    model = str(normalized.get("model") or "").strip()
+    include = normalized.get("include")
+    include_list = list(include) if isinstance(include, list) else []
+    if model == "grok-4.20-multi-agent" and "verbose_streaming" not in include_list:
+        include_list.append("verbose_streaming")
+    if include_list:
+        normalized["include"] = include_list
+    return normalized
+
+
 class ResponseCreateRequest(BaseModel):
     model: str = Field(..., description="Model name")
     input: Optional[Any] = Field(None, description="Input content")
@@ -57,7 +69,7 @@ async def create_response(request: ResponseCreateRequest):
     )
 
     if is_xai_direct_response:
-        payload = request.model_dump(exclude_none=True)
+        payload = _augment_multi_agent_payload(request.model_dump(exclude_none=True))
         result = await XAIResponsesService().create_response(payload)
         if request.stream:
             return StreamingResponse(

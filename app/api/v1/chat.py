@@ -102,6 +102,18 @@ def _is_multi_agent_model(model: str, model_info=None) -> bool:
     return "multi-agent" in model_id.lower() or "multi-agent" in grok_model.lower()
 
 
+def _augment_multi_agent_responses_payload(payload: dict) -> dict:
+    normalized = dict(payload or {})
+    model = str(normalized.get("model") or "").strip()
+    include = normalized.get("include")
+    include_list = list(include) if isinstance(include, list) else []
+    if model == "grok-4.20-multi-agent" and "verbose_streaming" not in include_list:
+        include_list.append("verbose_streaming")
+    if include_list:
+        normalized["include"] = include_list
+    return normalized
+
+
 def _select_xai_key_manager_and_record():
     manager = load_runtime_manager()
     key_record = manager.acquire_key()
@@ -885,6 +897,7 @@ async def chat_completions(request: ChatCompletionRequest, http_request: Request
                     payload["temperature"] = request.temperature
                 if request.top_p is not None:
                     payload["top_p"] = request.top_p
+                payload = _augment_multi_agent_responses_payload(payload)
                 try:
                     result = await service.create_response(payload)
                 except Exception as e:

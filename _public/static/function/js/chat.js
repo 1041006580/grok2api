@@ -868,6 +868,16 @@
     return `<details class="think-block" data-think="true" data-synthetic-think="true"><summary class="think-summary">${t('chat.thinkLabel')}</summary><div class="think-content"><em>${t('chat.thinking')}</em></div></details>${body}`;
   }
 
+  function extractReasoningTokens(json) {
+    const direct = json && json.usage && json.usage.reasoning_tokens;
+    if (Number.isFinite(direct)) return direct;
+    const nested = json && json.response && json.response.usage && json.response.usage.output_tokens_details
+      ? json.response.usage.output_tokens_details.reasoning_tokens
+      : null;
+    if (Number.isFinite(nested)) return nested;
+    return null;
+  }
+
   function deleteMessageByRow(row) {
     if (!row || !chatLog) return;
     if (activeStreamInfo && activeStreamInfo.entry.row === row) return;
@@ -1056,6 +1066,7 @@
       startedAt: Date.now(),
       firstTokenAt: null,
       hasThink: false,
+      reasoningTokens: null,
       thinkElapsed: null,
       thinkAutoCollapsed: false
     };
@@ -1281,7 +1292,10 @@
     if (!entry || !entry.contentNode) return;
     const summaries = entry.contentNode.querySelectorAll('.think-summary');
     if (!summaries.length) return;
-    const text = typeof elapsedSec === 'number' ? (elapsedSec > 0 ? t('chat.thinkingSec', { sec: elapsedSec }) : t('chat.thought')) : t('chat.thinking');
+    const tokensSuffix = Number.isFinite(entry.reasoningTokens) ? ` · ${entry.reasoningTokens} tokens` : '';
+    const text = typeof elapsedSec === 'number'
+      ? (elapsedSec > 0 ? `${t('chat.thinkingSec', { sec: elapsedSec })}${tokensSuffix}` : `${t('chat.thought')}${tokensSuffix}`)
+      : `${t('chat.thinking')}${tokensSuffix}`;
     summaries.forEach((node) => {
       node.textContent = text;
       const block = node.closest('.think-block');
@@ -1704,10 +1718,14 @@
               assistantEntry.role === 'assistant' &&
               (json.type === 'response.created' || json.type === 'response.in_progress' || eventType === 'response.created' || eventType === 'response.in_progress')
             ) {
+              const reasoningTokens = extractReasoningTokens(json);
               if (!assistantEntry.hasThink) {
                 assistantEntry.hasThink = true;
                 assistantEntry.thinkStartAt = Date.now();
                 assistantEntry.thinkElapsed = null;
+              }
+              if (Number.isFinite(reasoningTokens)) {
+                assistantEntry.reasoningTokens = reasoningTokens;
               }
               if (sessionsData.activeId === targetSessionId) {
                 updateMessage(assistantEntry, assistantText, false);
@@ -1732,6 +1750,11 @@
               const content = Array.isArray(firstItem.content) ? firstItem.content : [];
               const firstContent = content[0] || {};
               delta = firstContent.text || '';
+            }
+
+            const reasoningTokens = extractReasoningTokens(json);
+            if (Number.isFinite(reasoningTokens)) {
+              assistantEntry.reasoningTokens = reasoningTokens;
             }
 
             if (delta) {
