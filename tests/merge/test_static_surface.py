@@ -93,6 +93,9 @@ def test_chat_pages_handle_xai_responses_sse_events():
         assert "json.type === 'response.output_text.delta'" in js
         assert "json.type === 'response.output_text.done'" in js
         assert "json.type === 'response.completed'" in js
+        assert "json.type === 'response.created'" in js
+        assert "json.type === 'response.in_progress'" in js
+        assert "data-synthetic-think" in js
 
 
 def test_admin_surface_exposes_xai_keys_page_and_nav():

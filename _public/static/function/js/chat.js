@@ -859,6 +859,15 @@
     }).join('');
   }
 
+  function renderAssistantContent(entry) {
+    const raw = entry && typeof entry.raw === 'string' ? entry.raw : '';
+    const body = renderMarkdown(raw);
+    if (!entry || !entry.hasThink || raw.includes('<think>')) {
+      return body;
+    }
+    return `<details class="think-block" data-think="true" data-synthetic-think="true"><summary class="think-summary">${t('chat.thinkLabel')}</summary><div class="think-content"><em>${t('chat.thinking')}</em></div></details>${body}`;
+  }
+
   function deleteMessageByRow(row) {
     if (!row || !chatLog) return;
     if (activeStreamInfo && activeStreamInfo.entry.row === row) return;
@@ -1190,10 +1199,10 @@
     }
     if (finalize) {
       entry.contentNode.classList.add('rendered');
-      setRenderedHTML(entry.contentNode, renderMarkdown(entry.raw));
+      setRenderedHTML(entry.contentNode, renderAssistantContent(entry));
     } else {
       if (entry.role === 'assistant') {
-        setRenderedHTML(entry.contentNode, renderMarkdown(entry.raw));
+        setRenderedHTML(entry.contentNode, renderAssistantContent(entry));
       } else {
         entry.contentNode.textContent = entry.raw;
       }
@@ -1202,6 +1211,14 @@
       updateThinkSummary(entry, finalize ? (entry.thinkElapsed ?? 0) : entry.thinkElapsed);
       const thinkBlocks = entry.contentNode.querySelectorAll('.think-block[data-think="true"]');
       thinkBlocks.forEach((block, i) => {
+        if (block.hasAttribute('data-synthetic-think')) {
+          if (entry.thinkElapsed === null || entry.thinkElapsed === undefined) {
+            block.removeAttribute('open');
+          } else {
+            block.removeAttribute('open');
+          }
+          return;
+        }
         if (savedThinkStates && i < savedThinkStates.length) {
           if (savedThinkStates[i]) {
             block.setAttribute('open', '');
@@ -1661,8 +1678,13 @@
       buffer = parts.pop() || '';
       for (const part of parts) {
         const lines = part.split('\n');
+        let eventType = '';
         for (const line of lines) {
           const trimmed = line.trim();
+          if (trimmed.startsWith('event:')) {
+            eventType = trimmed.slice(6).trim();
+            continue;
+          }
           if (!trimmed.startsWith('data:')) continue;
           const payload = trimmed.slice(5).trim();
           if (!payload) continue;
@@ -1678,6 +1700,20 @@
           }
           try {
             const json = JSON.parse(payload);
+            if (
+              assistantEntry.role === 'assistant' &&
+              (json.type === 'response.created' || json.type === 'response.in_progress' || eventType === 'response.created' || eventType === 'response.in_progress')
+            ) {
+              if (!assistantEntry.hasThink) {
+                assistantEntry.hasThink = true;
+                assistantEntry.thinkStartAt = Date.now();
+                assistantEntry.thinkElapsed = null;
+              }
+              if (sessionsData.activeId === targetSessionId) {
+                updateMessage(assistantEntry, assistantText, false);
+              }
+              continue;
+            }
             let delta = json && json.choices && json.choices[0] && json.choices[0].delta
               ? json.choices[0].delta.content
               : '';
@@ -1699,6 +1735,10 @@
             }
 
             if (delta) {
+              if (assistantEntry.hasThink && assistantEntry.thinkStartAt && assistantEntry.thinkElapsed === null) {
+                assistantEntry.thinkElapsed = Math.max(1, Math.round((Date.now() - assistantEntry.thinkStartAt) / 1000));
+                updateThinkSummary(assistantEntry, assistantEntry.thinkElapsed);
+              }
               if (json && (json.type === 'response.output_text.done' || json.type === 'response.completed')) {
                 assistantText = delta;
               } else {
