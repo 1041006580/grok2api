@@ -230,12 +230,16 @@ class XAIChatService:
                     self._key_record = candidate
 
                     async def _stream() -> AsyncGenerator[str, None]:
+                        from app.core.logger import logger
                         try:
+                            chunk_count = 0
                             async for chunk in response.content:
-                                if isinstance(chunk, bytes):
-                                    yield chunk.decode(errors="ignore")
-                                else:
-                                    yield str(chunk)
+                                chunk_count += 1
+                                decoded = chunk.decode(errors="ignore") if isinstance(chunk, bytes) else str(chunk)
+                                if chunk_count <= 3:
+                                    logger.debug(f"xAI stream chunk #{chunk_count}: {decoded[:200]}")
+                                yield decoded
+                            logger.debug(f"xAI stream finished, total chunks: {chunk_count}")
                         finally:
                             response.close()
                             await session.close()
