@@ -862,6 +862,7 @@ async def chat_completions(request: ChatCompletionRequest, http_request: Request
 
             # Multi-agent models use Responses API, others use Chat Completions API
             if _is_multi_agent_model(request.model, model_info):
+                logger.debug(f"Using Responses API for multi-agent model: {request.model}")
                 service = XAIResponsesService(key_manager=manager, key_record=key_record)
                 # Build Responses API payload
                 payload = {

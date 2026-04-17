@@ -183,10 +183,13 @@ class XAIResponsesService:
             )
 
         if bool(payload.get("stream")):
+            from app.core.logger import logger
+            logger.debug(f"xAI Responses API stream request: model={payload.get('model')}, candidates={len(candidate_keys)}")
             session = aiohttp.ClientSession(timeout=timeout)
             last_error: Optional[Exception] = None
             for index, candidate in enumerate(candidate_keys):
                 try:
+                    logger.debug(f"xAI Responses trying key #{index+1}/{len(candidate_keys)}")
                     response = await self._open_stream(
                         session,
                         f"{self.base_url}/responses",
@@ -194,20 +197,26 @@ class XAIResponsesService:
                         key_record=candidate,
                     )
                     self._key_record = candidate
+                    logger.debug(f"xAI Responses stream opened successfully, status={response.status}")
 
                     async def _stream() -> AsyncGenerator[str, None]:
+                        from app.core.logger import logger
                         try:
+                            chunk_count = 0
                             async for chunk in response.content:
-                                if isinstance(chunk, bytes):
-                                    yield chunk.decode(errors="ignore")
-                                else:
-                                    yield str(chunk)
+                                chunk_count += 1
+                                decoded = chunk.decode(errors="ignore") if isinstance(chunk, bytes) else str(chunk)
+                                if chunk_count <= 3:
+                                    logger.debug(f"xAI Responses chunk #{chunk_count}: {decoded[:200]}")
+                                yield decoded
+                            logger.debug(f"xAI Responses stream finished, total chunks: {chunk_count}")
                         finally:
                             response.close()
                             await session.close()
 
                     return _stream()
                 except Exception as exc:
+                    logger.error(f"xAI Responses key #{index+1} failed: {exc}")
                     if not self._is_retryable_create_error(exc) or index >= len(candidate_keys) - 1:
                         await session.close()
                         raise
