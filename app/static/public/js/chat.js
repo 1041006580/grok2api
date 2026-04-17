@@ -1333,7 +1333,7 @@
 
   async function loadModels(authHeader) {
     if (!modelDropdown) return;
-    const fallback = ['grok-4.1-fast', 'grok-4', 'grok-3', 'grok-3-mini', 'grok-3-thinking', 'grok-4.20-beta', 'grok-imagine-1.0-fast'];
+    const fallback = ['grok-4.1-fast', 'grok-4', 'grok-3', 'grok-3-mini', 'grok-3-thinking', 'grok-4.20-beta', 'grok-4.20-multi-agent', 'grok-imagine-1.0-fast'];
     const preferred = 'grok-4.20-beta';
     try {
       const res = await fetch('/v1/public/models', {

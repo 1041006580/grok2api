@@ -75,6 +75,7 @@ def test_chat_pages_load_models_with_auth_headers_after_auth_bootstrap():
 
     assert "async function loadModels(authHeader)" in public_js
     assert "fetch('/v1/public/models'" in public_js
+    assert "grok-4.20-multi-agent" in public_js
     assert "headers: buildAuthHeaders(authHeader)" in public_js
     assert "await loadModels(authResult);" in public_js
 
