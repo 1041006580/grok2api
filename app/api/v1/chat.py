@@ -864,12 +864,23 @@ async def chat_completions(request: ChatCompletionRequest, http_request: Request
             if _is_multi_agent_model(request.model, model_info):
                 logger.debug(f"Using Responses API for multi-agent model: {request.model}")
                 service = XAIResponsesService(key_manager=manager, key_record=key_record)
-                # Build Responses API payload
+                # Build Responses API payload — uses "input" not "messages"
+                messages = [msg.model_dump() for msg in request.messages]
+                # Extract system/developer message as instructions
+                instructions = None
+                input_messages = []
+                for m in messages:
+                    if m.get("role") in ("system", "developer"):
+                        instructions = m.get("content", "")
+                    else:
+                        input_messages.append(m)
                 payload = {
                     "model": request.model,
-                    "messages": [msg.model_dump() for msg in request.messages],
+                    "input": input_messages,
                     "stream": bool(is_stream),
                 }
+                if instructions:
+                    payload["instructions"] = instructions
                 if request.temperature is not None:
                     payload["temperature"] = request.temperature
                 if request.top_p is not None:
