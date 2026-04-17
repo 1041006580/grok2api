@@ -1664,11 +1664,32 @@
           }
           try {
             const json = JSON.parse(payload);
-            const delta = json && json.choices && json.choices[0] && json.choices[0].delta
+            let delta = json && json.choices && json.choices[0] && json.choices[0].delta
               ? json.choices[0].delta.content
               : '';
+
+            if (!delta && json && json.type === 'response.output_text.delta') {
+              delta = json.delta || '';
+            }
+
+            if (!delta && json && json.type === 'response.output_text.done') {
+              delta = json.text || '';
+            }
+
+            if (!delta && json && json.type === 'response.completed') {
+              const output = Array.isArray(json.response && json.response.output) ? json.response.output : [];
+              const firstItem = output[0] || {};
+              const content = Array.isArray(firstItem.content) ? firstItem.content : [];
+              const firstContent = content[0] || {};
+              delta = firstContent.text || '';
+            }
+
             if (delta) {
-              assistantText += delta;
+              if (json && (json.type === 'response.output_text.done' || json.type === 'response.completed')) {
+                assistantText = delta;
+              } else {
+                assistantText += delta;
+              }
               if (!assistantEntry.firstTokenAt) {
                 assistantEntry.firstTokenAt = Date.now();
               }

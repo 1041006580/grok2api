@@ -85,6 +85,16 @@ def test_chat_pages_load_models_with_auth_headers_after_auth_bootstrap():
     assert "await loadModels(authResult);" in function_js
 
 
+def test_chat_pages_handle_xai_responses_sse_events():
+    public_js = Path("app/static/public/js/chat.js").read_text(encoding="utf-8")
+    function_js = Path("_public/static/function/js/chat.js").read_text(encoding="utf-8")
+
+    for js in (public_js, function_js):
+        assert "json.type === 'response.output_text.delta'" in js
+        assert "json.type === 'response.output_text.done'" in js
+        assert "json.type === 'response.completed'" in js
+
+
 def test_admin_surface_exposes_xai_keys_page_and_nav():
     public_header = Path("app/static/common/html/header.html").read_text(encoding="utf-8")
     function_header = Path("_public/static/common/html/header.html").read_text(encoding="utf-8")
