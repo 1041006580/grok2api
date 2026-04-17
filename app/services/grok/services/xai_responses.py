@@ -9,6 +9,7 @@ import orjson
 
 from app.core.config import get_config
 from app.core.exceptions import UpstreamException, ValidationException
+from app.core.logger import logger
 from app.services.grok.services.xai_key_manager import (
     XAIKeyInfo,
     XAIKeyManager,
@@ -81,6 +82,42 @@ class XAIResponsesService:
             "Authorization": f"Bearer {key_record.key}",
             "Content-Type": "application/json",
         }
+
+    @staticmethod
+    def _truncate_debug_text(value: Any, limit: int = 500) -> str:
+        text = str(value or "").strip()
+        if len(text) <= limit:
+            return text
+        return f"{text[:limit]}...(truncated)"
+
+    def _log_upstream_failure(
+        self,
+        *,
+        candidate_index: int,
+        candidate_total: int,
+        key_record: Optional[XAIKeyInfo],
+        exc: Exception,
+        payload: Optional[Dict[str, Any]],
+    ) -> None:
+        details = getattr(exc, "details", None)
+        status = details.get("status") if isinstance(details, dict) else None
+        body = details.get("body") if isinstance(details, dict) else ""
+        model = (payload or {}).get("model")
+        include = (payload or {}).get("include")
+        stream = (payload or {}).get("stream")
+        key_id = getattr(key_record, "id", None)
+        logger.error(
+            "xAI Responses key #{}/{} failed: status={}, key_id={}, model={}, stream={}, include={}, error={}, body={}",
+            candidate_index,
+            candidate_total,
+            status,
+            key_id,
+            model,
+            stream,
+            include,
+            str(exc),
+            self._truncate_debug_text(body),
+        )
 
     @staticmethod
     def _normalize_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -196,7 +233,6 @@ class XAIResponsesService:
             )
 
         if bool(payload.get("stream")):
-            from app.core.logger import logger
             logger.debug(f"xAI Responses API stream request: model={payload.get('model')}, candidates={len(candidate_keys)}")
             session = aiohttp.ClientSession(timeout=timeout)
             last_error: Optional[Exception] = None
@@ -213,7 +249,6 @@ class XAIResponsesService:
                     logger.debug(f"xAI Responses stream opened successfully, status={response.status}")
 
                     async def _stream() -> AsyncGenerator[str, None]:
-                        from app.core.logger import logger
                         try:
                             chunk_count = 0
                             async for chunk in response.content:
@@ -229,7 +264,13 @@ class XAIResponsesService:
 
                     return _stream()
                 except Exception as exc:
-                    logger.error(f"xAI Responses key #{index+1} failed: {exc}")
+                    self._log_upstream_failure(
+                        candidate_index=index + 1,
+                        candidate_total=len(candidate_keys),
+                        key_record=candidate,
+                        exc=exc,
+                        payload=payload,
+                    )
                     if not self._is_retryable_create_error(exc) or index >= len(candidate_keys) - 1:
                         await session.close()
                         raise
@@ -259,6 +300,13 @@ class XAIResponsesService:
                     self._key_record = candidate
                     return result
                 except Exception as exc:
+                    self._log_upstream_failure(
+                        candidate_index=index + 1,
+                        candidate_total=len(candidate_keys),
+                        key_record=candidate,
+                        exc=exc,
+                        payload=payload,
+                    )
                     if not self._is_retryable_create_error(exc) or index >= len(candidate_keys) - 1:
                         raise
                     last_error = exc
