@@ -19,6 +19,7 @@ from app.services.grok.services.image_edit import ImageEditService
 from app.services.grok.services.model import ModelService
 from app.services.grok.services.video import VideoService
 from app.services.grok.services.xai_chat import XAIChatService
+from app.services.grok.services.xai_responses import XAIResponsesService
 from app.services.grok.services.xai_key_manager import load_runtime_manager
 from app.services.grok.utils.response import make_chat_response
 from app.services.token import get_token_manager
@@ -90,6 +91,15 @@ IMAGINE_FAST_MODEL_ID = "grok-imagine-1.0-fast"
 
 def _is_xai_direct_chat_model(model: str, model_info=None) -> bool:
     return bool(model_info and getattr(model_info, "provider", "") == "xai_api")
+
+
+def _is_multi_agent_model(model: str, model_info=None) -> bool:
+    """Check if model requires Responses API (multi-agent)"""
+    if not model_info:
+        return False
+    model_id = getattr(model_info, "model_id", "")
+    grok_model = getattr(model_info, "grok_model", "")
+    return "multi-agent" in model_id.lower() or "multi-agent" in grok_model.lower()
 
 
 def _select_xai_key_manager_and_record():
@@ -848,25 +858,46 @@ async def chat_completions(request: ChatCompletionRequest, http_request: Request
         model_info = ModelService.get(request.model)
         if _is_xai_direct_chat_model(request.model, model_info):
             manager, key_record = _select_xai_key_manager_and_record()
-            service = XAIChatService(key_manager=manager, key_record=key_record)
             is_stream = request.stream if request.stream is not None else get_config("app.stream")
-            try:
-                result = await service.create_chat_completion(
-                    model=request.model,
-                    messages=[msg.model_dump() for msg in request.messages],
-                    stream=bool(is_stream),
-                    deferred=bool(request.deferred),
-                    reasoning_effort=request.reasoning_effort,
-                    temperature=request.temperature,
-                    top_p=request.top_p,
-                    tools=request.tools,
-                    tool_choice=request.tool_choice,
-                    parallel_tool_calls=request.parallel_tool_calls,
-                )
-            except Exception as e:
-                if request.stream:
-                    return _streaming_error_response(e)
-                raise
+
+            # Multi-agent models use Responses API, others use Chat Completions API
+            if _is_multi_agent_model(request.model, model_info):
+                service = XAIResponsesService(key_manager=manager, key_record=key_record)
+                # Build Responses API payload
+                payload = {
+                    "model": request.model,
+                    "messages": [msg.model_dump() for msg in request.messages],
+                    "stream": bool(is_stream),
+                }
+                if request.temperature is not None:
+                    payload["temperature"] = request.temperature
+                if request.top_p is not None:
+                    payload["top_p"] = request.top_p
+                try:
+                    result = await service.create_response(payload)
+                except Exception as e:
+                    if request.stream:
+                        return _streaming_error_response(e)
+                    raise
+            else:
+                service = XAIChatService(key_manager=manager, key_record=key_record)
+                try:
+                    result = await service.create_chat_completion(
+                        model=request.model,
+                        messages=[msg.model_dump() for msg in request.messages],
+                        stream=bool(is_stream),
+                        deferred=bool(request.deferred),
+                        reasoning_effort=request.reasoning_effort,
+                        temperature=request.temperature,
+                        top_p=request.top_p,
+                        tools=request.tools,
+                        tool_choice=request.tool_choice,
+                        parallel_tool_calls=request.parallel_tool_calls,
+                    )
+                except Exception as e:
+                    if request.stream:
+                        return _streaming_error_response(e)
+                    raise
 
             if request.deferred and isinstance(result, dict):
                 request_id = str(result.get("request_id", "") or "").strip()
