@@ -217,10 +217,13 @@ class XAIChatService:
             )
 
         if stream:
+            from app.core.logger import logger
+            logger.debug(f"xAI chat stream request: model={model}, candidates={len(candidate_keys)}")
             session = aiohttp.ClientSession(timeout=timeout)
             last_error: Optional[Exception] = None
             for index, candidate in enumerate(candidate_keys):
                 try:
+                    logger.debug(f"xAI trying key #{index+1}/{len(candidate_keys)}")
                     response = await self._open_stream(
                         session,
                         f"{self.base_url}/chat/completions",
@@ -228,6 +231,7 @@ class XAIChatService:
                         key_record=candidate,
                     )
                     self._key_record = candidate
+                    logger.debug(f"xAI stream opened successfully, status={response.status}")
 
                     async def _stream() -> AsyncGenerator[str, None]:
                         from app.core.logger import logger
@@ -246,6 +250,7 @@ class XAIChatService:
 
                     return _stream()
                 except Exception as exc:
+                    logger.error(f"xAI key #{index+1} failed: {exc}")
                     if not self._is_retryable_create_error(exc) or index >= len(candidate_keys) - 1:
                         await session.close()
                         raise
