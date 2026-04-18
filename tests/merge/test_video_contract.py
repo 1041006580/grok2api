@@ -2,6 +2,7 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+import orjson
 import pytest
 from fastapi import HTTPException
 
@@ -54,6 +55,54 @@ async def _collect_streaming_body(response) -> str:
 def _manager_with_xai_key():
     return SimpleNamespace(
         acquire_key=lambda: SimpleNamespace(key="dummy001", id="fake-xai-id")
+    )
+
+
+class _RecordingMediaStorage:
+    def __init__(self):
+        self.calls = []
+
+    async def write_bytes(self, media_type, name, data, content_type=None):
+        self.calls.append((media_type, name, data, content_type))
+
+
+def _fake_aiohttp_module(
+    payload: bytes = b"fake-video-binary",
+    content_type: str = "video/mp4",
+):
+    class FakeResponse:
+        def __init__(self):
+            self.status = 200
+            self.headers = {"Content-Type": content_type}
+
+        async def read(self):
+            return payload
+
+        async def text(self):
+            return ""
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class FakeClientSession:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        def get(self, url, **kwargs):
+            return FakeResponse()
+
+    return SimpleNamespace(
+        ClientSession=FakeClientSession,
+        ClientTimeout=lambda total=None: SimpleNamespace(total=total),
     )
 
 
@@ -353,6 +402,320 @@ def test_public_video_sse_uses_xai_service_for_xai_model():
     legacy_completions.assert_not_called()
     assert "https://example.com/xai-page.mp4" in body
     assert "[DONE]" in body
+
+
+def test_videos_route_persists_xai_video_and_returns_local_file_url():
+    from app.api.v1 import video as video_module
+
+    async def scenario():
+        class FakeRequest:
+            headers = {"content-type": "application/json"}
+
+            async def json(self):
+                return {
+                    "model": "grok-imagine-video",
+                    "prompt": "launch a rocket over mars",
+                    "size": "1280x720",
+                    "seconds": 10,
+                    "quality": "high",
+                }
+
+        fake_key = SimpleNamespace(key="dummy001", id="k1")
+        fake_manager = SimpleNamespace(acquire_key=lambda: fake_key)
+        media_storage = _RecordingMediaStorage()
+
+        class FakeXAIVideoService:
+            generate = AsyncMock(
+                return_value={
+                    "request_id": "vidreq_123",
+                    "url": "https://example.com/upstream.mp4",
+                    "duration": 10,
+                    "model": "grok-imagine-video",
+                }
+            )
+
+            def __init__(self, *args, **kwargs):
+                pass
+
+        with patch.object(video_module, "load_runtime_manager", return_value=fake_manager):
+            with patch.object(video_module, "get_media_storage", return_value=media_storage, create=True):
+                with patch.object(
+                    video_module,
+                    "aiohttp",
+                    _fake_aiohttp_module(),
+                    create=True,
+                ):
+                    with patch.object(
+                        video_module,
+                        "get_config",
+                        side_effect=lambda key, default=None: (
+                            "https://unit.test" if key == "app.app_url" else default
+                        ),
+                    ):
+                        with patch.object(
+                            video_module,
+                            "XAIVideoService",
+                            FakeXAIVideoService,
+                            create=True,
+                        ):
+                            response = await video_module.create_video(FakeRequest())
+        return response, media_storage
+
+    response, media_storage = asyncio.run(scenario())
+    body = orjson.loads(response.body)
+
+    assert body["url"] == "https://unit.test/v1/files/video/vidreq_123.mp4"
+    assert media_storage.calls == [
+        ("video", "vidreq_123.mp4", b"fake-video-binary", "video/mp4")
+    ]
+
+
+def test_official_xai_video_generation_status_persists_completed_video_and_caches_local_url():
+    from app.api.v1 import video as video_module
+
+    async def scenario():
+        fake_key = SimpleNamespace(key="dummy001", id="k1")
+        fake_manager = SimpleNamespace(
+            acquire_key=lambda: SimpleNamespace(key="other-key"),
+            list_keys=lambda: [fake_key],
+        )
+        state = {
+            "xai": {
+                "keys": [{"id": "k1", "key": "rotated-key", "enabled": True}],
+                "request_key_bindings": {"vidreq_123": {"key_id": "k1", "key": "dummy001"}},
+            }
+        }
+        lock = asyncio.Lock()
+        media_storage = _RecordingMediaStorage()
+
+        class FakeXAIVideoService:
+            get_generation = AsyncMock(
+                return_value={
+                    "request_id": "vidreq_123",
+                    "status": "done",
+                    "video": {"url": "https://example.com/upstream.mp4"},
+                }
+            )
+
+            def __init__(self, *args, **kwargs):
+                pass
+
+        class DummyStorage:
+            async def load_config(self):
+                return state
+
+            async def save_config(self, data):
+                state.clear()
+                state.update(data)
+
+            class _Lock:
+                async def __aenter__(self):
+                    await lock.acquire()
+
+                async def __aexit__(self, exc_type, exc, tb):
+                    lock.release()
+
+            def acquire_lock(self, *_args, **_kwargs):
+                return self._Lock()
+
+        with patch.object(video_module, "load_runtime_manager", return_value=fake_manager):
+            with patch.object(video_module, "get_storage", return_value=DummyStorage()):
+                with patch.object(video_module, "get_media_storage", return_value=media_storage, create=True):
+                    with patch.object(
+                        video_module,
+                        "aiohttp",
+                        _fake_aiohttp_module(),
+                        create=True,
+                    ):
+                        with patch.object(
+                            video_module,
+                            "get_config",
+                            side_effect=lambda key, default=None: (
+                                "https://unit.test" if key == "app.app_url" else default
+                            ),
+                        ):
+                            with patch.object(
+                                video_module,
+                                "XAIVideoService",
+                                FakeXAIVideoService,
+                                create=True,
+                            ):
+                                result = await video_module.get_xai_video_generation("vidreq_123")
+        return result, state, media_storage
+
+    result, state, media_storage = asyncio.run(scenario())
+
+    assert result["video"]["url"] == "https://unit.test/v1/files/video/vidreq_123.mp4"
+    assert (
+        state["xai"]["request_key_bindings"]["vidreq_123"]["result"]["video"]["url"]
+        == "https://unit.test/v1/files/video/vidreq_123.mp4"
+    )
+    assert media_storage.calls == [
+        ("video", "vidreq_123.mp4", b"fake-video-binary", "video/mp4")
+    ]
+
+
+def test_function_video_sse_uses_persisted_xai_video_url():
+    from app.api.v1 import video as video_api_module
+    from app.api.v1.function import video as video_module
+
+    async def scenario():
+        request = SimpleNamespace(is_disconnected=AsyncMock(return_value=False))
+        media_storage = _RecordingMediaStorage()
+        fake_manager = _manager_with_xai_key()
+
+        fake_service = type(
+            "FakeXAIVideoService",
+            (),
+            {
+                "generate": AsyncMock(
+                    return_value={
+                        "request_id": "vidreq_function",
+                        "url": "https://example.com/function-xai.mp4",
+                        "duration": 10,
+                        "model": "grok-imagine-video",
+                    }
+                )
+            },
+        )
+
+        with patch.object(
+            video_module,
+            "load_runtime_manager",
+            return_value=fake_manager,
+            create=True,
+        ):
+            started = await video_module.function_video_start(
+                video_module.VideoStartRequest(
+                    prompt="make a short function xai clip",
+                    model="grok-imagine-video",
+                    aspect_ratio="16:9",
+                    video_length=10,
+                    resolution_name="720p",
+                    preset="normal",
+                )
+            )
+            with patch.object(
+                video_module,
+                "XAIVideoService",
+                fake_service,
+                create=True,
+            ):
+                with patch.object(video_api_module, "get_media_storage", return_value=media_storage, create=True):
+                    with patch.object(
+                        video_api_module,
+                        "aiohttp",
+                        _fake_aiohttp_module(),
+                        create=True,
+                    ):
+                        with patch.object(
+                            video_api_module,
+                            "get_config",
+                            side_effect=lambda key, default=None: (
+                                "https://unit.test" if key == "app.app_url" else default
+                            ),
+                        ):
+                            response = await video_module.function_video_sse(
+                                request=request,
+                                task_id=started["task_id"],
+                            )
+                            body = await _collect_streaming_body(response)
+        return body, media_storage
+
+    body, media_storage = asyncio.run(scenario())
+
+    assert "https://unit.test/v1/files/video/vidreq_function.mp4" in body
+    assert media_storage.calls == [
+        ("video", "vidreq_function.mp4", b"fake-video-binary", "video/mp4")
+    ]
+
+
+def test_public_video_sse_uses_persisted_xai_video_url():
+    from app.api.v1 import video as video_api_module
+    from app.api.v1.public_api import video as video_module
+
+    async def scenario():
+        request = SimpleNamespace(
+            headers={},
+            query_params={},
+            is_disconnected=AsyncMock(return_value=False),
+        )
+        media_storage = _RecordingMediaStorage()
+        fake_manager = _manager_with_xai_key()
+
+        fake_service = type(
+            "FakeXAIVideoService",
+            (),
+            {
+                "generate": AsyncMock(
+                    return_value={
+                        "request_id": "vidreq_public",
+                        "url": "https://example.com/public-xai.mp4",
+                        "duration": 10,
+                        "model": "grok-imagine-video",
+                    }
+                )
+            },
+        )
+
+        with patch.object(
+            video_module,
+            "load_runtime_manager",
+            return_value=fake_manager,
+            create=True,
+        ):
+            started = await video_module.public_video_start(
+                video_module.VideoStartRequest(
+                    prompt="make a short public xai clip",
+                    model="grok-imagine-video",
+                    aspect_ratio="16:9",
+                    video_length=10,
+                    resolution_name="720p",
+                    preset="normal",
+                )
+            )
+            with patch("app.api.v1.public_api.video.get_public_api_key", return_value=""):
+                with patch("app.api.v1.public_api.video.is_public_enabled", return_value=True):
+                    with patch.object(
+                        video_module,
+                        "XAIVideoService",
+                        fake_service,
+                        create=True,
+                    ):
+                        with patch.object(
+                            video_api_module,
+                            "get_media_storage",
+                            return_value=media_storage,
+                            create=True,
+                        ):
+                            with patch.object(
+                                video_api_module,
+                                "aiohttp",
+                                _fake_aiohttp_module(),
+                                create=True,
+                            ):
+                                with patch.object(
+                                    video_api_module,
+                                    "get_config",
+                                    side_effect=lambda key, default=None: (
+                                        "https://unit.test"
+                                        if key == "app.app_url"
+                                        else default
+                                    ),
+                                ):
+                                    response = await video_module.public_video_sse(
+                                        request=request,
+                                        task_id=started["task_id"],
+                                    )
+                                    body = await _collect_streaming_body(response)
+        return body, media_storage
+
+    body, media_storage = asyncio.run(scenario())
+
+    assert "https://unit.test/v1/files/video/vidreq_public.mp4" in body
+    assert media_storage.calls == [
+        ("video", "vidreq_public.mp4", b"fake-video-binary", "video/mp4")
+    ]
 
 
 def test_official_xai_video_generation_start_returns_request_id():

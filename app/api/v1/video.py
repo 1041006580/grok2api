@@ -8,7 +8,9 @@ import time
 import uuid
 from collections.abc import Mapping
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import urlparse
 
+import aiohttp
 import orjson
 from fastapi import APIRouter, Request, UploadFile
 from fastapi.responses import JSONResponse
@@ -17,11 +19,13 @@ from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from app.core.config import _deep_merge, config, get_config
 from app.core.exceptions import UpstreamException, ValidationException
+from app.core.logger import logger
 from app.core.storage import get_storage
 from app.services.grok.services.model import ModelService
 from app.services.grok.services.video import VideoService
 from app.services.grok.services.xai_key_manager import load_runtime_manager
 from app.services.grok.services.xai_video import XAIVideoService
+from app.services.media_storage import get_media_storage
 
 
 router = APIRouter(tags=["Videos"])
@@ -42,6 +46,13 @@ QUALITY_TO_RESOLUTION = {
 MIN_SECONDS = 6
 MAX_SECONDS = 30
 ALLOWED_ASPECT_RATIOS = {"16:9", "9:16", "3:2", "2:3", "1:1"}
+_XAI_SUCCESS_STATUSES = {"done", "completed", "succeeded"}
+_XAI_TERMINAL_STATUSES = _XAI_SUCCESS_STATUSES | {"failed", "error", "expired", "cancelled"}
+_VIDEO_CONTENT_TYPE_TO_EXT = {
+    "video/mp4": "mp4",
+    "video/webm": "webm",
+    "video/quicktime": "mov",
+}
 
 
 class VideoCreateRequest(BaseModel):
@@ -525,6 +536,124 @@ def _build_create_response(
     }
 
 
+def _build_video_file_url(filename: str) -> str:
+    app_url = get_config("app.app_url")
+    if app_url:
+        return f"{str(app_url).rstrip('/')}/v1/files/video/{filename}"
+    return f"/v1/files/video/{filename}"
+
+
+def _extract_xai_video_url(result: Mapping[str, Any]) -> str:
+    direct_url = result.get("url")
+    if isinstance(direct_url, str) and direct_url.strip():
+        return direct_url.strip()
+    video = result.get("video")
+    if isinstance(video, Mapping):
+        nested_url = video.get("url")
+        if isinstance(nested_url, str) and nested_url.strip():
+            return nested_url.strip()
+    return ""
+
+
+def _has_local_video_file_url(url: str) -> bool:
+    candidate = str(url or "").strip()
+    if not candidate:
+        return False
+    if candidate.startswith("/v1/files/video/"):
+        return True
+    app_url = str(get_config("app.app_url") or "").strip().rstrip("/")
+    return bool(app_url) and candidate.startswith(f"{app_url}/v1/files/video/")
+
+
+def _guess_video_extension(url: str, content_type: str) -> str:
+    normalized_type = str(content_type or "").split(";", 1)[0].strip().lower()
+    if normalized_type in _VIDEO_CONTENT_TYPE_TO_EXT:
+        return _VIDEO_CONTENT_TYPE_TO_EXT[normalized_type]
+
+    path = urlparse(str(url or "").strip()).path
+    if path:
+        suffix = path.rsplit("/", 1)[-1]
+        if "." in suffix:
+            ext = suffix.rsplit(".", 1)[-1].strip().lower()
+            if ext in {"mp4", "webm", "mov", "m4v"}:
+                return ext
+    return "mp4"
+
+
+def _build_video_filename(request_id: str, url: str, content_type: str) -> str:
+    base = re.sub(r"[^a-zA-Z0-9._-]+", "-", str(request_id or "").strip()).strip("-.")
+    if not base:
+        base = f"xai-video-{uuid.uuid4().hex[:12]}"
+    ext = _guess_video_extension(url, content_type)
+    return f"{base}.{ext}"
+
+
+def _rewrite_xai_video_result_url(
+    result: Mapping[str, Any],
+    local_url: str,
+) -> Dict[str, Any]:
+    rewritten = dict(result)
+    rewritten["url"] = local_url
+    video = rewritten.get("video")
+    if isinstance(video, Mapping):
+        next_video = dict(video)
+        next_video["url"] = local_url
+        rewritten["video"] = next_video
+    return rewritten
+
+
+async def _download_xai_video(url: str) -> tuple[bytes, str]:
+    timeout = aiohttp.ClientTimeout(total=float(get_config("xai.timeout", get_config("video.timeout", 60))))
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.get(url) as response:
+            content = await response.read()
+            content_type = str(response.headers.get("Content-Type", "") or "").strip()
+            if response.status >= 400:
+                raise UpstreamException(
+                    message=f"xAI video download failed with status {response.status}",
+                    details={"status": response.status, "body": (await response.text())[:1000]},
+                )
+            if not content:
+                raise UpstreamException(
+                    message="xAI video download returned an empty body",
+                    details={"status": response.status, "url": url},
+                )
+            return content, content_type
+
+
+async def persist_xai_video_result(result: Mapping[str, Any]) -> Dict[str, Any]:
+    rewritten = dict(result)
+    video_url = _extract_xai_video_url(rewritten)
+    if not video_url or _has_local_video_file_url(video_url):
+        return rewritten
+
+    request_id = str(rewritten.get("request_id") or "").strip()
+    try:
+        content, content_type = await _download_xai_video(video_url)
+        filename = _build_video_filename(request_id, video_url, content_type)
+        normalized_content_type = (
+            str(content_type).split(";", 1)[0].strip().lower() or "video/mp4"
+        )
+        await get_media_storage().write_bytes(
+            "video",
+            filename,
+            content,
+            content_type=normalized_content_type,
+        )
+        return _rewrite_xai_video_result_url(rewritten, _build_video_file_url(filename))
+    except Exception as exc:
+        logger.warning(f"xAI video persistence skipped for request {request_id or '-'}: {exc}")
+        return rewritten
+
+
+async def _finalize_xai_video_result(result: Mapping[str, Any]) -> Dict[str, Any]:
+    normalized = dict(result)
+    status = str(normalized.get("status", "")).strip().lower()
+    if status in _XAI_SUCCESS_STATUSES:
+        return await persist_xai_video_result(normalized)
+    return normalized
+
+
 async def _create_video_from_payload(payload: BaseModel, references: List[str]) -> JSONResponse:
     prompt = (payload.prompt or "").strip()
     if not prompt:
@@ -562,6 +691,7 @@ async def _create_video_from_payload(payload: BaseModel, references: List[str]) 
             resolution=resolution,
             image_url=references[0] if references else None,
         )
+        direct_result = await persist_xai_video_result(direct_result)
         return JSONResponse(
             content=_build_create_response(
                 model=model,
@@ -729,13 +859,14 @@ async def get_xai_video_generation(request_id: str):
             service = XAIVideoService(key_manager=manager, key_record=key_record)
             try:
                 result = await service.get_generation(request_id)
+                result = await _finalize_xai_video_result(result)
             except Exception:
                 continue
 
             status = str(result.get("status", "")).strip().lower()
             try:
                 await _remember_xai_request_key(request_id, key_record)
-                if status in {"done", "completed", "succeeded", "failed", "error", "expired", "cancelled"}:
+                if status in _XAI_TERMINAL_STATUSES:
                     await _cache_bound_xai_request_result(request_id, result)
             except Exception:
                 pass
@@ -748,14 +879,18 @@ async def get_xai_video_generation(request_id: str):
         )
     cached_result = binding.get("result")
     if isinstance(cached_result, Mapping):
-        return cached_result
+        result = await _finalize_xai_video_result(cached_result)
+        if result != dict(cached_result):
+            await _cache_bound_xai_request_result(request_id, result)
+        return result
 
     key_record = binding["key_record"]
     manager = load_runtime_manager()
     service = XAIVideoService(key_manager=manager, key_record=key_record)
     result = await service.get_generation(request_id)
+    result = await _finalize_xai_video_result(result)
     status = str(result.get("status", "")).strip().lower()
-    if status in {"done", "completed", "succeeded", "failed", "error", "expired", "cancelled"}:
+    if status in _XAI_TERMINAL_STATUSES:
         await _cache_bound_xai_request_result(request_id, result)
     return result
 
@@ -765,5 +900,6 @@ __all__ = [
     "create_video",
     "create_xai_video_generation",
     "get_xai_video_generation",
+    "persist_xai_video_result",
     "XAIVideoGenerationRequest",
 ]

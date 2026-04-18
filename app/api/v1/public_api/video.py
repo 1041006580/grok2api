@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from app.api.v1.video import persist_xai_video_result
 from app.core.auth import (
     verify_public_key,
     get_public_api_key,
@@ -293,6 +294,7 @@ async def public_video_sse(request: Request, task_id: str = Query("")):
                     resolution=resolution_name,
                     image_url=image_url,
                 )
+                result = await persist_xai_video_result(result)
                 if await request.is_disconnected():
                     return
                 yield _build_sse_chunk(str(result["url"]))
