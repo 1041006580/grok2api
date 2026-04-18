@@ -33,6 +33,7 @@ LEGACY_VIDEO_MODEL_IDS = (
 XAI_VIDEO_MODEL_ID = "grok-imagine-video"
 DEFAULT_VIDEO_MODEL_ID = LEGACY_VIDEO_MODEL_IDS[0]
 XAI_POOL_ERROR_MESSAGE = "xAI key pool is not configured with any enabled key"
+XAI_SSE_KEEPALIVE_SECONDS = 10.0
 
 _VIDEO_RATIO_MAP = {
     "1280x720": "16:9",
@@ -155,6 +156,45 @@ def _build_sse_chunk(content: str) -> str:
         ]
     }
     return f"data: {orjson.dumps(payload).decode()}\n\n"
+
+
+def _build_error_payload(exc: Exception) -> Dict[str, str]:
+    message = str(exc)
+    details = getattr(exc, "details", None)
+    body = details.get("body") if isinstance(details, dict) else ""
+    haystack = f"{message}\n{body}".lower()
+    if "content moderation" in haystack or "moderated" in haystack:
+        return {"error": message, "code": "content_moderation_rejected"}
+    return {"error": message, "code": "internal_error"}
+
+
+async def _stream_xai_video_result(request: Request, generate_coro):
+    generation_task = asyncio.create_task(generate_coro)
+    try:
+        while True:
+            try:
+                result = await asyncio.wait_for(
+                    asyncio.shield(generation_task),
+                    timeout=XAI_SSE_KEEPALIVE_SECONDS,
+                )
+                break
+            except asyncio.TimeoutError:
+                if await request.is_disconnected():
+                    return
+                yield ": keep-alive\n\n"
+
+        result = await persist_xai_video_result(result)
+        if await request.is_disconnected():
+            return
+        yield _build_sse_chunk(str(result["url"]))
+        yield "data: [DONE]\n\n"
+    finally:
+        if not generation_task.done():
+            generation_task.cancel()
+            try:
+                await generation_task
+            except asyncio.CancelledError:
+                pass
 
 
 def _validate_image_url(image_url: str) -> None:
@@ -286,19 +326,18 @@ async def public_video_sse(request: Request, task_id: str = Query("")):
     async def event_stream():
         try:
             if model_id == XAI_VIDEO_MODEL_ID:
-                result = await XAIVideoService().generate(
-                    prompt=prompt,
-                    model=model_id,
-                    duration=video_length,
-                    aspect_ratio=aspect_ratio,
-                    resolution=resolution_name,
-                    image_url=image_url,
-                )
-                result = await persist_xai_video_result(result)
-                if await request.is_disconnected():
-                    return
-                yield _build_sse_chunk(str(result["url"]))
-                yield "data: [DONE]\n\n"
+                async for chunk in _stream_xai_video_result(
+                    request,
+                    XAIVideoService().generate(
+                        prompt=prompt,
+                        model=model_id,
+                        duration=video_length,
+                        aspect_ratio=aspect_ratio,
+                        resolution=resolution_name,
+                        image_url=image_url,
+                    ),
+                ):
+                    yield chunk
                 return
 
             model_info = ModelService.get(model_id)
@@ -345,7 +384,7 @@ async def public_video_sse(request: Request, task_id: str = Query("")):
                 e,
                 getattr(e, "details", None),
             )
-            payload = {"error": str(e), "code": "internal_error"}
+            payload = _build_error_payload(e)
             yield f"data: {orjson.dumps(payload).decode()}\n\n"
             yield "data: [DONE]\n\n"
         finally:

@@ -120,6 +120,27 @@
     return message;
   }
 
+  function isModerationErrorPayload(payload) {
+    const code = parseErrorCode(payload);
+    if (code === 'content_moderation_rejected') {
+      return true;
+    }
+    const detail = parseErrorMessage(payload, '');
+    const haystack = `${code} ${detail}`.toLowerCase();
+    return haystack.includes('content moderation') || haystack.includes('moderated');
+  }
+
+  function renderModerationRejectedState() {
+    const container = ensurePreviewSlot();
+    if (!container) return;
+    const body = container.querySelector('.video-item-body');
+    if (body) {
+      body.innerHTML = '<div class="video-item-placeholder" style="color:#dc2626;">内容审核未通过，视频无法生成</div>';
+    }
+    updateItemLinks(container, '');
+    container.classList.remove('is-pending');
+  }
+
   function setStatus(state, text) {
     if (!statusText) return;
     statusText.textContent = text;
@@ -541,14 +562,7 @@
     }
 
     if (text.includes('审核拦截') || text.includes('moderated')) {
-      const container = ensurePreviewSlot();
-      if (container) {
-        const body = container.querySelector('.video-item-body');
-        if (body) {
-          body.innerHTML = '<div class="video-item-placeholder" style="color:#dc2626;">内容审核未通过，视频无法生成</div>';
-        }
-        container.classList.remove('is-pending');
-      }
+      renderModerationRejectedState();
       return;
     }
 
@@ -685,6 +699,13 @@
         return;
       }
       if (payload && payload.error) {
+        if (isModerationErrorPayload(payload)) {
+          renderModerationRejectedState();
+          toast('内容审核未通过，视频无法生成', 'error');
+          setStatus('error', '审核未通过');
+          finishRun(true);
+          return;
+        }
         const detail = buildErrorMessage(payload, '生成失败');
         toast(`生成失败：${detail}`, 'error');
         setStatus('error', '生成失败');

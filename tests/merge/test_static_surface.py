@@ -40,6 +40,15 @@ def test_video_scripts_send_selected_model_and_public_page_handles_xai_mode():
     assert "const XAI_VIDEO_MODEL_ID = 'grok-imagine-video';" in public_js
 
 
+def test_video_scripts_expose_moderation_rejection_ui_handling():
+    function_js = Path("_public/static/function/js/video.js").read_text(encoding="utf-8")
+    public_js = Path("app/static/public/js/video.js").read_text(encoding="utf-8")
+
+    for js in (function_js, public_js):
+        assert "content_moderation_rejected" in js
+        assert "内容审核未通过，视频无法生成" in js
+
+
 def test_video_page_css_assigns_model_hint_a_dedicated_grid_slot():
     function_css = Path("_public/static/function/css/video.css").read_text(encoding="utf-8")
     public_css = Path("app/static/public/css/video.css").read_text(encoding="utf-8")

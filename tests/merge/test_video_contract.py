@@ -328,6 +328,77 @@ def test_function_video_sse_uses_xai_service_for_xai_model():
     assert "[DONE]" in body
 
 
+def test_function_video_sse_emits_keepalive_while_waiting_for_xai_video():
+    from app.api.v1.function import video as video_module
+
+    async def delayed_generate(**_kwargs):
+        await asyncio.sleep(0.02)
+        return {
+            "url": "https://example.com/function-xai-slow.mp4",
+            "duration": 10,
+            "model": "grok-imagine-video",
+        }
+
+    async def passthrough(result):
+        return dict(result)
+
+    async def scenario():
+        request = SimpleNamespace(is_disconnected=AsyncMock(return_value=False))
+
+        fake_service = type(
+            "FakeXAIVideoService",
+            (),
+            {"generate": AsyncMock(side_effect=delayed_generate)},
+        )
+
+        fake_manager = _manager_with_xai_key()
+        with patch.object(
+            video_module,
+            "load_runtime_manager",
+            return_value=fake_manager,
+            create=True,
+        ):
+            started = await video_module.function_video_start(
+                video_module.VideoStartRequest(
+                    prompt="make a slow function xai clip",
+                    model="grok-imagine-video",
+                    aspect_ratio="16:9",
+                    video_length=10,
+                    resolution_name="720p",
+                    preset="normal",
+                )
+            )
+            with patch.object(
+                video_module,
+                "XAIVideoService",
+                fake_service,
+                create=True,
+            ):
+                with patch.object(
+                    video_module,
+                    "persist_xai_video_result",
+                    new=AsyncMock(side_effect=passthrough),
+                    create=True,
+                ):
+                    with patch.object(
+                        video_module,
+                        "XAI_SSE_KEEPALIVE_SECONDS",
+                        0.001,
+                        create=True,
+                    ):
+                        response = await video_module.function_video_sse(
+                            request=request,
+                            task_id=started["task_id"],
+                        )
+                        body = await _collect_streaming_body(response)
+        return body
+
+    body = asyncio.run(scenario())
+
+    assert ": keep-alive" in body
+    assert "https://example.com/function-xai-slow.mp4" in body
+
+
 def test_public_video_sse_uses_xai_service_for_xai_model():
     from app.api.v1.public_api import video as video_module
 
@@ -402,6 +473,199 @@ def test_public_video_sse_uses_xai_service_for_xai_model():
     legacy_completions.assert_not_called()
     assert "https://example.com/xai-page.mp4" in body
     assert "[DONE]" in body
+
+
+def test_function_video_sse_returns_moderation_error_code_for_xai_rejection():
+    from app.api.v1.function import video as video_module
+    from app.core.exceptions import UpstreamException
+
+    async def scenario():
+        request = SimpleNamespace(is_disconnected=AsyncMock(return_value=False))
+        fake_manager = _manager_with_xai_key()
+
+        fake_service = type(
+            "FakeXAIVideoService",
+            (),
+            {
+                "generate": AsyncMock(
+                    side_effect=UpstreamException(
+                        message="Generated video rejected by content moderation.",
+                        details={"status": 400, "body": '{"error":"Generated video rejected by content moderation."}'},
+                    )
+                )
+            },
+        )
+
+        with patch.object(
+            video_module,
+            "load_runtime_manager",
+            return_value=fake_manager,
+            create=True,
+        ):
+            started = await video_module.function_video_start(
+                video_module.VideoStartRequest(
+                    prompt="reject this clip",
+                    model="grok-imagine-video",
+                    aspect_ratio="16:9",
+                    video_length=10,
+                    resolution_name="720p",
+                    preset="normal",
+                )
+            )
+            with patch.object(
+                video_module,
+                "XAIVideoService",
+                fake_service,
+                create=True,
+            ):
+                response = await video_module.function_video_sse(
+                    request=request,
+                    task_id=started["task_id"],
+                )
+                return await _collect_streaming_body(response)
+
+    body = asyncio.run(scenario())
+
+    assert '"code":"content_moderation_rejected"' in body
+    assert "Generated video rejected by content moderation." in body
+
+
+def test_public_video_sse_emits_keepalive_while_waiting_for_xai_video():
+    from app.api.v1.public_api import video as video_module
+
+    async def delayed_generate(**_kwargs):
+        await asyncio.sleep(0.02)
+        return {
+            "url": "https://example.com/public-xai-slow.mp4",
+            "duration": 10,
+            "model": "grok-imagine-video",
+        }
+
+    async def passthrough(result):
+        return dict(result)
+
+    async def scenario():
+        request = SimpleNamespace(
+            headers={},
+            query_params={},
+            is_disconnected=AsyncMock(return_value=False),
+        )
+
+        fake_service = type(
+            "FakeXAIVideoService",
+            (),
+            {"generate": AsyncMock(side_effect=delayed_generate)},
+        )
+
+        fake_manager = _manager_with_xai_key()
+        with patch.object(
+            video_module,
+            "load_runtime_manager",
+            return_value=fake_manager,
+            create=True,
+        ):
+            started = await video_module.public_video_start(
+                video_module.VideoStartRequest(
+                    prompt="make a slow public xai clip",
+                    model="grok-imagine-video",
+                    aspect_ratio="16:9",
+                    video_length=10,
+                    resolution_name="720p",
+                    preset="normal",
+                )
+            )
+            with patch("app.api.v1.public_api.video.get_public_api_key", return_value=""):
+                with patch("app.api.v1.public_api.video.is_public_enabled", return_value=True):
+                    with patch.object(
+                        video_module,
+                        "XAIVideoService",
+                        fake_service,
+                        create=True,
+                    ):
+                        with patch.object(
+                            video_module,
+                            "persist_xai_video_result",
+                            new=AsyncMock(side_effect=passthrough),
+                            create=True,
+                        ):
+                            with patch.object(
+                                video_module,
+                                "XAI_SSE_KEEPALIVE_SECONDS",
+                                0.001,
+                                create=True,
+                            ):
+                                response = await video_module.public_video_sse(
+                                    request=request,
+                                    task_id=started["task_id"],
+                                )
+                                body = await _collect_streaming_body(response)
+        return body
+
+    body = asyncio.run(scenario())
+
+    assert ": keep-alive" in body
+    assert "https://example.com/public-xai-slow.mp4" in body
+
+
+def test_public_video_sse_returns_moderation_error_code_for_xai_rejection():
+    from app.api.v1.public_api import video as video_module
+    from app.core.exceptions import UpstreamException
+
+    async def scenario():
+        request = SimpleNamespace(
+            headers={},
+            query_params={},
+            is_disconnected=AsyncMock(return_value=False),
+        )
+        fake_manager = _manager_with_xai_key()
+
+        fake_service = type(
+            "FakeXAIVideoService",
+            (),
+            {
+                "generate": AsyncMock(
+                    side_effect=UpstreamException(
+                        message="Generated video rejected by content moderation.",
+                        details={"status": 400, "body": '{"error":"Generated video rejected by content moderation."}'},
+                    )
+                )
+            },
+        )
+
+        with patch.object(
+            video_module,
+            "load_runtime_manager",
+            return_value=fake_manager,
+            create=True,
+        ):
+            started = await video_module.public_video_start(
+                video_module.VideoStartRequest(
+                    prompt="reject this public clip",
+                    model="grok-imagine-video",
+                    aspect_ratio="16:9",
+                    video_length=10,
+                    resolution_name="720p",
+                    preset="normal",
+                )
+            )
+            with patch("app.api.v1.public_api.video.get_public_api_key", return_value=""):
+                with patch("app.api.v1.public_api.video.is_public_enabled", return_value=True):
+                    with patch.object(
+                        video_module,
+                        "XAIVideoService",
+                        fake_service,
+                        create=True,
+                    ):
+                        response = await video_module.public_video_sse(
+                            request=request,
+                            task_id=started["task_id"],
+                        )
+                        return await _collect_streaming_body(response)
+
+    body = asyncio.run(scenario())
+
+    assert '"code":"content_moderation_rejected"' in body
+    assert "Generated video rejected by content moderation." in body
 
 
 def test_videos_route_persists_xai_video_and_returns_local_file_url():

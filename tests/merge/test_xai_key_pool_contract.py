@@ -3,7 +3,10 @@ import shutil
 import tomllib
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
+
+import pytest
 
 from app.core import storage as core_storage
 from app.core.config import config
@@ -470,6 +473,52 @@ def test_xai_video_service_logs_upstream_400_response_details():
     assert "k1" in log_args
     assert "grok-imagine-video" in str(log_args)
     assert "bad request from upstream" in str(log_args)
+
+
+def test_xai_video_service_extracts_string_error_message_from_upstream_payload():
+    manager = XAIKeyManager.from_config(
+        {
+            "xai": {
+                "keys": [
+                    {"id": "k1", "key": "dummy001", "enabled": True, "status": "active"},
+                ]
+            }
+        }
+    )
+    service = XAIVideoService(key_manager=manager)
+
+    class FakeResponse:
+        status = 400
+        headers = {}
+
+        async def text(self):
+            return (
+                '{"code":"Client specified an invalid argument",'
+                '"error":"Generated video rejected by content moderation."}'
+            )
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class FakeSession:
+        def request(self, method, url, **kwargs):
+            return FakeResponse()
+
+    with pytest.raises(UpstreamException) as exc_info:
+        asyncio.run(
+            service._request_json(
+                FakeSession(),
+                "GET",
+                "https://api.x.ai/v1/videos/vidreq_123",
+                key_record=SimpleNamespace(key="dummy001", id="k1"),
+            )
+        )
+
+    assert str(exc_info.value) == "Generated video rejected by content moderation."
+    assert exc_info.value.details["status"] == 400
 
 
 def test_xai_responses_service_disables_rate_limited_key_before_fallback():

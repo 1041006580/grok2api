@@ -57,6 +57,10 @@ class XAIVideoService:
     def _extract_error_message(payload: Any) -> str:
         if isinstance(payload, dict):
             error = payload.get("error")
+            if isinstance(error, str):
+                text = error.strip()
+                if text:
+                    return text
             if isinstance(error, dict):
                 message = error.get("message")
                 if isinstance(message, str) and message.strip():

@@ -78,6 +78,61 @@
     }
   }
 
+  function parseErrorMessage(source, fallback) {
+    const defaultText = fallback || '请求失败';
+    if (!source) return defaultText;
+
+    if (typeof source === 'string') {
+      const text = source.trim();
+      if (!text) return defaultText;
+      try {
+        return parseErrorMessage(JSON.parse(text), defaultText);
+      } catch (e) {
+        return text;
+      }
+    }
+
+    if (typeof source !== 'object') {
+      return defaultText;
+    }
+
+    const candidates = [
+      source.detail,
+      source.message,
+      source.error && source.error.message,
+      source.error && source.error.detail,
+      typeof source.error === 'string' ? source.error : ''
+    ];
+
+    for (const value of candidates) {
+      if (typeof value === 'string' && value.trim()) {
+        return value.trim();
+      }
+    }
+    return defaultText;
+  }
+
+  function parseErrorCode(source) {
+    if (!source || typeof source !== 'object') return '';
+    if (typeof source.code === 'string' && source.code.trim()) {
+      return source.code.trim();
+    }
+    if (source.error && typeof source.error === 'object' && typeof source.error.code === 'string' && source.error.code.trim()) {
+      return source.error.code.trim();
+    }
+    return '';
+  }
+
+  function isModerationErrorPayload(payload) {
+    const code = parseErrorCode(payload);
+    if (code === 'content_moderation_rejected') {
+      return true;
+    }
+    const detail = parseErrorMessage(payload, '');
+    const haystack = `${code} ${detail}`.toLowerCase();
+    return haystack.includes('content moderation') || haystack.includes('moderated');
+  }
+
   function updateProgress(value) {
     const safe = Math.max(0, Math.min(100, Number(value) || 0));
     lastProgress = safe;
@@ -267,6 +322,17 @@
     }
   }
 
+  function renderModerationRejectedState() {
+    const container = ensurePreviewSlot();
+    if (!container) return;
+    const body = container.querySelector('.video-item-body');
+    if (body) {
+      body.innerHTML = '<div class="video-item-placeholder" style="color:#dc2626;">内容审核未通过，视频无法生成</div>';
+    }
+    updateItemLinks(container, '');
+    container.classList.remove('is-pending');
+  }
+
   function setIndeterminate(active) {
     if (!progressBar) return;
     if (active) {
@@ -431,6 +497,10 @@
     if (text.includes('<think>') || text.includes('</think>')) {
       return;
     }
+    if (text.includes('审核拦截') || text.includes('moderated') || text.includes('content moderation')) {
+      renderModerationRejectedState();
+      return;
+    }
     if (text.includes('超分辨率') || text.includes('super resolution')) {
       setStatus('connecting', t('video.superResolutionInProgress'));
       setIndeterminate(true);
@@ -574,7 +644,14 @@
         return;
       }
       if (payload && payload.error) {
-        toast(payload.error, 'error');
+        if (isModerationErrorPayload(payload)) {
+          renderModerationRejectedState();
+          toast('内容审核未通过，视频无法生成', 'error');
+          setStatus('error', '审核未通过');
+          finishRun(true);
+          return;
+        }
+        toast(parseErrorMessage(payload, t('common.generationFailed')), 'error');
         setStatus('error', t('common.generationFailed'));
         finishRun(true);
         return;
