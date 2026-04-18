@@ -12,6 +12,7 @@ from app.core.exceptions import UpstreamException, ValidationException
 from app.services.grok.services.xai_key_manager import (
     XAIKeyInfo,
     XAIKeyManager,
+    disable_runtime_key,
     load_runtime_manager,
 )
 
@@ -250,6 +251,8 @@ class XAIChatService:
 
                     return _stream()
                 except Exception as exc:
+                    if self._status_from_exception(exc) == 429 and candidate:
+                        await disable_runtime_key(candidate.id, last_error=str(exc))
                     logger.error(f"xAI key #{index+1} failed: {exc}")
                     if not self._is_retryable_create_error(exc) or index >= len(candidate_keys) - 1:
                         await session.close()
@@ -280,6 +283,8 @@ class XAIChatService:
                     self._key_record = candidate
                     return result
                 except Exception as exc:
+                    if self._status_from_exception(exc) == 429 and candidate:
+                        await disable_runtime_key(candidate.id, last_error=str(exc))
                     if not self._is_retryable_create_error(exc) or index >= len(candidate_keys) - 1:
                         raise
                     last_error = exc
@@ -321,6 +326,8 @@ class XAIChatService:
                 message = self._extract_error_message(data) or (
                     f"xAI deferred chat request failed with status {response.status}"
                 )
+                if response.status == 429 and key_record:
+                    await disable_runtime_key(key_record.id, last_error=message)
                 raise UpstreamException(
                     message=message,
                     details={"status": response.status, "body": text[:1000]},

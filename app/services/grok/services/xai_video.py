@@ -12,6 +12,7 @@ import orjson
 from app.core.config import get_config
 from app.core.exceptions import UpstreamException, ValidationException
 from app.services.grok.services.xai_key_manager import XAIKeyInfo, XAIKeyManager, load_runtime_manager
+from app.services.grok.services.xai_key_manager import disable_runtime_key
 
 
 DEFAULT_XAI_BASE_URL = "https://api.x.ai/v1"
@@ -276,6 +277,8 @@ class XAIVideoService:
                     self._key_record = candidate
                     return result
                 except Exception as exc:
+                    if self._status_from_exception(exc) == 429 and candidate:
+                        await disable_runtime_key(candidate.id, last_error=str(exc))
                     if not self._is_retryable_create_error(exc):
                         raise
                     last_error = exc
@@ -313,6 +316,8 @@ class XAIVideoService:
                         key_record=bound_key,
                     )
                 except Exception as exc:
+                    if self._status_from_exception(exc) == 429 and bound_key:
+                        await disable_runtime_key(bound_key.id, last_error=str(exc))
                     if (
                         not self._is_retryable_poll_error(exc)
                         or attempt >= self.poll_retry_attempts

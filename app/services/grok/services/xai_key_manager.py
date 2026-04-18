@@ -87,3 +87,53 @@ class XAIKeyManager:
 
 def load_runtime_manager() -> XAIKeyManager:
     return XAIKeyManager.from_config({"xai": get_config("xai", {}) or {}})
+
+
+async def disable_runtime_key(key_id: str, *, last_error: Optional[str] = None) -> None:
+    key_id = str(key_id or "").strip()
+    if not key_id:
+        return
+
+    from app.core.config import _deep_merge, config
+    from app.core.storage import get_storage
+
+    storage = get_storage()
+    async with storage.acquire_lock("config_save", timeout=10):
+        config._ensure_defaults()
+        persisted = await storage.load_config()
+        current_config = getattr(config, "_config", {}) or {}
+        if isinstance(persisted, Mapping) and (persisted or not current_config):
+            source = persisted
+        else:
+            source = current_config
+        base = _deep_merge(getattr(config, "_defaults", {}) or {}, source or {})
+        section = base.get("xai", {}) or {}
+        if not isinstance(section, Mapping):
+            return
+        section = dict(section)
+        keys = section.get("keys", [])
+        if not isinstance(keys, list):
+            return
+
+        changed = False
+        new_keys = []
+        for raw in keys:
+            if not isinstance(raw, Mapping):
+                new_keys.append(raw)
+                continue
+            entry = dict(raw)
+            if str(entry.get("id", "") or "").strip() == key_id:
+                entry["enabled"] = False
+                entry["status"] = XAIKeyStatus.BLOCKED.value
+                if last_error:
+                    entry["last_error"] = str(last_error).strip()
+                changed = True
+            new_keys.append(entry)
+
+        if not changed:
+            return
+
+        section["keys"] = new_keys
+        base["xai"] = section
+        await storage.save_config(base)
+        config._config = base

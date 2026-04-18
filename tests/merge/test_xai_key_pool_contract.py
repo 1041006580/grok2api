@@ -5,9 +5,12 @@ import uuid
 from pathlib import Path
 
 from app.core import storage as core_storage
+from app.core.config import config
 from app.core.exceptions import UpstreamException
 from app.core.storage import LocalStorage
 from app.services.grok.services.xai_key_manager import XAIKeyManager
+from app.services.grok.services.xai_responses import XAIResponsesService
+from app.services.grok.services.xai_chat import XAIChatService
 from app.services.grok.services.xai_video import XAIVideoService
 
 
@@ -337,3 +340,164 @@ def test_xai_video_service_get_generation_retries_on_same_key_without_switching(
 
     assert result["status"] == "done"
     assert attempted_key_ids == ["k1", "k1", "k1"]
+
+
+def test_disable_runtime_key_persists_disabled_state(monkeypatch):
+    from app.services.grok.services.xai_key_manager import disable_runtime_key
+
+    tmp_dir = core_storage.DATA_DIR / f"tmp-config-{uuid.uuid4().hex}"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    config_path = tmp_dir / "config.toml"
+    monkeypatch.setattr(core_storage, "CONFIG_FILE", config_path)
+
+    storage = LocalStorage()
+    payload = {
+        "xai": {
+            "keys": [
+                {"id": "k1", "key": "dummy001", "enabled": True, "status": "active"},
+                {"id": "k2", "key": "dummy002", "enabled": True, "status": "active"},
+            ]
+        }
+    }
+
+    async def scenario():
+        config._defaults = {"xai": {"keys": []}}
+        config._config = payload
+        await storage.save_config(payload)
+        await disable_runtime_key("k1", last_error="rate limited")
+        return await storage.load_config()
+
+    try:
+        loaded = asyncio.run(scenario())
+        assert loaded["xai"]["keys"][0]["enabled"] is False
+        assert loaded["xai"]["keys"][0]["status"] == "blocked"
+        assert loaded["xai"]["keys"][0]["last_error"] == "rate limited"
+        assert loaded["xai"]["keys"][1]["enabled"] is True
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def test_xai_video_service_disables_rate_limited_key_before_fallback():
+    manager = XAIKeyManager.from_config(
+        {
+            "xai": {
+                "keys": [
+                    {"id": "k1", "key": "dummy001", "enabled": True, "status": "active"},
+                    {"id": "k2", "key": "dummy002", "enabled": True, "status": "active"},
+                ]
+            }
+        }
+    )
+    service = XAIVideoService(key_manager=manager)
+
+    async def fake_request_json(self, session, method, url, payload=None, **kwargs):
+        key_record = kwargs.get("key_record")
+        if key_record.id == "k1":
+            raise UpstreamException(
+                message="xAI video API request failed with status 429",
+                details={"status": 429, "body": "rate limited"},
+            )
+        return {"request_id": "vidreq_123", "status": "pending"}
+
+    original = XAIVideoService._request_json
+    XAIVideoService._request_json = fake_request_json
+    try:
+        import app.services.grok.services.xai_video as xai_video_module
+        from unittest.mock import AsyncMock, patch
+        with patch.object(xai_video_module, "disable_runtime_key", new=AsyncMock()) as mock_disable:
+            result = asyncio.run(
+                service.start_generation(
+                    prompt="launch a rocket",
+                    model="grok-imagine-video",
+                    duration=10,
+                    aspect_ratio="16:9",
+                    resolution="720p",
+                )
+            )
+            mock_disable.assert_awaited_once_with("k1", last_error="xAI video API request failed with status 429")
+    finally:
+        XAIVideoService._request_json = original
+
+    assert result["request_id"] == "vidreq_123"
+
+
+def test_xai_responses_service_disables_rate_limited_key_before_fallback():
+    manager = XAIKeyManager.from_config(
+        {
+            "xai": {
+                "keys": [
+                    {"id": "k1", "key": "dummy001", "enabled": True, "status": "active"},
+                    {"id": "k2", "key": "dummy002", "enabled": True, "status": "active"},
+                ]
+            }
+        }
+    )
+    service = XAIResponsesService(key_manager=manager)
+
+    async def fake_request_json(self, session, method, url, payload=None, **kwargs):
+        key_record = kwargs.get("key_record")
+        if key_record.id == "k1":
+            raise UpstreamException(
+                message="xAI responses API request failed with status 429",
+                details={"status": 429, "body": "rate limited"},
+            )
+        return {"id": "resp_123", "object": "response"}
+
+    original = XAIResponsesService._request_json
+    XAIResponsesService._request_json = fake_request_json
+    try:
+        import app.services.grok.services.xai_responses as xai_responses_module
+        from unittest.mock import AsyncMock, patch
+        with patch.object(xai_responses_module, "disable_runtime_key", new=AsyncMock()) as mock_disable:
+            result = asyncio.run(
+                service.create_response(
+                    {"model": "grok-4.20-multi-agent", "input": "hello", "stream": False}
+                )
+            )
+            mock_disable.assert_awaited_once_with("k1", last_error="xAI responses API request failed with status 429")
+    finally:
+        XAIResponsesService._request_json = original
+
+    assert result["id"] == "resp_123"
+
+
+def test_xai_chat_service_disables_rate_limited_key_before_fallback():
+    manager = XAIKeyManager.from_config(
+        {
+            "xai": {
+                "keys": [
+                    {"id": "k1", "key": "dummy001", "enabled": True, "status": "active"},
+                    {"id": "k2", "key": "dummy002", "enabled": True, "status": "active"},
+                ]
+            }
+        }
+    )
+    service = XAIChatService(key_manager=manager)
+
+    async def fake_request_json(self, session, method, url, payload=None, **kwargs):
+        key_record = kwargs.get("key_record")
+        if key_record.id == "k1":
+            raise UpstreamException(
+                message="xAI chat API request failed with status 429",
+                details={"status": 429, "body": "rate limited"},
+            )
+        return {"id": "chatcmpl_123", "object": "chat.completion"}
+
+    original = XAIChatService._request_json
+    XAIChatService._request_json = fake_request_json
+    try:
+        import app.services.grok.services.xai_chat as xai_chat_module
+        from unittest.mock import AsyncMock, patch
+        with patch.object(xai_chat_module, "disable_runtime_key", new=AsyncMock()) as mock_disable:
+            result = asyncio.run(
+                service.create_chat_completion(
+                    model="grok-4.20-multi-agent",
+                    messages=[{"role": "user", "content": "hello"}],
+                    stream=False,
+                )
+            )
+            mock_disable.assert_awaited_once_with("k1", last_error="xAI chat API request failed with status 429")
+    finally:
+        XAIChatService._request_json = original
+
+    assert result["id"] == "chatcmpl_123"

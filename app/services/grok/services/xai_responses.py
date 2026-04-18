@@ -13,6 +13,7 @@ from app.core.logger import logger
 from app.services.grok.services.xai_key_manager import (
     XAIKeyInfo,
     XAIKeyManager,
+    disable_runtime_key,
     load_runtime_manager,
 )
 
@@ -119,18 +120,6 @@ class XAIResponsesService:
             self._truncate_debug_text(body),
         )
 
-    @staticmethod
-    def _normalize_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
-        normalized = dict(payload or {})
-        model = str(normalized.get("model") or "").strip()
-        include = normalized.get("include")
-        include_list = list(include) if isinstance(include, list) else []
-        if model == "grok-4.20-multi-agent" and "verbose_streaming" not in include_list:
-            include_list.append("verbose_streaming")
-        if include_list:
-            normalized["include"] = include_list
-        return normalized
-
     def _create_candidate_keys(self) -> list[XAIKeyInfo]:
         ordered: list[XAIKeyInfo] = []
         seen: set[tuple[str, str]] = set()
@@ -222,7 +211,6 @@ class XAIResponsesService:
         return response
 
     async def create_response(self, payload: Dict[str, Any]):
-        payload = self._normalize_payload(payload)
         timeout = aiohttp.ClientTimeout(total=self.timeout)
         candidate_keys = self._create_candidate_keys()
         if not candidate_keys:
@@ -264,6 +252,8 @@ class XAIResponsesService:
 
                     return _stream()
                 except Exception as exc:
+                    if self._status_from_exception(exc) == 429 and candidate:
+                        await disable_runtime_key(candidate.id, last_error=str(exc))
                     self._log_upstream_failure(
                         candidate_index=index + 1,
                         candidate_total=len(candidate_keys),
@@ -300,6 +290,8 @@ class XAIResponsesService:
                     self._key_record = candidate
                     return result
                 except Exception as exc:
+                    if self._status_from_exception(exc) == 429 and candidate:
+                        await disable_runtime_key(candidate.id, last_error=str(exc))
                     self._log_upstream_failure(
                         candidate_index=index + 1,
                         candidate_total=len(candidate_keys),
