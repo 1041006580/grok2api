@@ -11,6 +11,7 @@ import orjson
 
 from app.core.config import get_config
 from app.core.exceptions import UpstreamException, ValidationException
+from app.core.logger import logger
 from app.services.grok.services.xai_key_manager import XAIKeyInfo, XAIKeyManager, load_runtime_manager
 from app.services.grok.services.xai_key_manager import disable_runtime_key
 
@@ -106,6 +107,41 @@ class XAIVideoService:
         if not self._key_record:
             self._key_record = self._key_manager.acquire_key()
         return self._headers_for(self._key_record)
+
+    @staticmethod
+    def _truncate_debug_text(value: Any, limit: int = 500) -> str:
+        text = str(value or "").strip()
+        if len(text) <= limit:
+            return text
+        return f"{text[:limit]}...(truncated)"
+
+    def _log_upstream_failure(
+        self,
+        *,
+        candidate_index: int,
+        candidate_total: int,
+        key_record: Optional[XAIKeyInfo],
+        exc: Exception,
+        payload: Optional[Dict[str, Any]] = None,
+        request_id: Optional[str] = None,
+        phase: str,
+    ) -> None:
+        details = getattr(exc, "details", None)
+        status = details.get("status") if isinstance(details, dict) else None
+        body = details.get("body") if isinstance(details, dict) else ""
+        key_id = getattr(key_record, "id", None)
+        logger.error(
+            "xAI video {} key #{}/{} failed: status={}, key_id={}, request_id={}, error={}, body={}, payload={}",
+            phase,
+            candidate_index,
+            candidate_total,
+            status,
+            key_id,
+            request_id,
+            str(exc),
+            self._truncate_debug_text(body),
+            self._truncate_debug_text(orjson.dumps(payload).decode() if payload else ""),
+        )
 
     def _create_candidate_keys(self) -> list[XAIKeyInfo]:
         ordered: list[XAIKeyInfo] = []
@@ -279,6 +315,14 @@ class XAIVideoService:
                 except Exception as exc:
                     if self._status_from_exception(exc) == 429 and candidate:
                         await disable_runtime_key(candidate.id, last_error=str(exc))
+                    self._log_upstream_failure(
+                        candidate_index=index + 1,
+                        candidate_total=len(candidate_keys),
+                        key_record=candidate,
+                        exc=exc,
+                        payload=payload,
+                        phase="create",
+                    )
                     if not self._is_retryable_create_error(exc):
                         raise
                     last_error = exc
@@ -318,6 +362,14 @@ class XAIVideoService:
                 except Exception as exc:
                     if self._status_from_exception(exc) == 429 and bound_key:
                         await disable_runtime_key(bound_key.id, last_error=str(exc))
+                    self._log_upstream_failure(
+                        candidate_index=attempt,
+                        candidate_total=self.poll_retry_attempts,
+                        key_record=bound_key,
+                        exc=exc,
+                        request_id=request_id,
+                        phase="poll",
+                    )
                     if (
                         not self._is_retryable_poll_error(exc)
                         or attempt >= self.poll_retry_attempts

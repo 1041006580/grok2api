@@ -3,6 +3,7 @@ import shutil
 import tomllib
 import uuid
 from pathlib import Path
+from unittest.mock import patch
 
 from app.core import storage as core_storage
 from app.core.config import config
@@ -419,6 +420,56 @@ def test_xai_video_service_disables_rate_limited_key_before_fallback():
         XAIVideoService._request_json = original
 
     assert result["request_id"] == "vidreq_123"
+
+
+def test_xai_video_service_logs_upstream_400_response_details():
+    manager = XAIKeyManager.from_config(
+        {
+            "xai": {
+                "keys": [
+                    {"id": "k1", "key": "dummy001", "enabled": True, "status": "active"},
+                ]
+            }
+        }
+    )
+    service = XAIVideoService(key_manager=manager)
+
+    async def fake_request_json(self, session, method, url, payload=None, **kwargs):
+        raise UpstreamException(
+            message="xAI video API request failed with status 400",
+            details={"status": 400, "body": '{"error":"bad request from upstream"}'},
+        )
+
+    original = XAIVideoService._request_json
+    XAIVideoService._request_json = fake_request_json
+    try:
+        import app.services.grok.services.xai_video as xai_video_module
+
+        with patch.object(xai_video_module, "logger") as mock_logger:
+            try:
+                asyncio.run(
+                    service.start_generation(
+                        prompt="launch a rocket",
+                        model="grok-imagine-video",
+                        duration=10,
+                        aspect_ratio="16:9",
+                        resolution="720p",
+                    )
+                )
+            except UpstreamException:
+                pass
+    finally:
+        XAIVideoService._request_json = original
+
+    assert mock_logger.error.called
+    log_args = mock_logger.error.call_args.args
+    assert "status={}" in log_args[0]
+    assert "body={}" in log_args[0]
+    assert "payload={}" in log_args[0]
+    assert 400 in log_args
+    assert "k1" in log_args
+    assert "grok-imagine-video" in str(log_args)
+    assert "bad request from upstream" in str(log_args)
 
 
 def test_xai_responses_service_disables_rate_limited_key_before_fallback():

@@ -316,7 +316,11 @@ async def function_video_sse(request: Request, task_id: str = Query("")):
                     break
                 yield chunk
         except Exception as e:
-            logger.warning(f"Function video SSE error: {e}")
+            logger.warning(
+                "Function video SSE error: {}, details={}",
+                e,
+                getattr(e, "details", None),
+            )
             payload = {"error": str(e), "code": "internal_error"}
             yield f"data: {orjson.dumps(payload).decode()}\n\n"
             yield "data: [DONE]\n\n"
