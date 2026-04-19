@@ -14,6 +14,8 @@ from app.core.logger import logger
 from app.api.v1.image import resolve_aspect_ratio
 from app.services.grok.services.image import ImageGenerationService
 from app.services.grok.services.model import ModelService
+from app.services.grok.services.xai_image import XAIImageService
+from app.services.grok.services.xai_key_manager import load_runtime_manager
 from app.services.token.manager import get_token_manager
 
 router = APIRouter()
@@ -21,6 +23,9 @@ router = APIRouter()
 IMAGINE_SESSION_TTL = 600
 _IMAGINE_SESSIONS: dict[str, dict] = {}
 _IMAGINE_SESSIONS_LOCK = asyncio.Lock()
+LEGACY_IMAGINE_MODEL_ID = "grok-imagine-1.0"
+XAI_IMAGE_MODEL_ID = "grok-imagine-image"
+XAI_POOL_ERROR_MESSAGE = "xAI key pool is not configured with any enabled key"
 
 
 async def _clean_sessions(now: float) -> None:
@@ -61,7 +66,28 @@ def _parse_sse_chunk(chunk: str) -> Optional[Dict[str, Any]]:
     return payload
 
 
-async def _new_session(prompt: str, aspect_ratio: str, nsfw: Optional[bool]) -> str:
+def _normalize_imagine_model(value: Optional[str]) -> str:
+    raw = (value or LEGACY_IMAGINE_MODEL_ID).strip()
+    if raw in {LEGACY_IMAGINE_MODEL_ID, XAI_IMAGE_MODEL_ID}:
+        return raw
+    raise HTTPException(
+        status_code=400,
+        detail=f"model must be one of ['{LEGACY_IMAGINE_MODEL_ID}', '{XAI_IMAGE_MODEL_ID}']",
+    )
+
+
+def _ensure_xai_key_available() -> None:
+    manager = load_runtime_manager()
+    if manager.acquire_key() is None:
+        raise HTTPException(status_code=400, detail=XAI_POOL_ERROR_MESSAGE)
+
+
+async def _new_session(
+    prompt: str,
+    aspect_ratio: str,
+    nsfw: Optional[bool],
+    model: str,
+) -> str:
     task_id = uuid.uuid4().hex
     now = time.time()
     async with _IMAGINE_SESSIONS_LOCK:
@@ -70,9 +96,37 @@ async def _new_session(prompt: str, aspect_ratio: str, nsfw: Optional[bool]) -> 
             "prompt": prompt,
             "aspect_ratio": aspect_ratio,
             "nsfw": nsfw,
+            "model": model,
             "created_at": now,
         }
     return task_id
+
+
+async def _stream_xai_imagine_images(
+    prompt: str,
+    aspect_ratio: str,
+    *,
+    model: str,
+    run_id: str,
+):
+    images = await XAIImageService().generate(
+        prompt=prompt,
+        model=model,
+        n=1,
+        response_format="b64_json",
+        aspect_ratio=aspect_ratio,
+    )
+    return [
+        {
+            "type": "image",
+            "b64_json": image_b64,
+            "sequence": index + 1,
+            "created_at": int(time.time() * 1000),
+            "aspect_ratio": aspect_ratio,
+            "run_id": run_id,
+        }
+        for index, image_b64 in enumerate(images)
+    ]
 
 
 async def _get_session(task_id: str) -> Optional[dict]:
@@ -113,11 +167,13 @@ async def _drop_sessions(task_ids: List[str]) -> int:
 @router.websocket("/imagine/ws")
 async def public_imagine_ws(websocket: WebSocket):
     session_id = None
+    session_model = LEGACY_IMAGINE_MODEL_ID
     task_id = websocket.query_params.get("task_id")
     if task_id:
         info = await _get_session(task_id)
         if info:
             session_id = task_id
+            session_model = _normalize_imagine_model(info.get("model"))
 
     ok = True
     if session_id is None:
@@ -156,9 +212,48 @@ async def public_imagine_ws(websocket: WebSocket):
         run_task = None
         stop_event.clear()
 
-    async def _run(prompt: str, aspect_ratio: str, nsfw: Optional[bool]):
-        model_id = "grok-imagine-1.0"
+    async def _run(
+        prompt: str,
+        aspect_ratio: str,
+        nsfw: Optional[bool],
+        model_id: str,
+    ):
         model_info = ModelService.get(model_id)
+        if model_id == XAI_IMAGE_MODEL_ID:
+            run_id = uuid.uuid4().hex
+            await _send(
+                {
+                    "type": "status",
+                    "status": "running",
+                    "prompt": prompt,
+                    "aspect_ratio": aspect_ratio,
+                    "run_id": run_id,
+                }
+            )
+            try:
+                for payload in await _stream_xai_imagine_images(
+                    prompt,
+                    aspect_ratio,
+                    model=model_id,
+                    run_id=run_id,
+                ):
+                    if stop_event.is_set():
+                        break
+                    await _send(payload)
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                logger.warning(f"xAI imagine stream error: {e}")
+                await _send(
+                    {
+                        "type": "error",
+                        "message": str(e),
+                        "code": "internal_error",
+                    }
+                )
+            await _send({"type": "status", "status": "stopped", "run_id": run_id})
+            return
+
         if not model_info or not model_info.is_image:
             await _send(
                 {
@@ -298,8 +393,23 @@ async def public_imagine_ws(websocket: WebSocket):
                 nsfw = payload.get("nsfw")
                 if nsfw is not None:
                     nsfw = bool(nsfw)
+                try:
+                    model_id = _normalize_imagine_model(
+                        payload.get("model") or session_model
+                    )
+                except HTTPException:
+                    await _send(
+                        {
+                            "type": "error",
+                            "message": "Image model is not available.",
+                            "code": "model_not_supported",
+                        }
+                    )
+                    continue
                 await _stop_run()
-                run_task = asyncio.create_task(_run(prompt, aspect_ratio, nsfw))
+                run_task = asyncio.create_task(
+                    _run(prompt, aspect_ratio, nsfw, model_id)
+                )
             elif action == "stop":
                 await _stop_run()
             else:
@@ -356,6 +466,7 @@ async def public_imagine_sse(
         prompt = str(session.get("prompt") or "").strip()
         ratio = str(session.get("aspect_ratio") or "2:3").strip() or "2:3"
         nsfw = session.get("nsfw")
+        model_id = _normalize_imagine_model(session.get("model"))
     else:
         prompt = (prompt or "").strip()
         if not prompt:
@@ -365,10 +476,36 @@ async def public_imagine_sse(
         nsfw = request.query_params.get("nsfw")
         if nsfw is not None:
             nsfw = str(nsfw).lower() in ("1", "true", "yes", "on")
+        model_id = LEGACY_IMAGINE_MODEL_ID
 
     async def event_stream():
         try:
-            model_id = "grok-imagine-1.0"
+            sequence = 0
+            run_id = uuid.uuid4().hex
+
+            yield (
+                f"data: {orjson.dumps({'type': 'status', 'status': 'running', 'prompt': prompt, 'aspect_ratio': ratio, 'run_id': run_id}).decode()}\n\n"
+            )
+
+            if model_id == XAI_IMAGE_MODEL_ID:
+                try:
+                    for payload in await _stream_xai_imagine_images(
+                        prompt,
+                        ratio,
+                        model=model_id,
+                        run_id=run_id,
+                    ):
+                        yield f"data: {orjson.dumps(payload).decode()}\n\n"
+                except Exception as e:
+                    logger.warning(f"xAI imagine SSE error: {e}")
+                    yield (
+                        f"data: {orjson.dumps({'type': 'error', 'message': str(e), 'code': 'internal_error'}).decode()}\n\n"
+                    )
+                yield (
+                    f"data: {orjson.dumps({'type': 'status', 'status': 'stopped', 'run_id': run_id}).decode()}\n\n"
+                )
+                return
+
             model_info = ModelService.get(model_id)
             if not model_info or not model_info.is_image:
                 yield (
@@ -377,12 +514,6 @@ async def public_imagine_sse(
                 return
 
             token_mgr = await get_token_manager()
-            sequence = 0
-            run_id = uuid.uuid4().hex
-
-            yield (
-                f"data: {orjson.dumps({'type': 'status', 'status': 'running', 'prompt': prompt, 'aspect_ratio': ratio, 'run_id': run_id}).decode()}\n\n"
-            )
 
             while True:
                 if await request.is_disconnected():
@@ -481,6 +612,7 @@ async def public_imagine_config():
 
 class ImagineStartRequest(BaseModel):
     prompt: str
+    model: Optional[str] = LEGACY_IMAGINE_MODEL_ID
     aspect_ratio: Optional[str] = "16:9"
     nsfw: Optional[bool] = None
 
@@ -490,9 +622,12 @@ async def public_imagine_start(data: ImagineStartRequest):
     prompt = (data.prompt or "").strip()
     if not prompt:
         raise HTTPException(status_code=400, detail="Prompt cannot be empty")
+    model = _normalize_imagine_model(data.model)
+    if model == XAI_IMAGE_MODEL_ID:
+        _ensure_xai_key_available()
     ratio = resolve_aspect_ratio(str(data.aspect_ratio or "2:3").strip() or "2:3")
-    task_id = await _new_session(prompt, ratio, data.nsfw)
-    return {"task_id": task_id, "aspect_ratio": ratio}
+    task_id = await _new_session(prompt, ratio, data.nsfw, model)
+    return {"task_id": task_id, "aspect_ratio": ratio, "model": model}
 
 
 class ImagineStopRequest(BaseModel):

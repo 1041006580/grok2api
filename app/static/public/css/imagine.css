@@ -221,6 +221,10 @@
   height: 100%;
 }
 
+.settings-row-triple {
+  grid-template-columns: 1.2fr 1fr 1fr;
+}
+
 .settings-field {
   display: flex;
   flex-direction: column;

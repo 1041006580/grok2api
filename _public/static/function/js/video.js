@@ -333,6 +333,22 @@
     container.classList.remove('is-pending');
   }
 
+  function renderFailureState(message) {
+    const container = ensurePreviewSlot();
+    if (!container) return;
+    const body = container.querySelector('.video-item-body');
+    if (body) {
+      body.innerHTML = '';
+      const placeholder = document.createElement('div');
+      placeholder.className = 'video-item-placeholder';
+      placeholder.style.color = '#dc2626';
+      placeholder.textContent = message || '视频生成失败，请重试';
+      body.appendChild(placeholder);
+    }
+    updateItemLinks(container, '');
+    container.classList.remove('is-pending');
+  }
+
   function setIndeterminate(active) {
     if (!progressBar) return;
     if (active) {
@@ -601,19 +617,20 @@
     startBtn.disabled = true;
     updateMeta();
     resetOutput(true);
-    initPreviewSlot();
     setStatus('connecting', t('common.connecting'));
 
     let taskId = '';
     try {
       taskId = await createVideoTask(authHeader);
     } catch (e) {
+      renderFailureState(t('common.createTaskFailed'));
       setStatus('error', t('common.createTaskFailed'));
       startBtn.disabled = false;
       isRunning = false;
       return;
     }
 
+    initPreviewSlot();
     currentTaskId = taskId;
     startAt = Date.now();
     setStatus('connected', t('common.generating'));
@@ -651,7 +668,9 @@
           finishRun(true);
           return;
         }
-        toast(parseErrorMessage(payload, t('common.generationFailed')), 'error');
+        const detail = parseErrorMessage(payload, t('common.generationFailed'));
+        renderFailureState(detail ? `生成失败：${detail}` : '视频生成失败，请重试');
+        toast(detail, 'error');
         setStatus('error', t('common.generationFailed'));
         finishRun(true);
         return;
@@ -668,6 +687,7 @@
 
     es.onerror = () => {
       if (!isRunning) return;
+      renderFailureState('连接错误，生成流中断，请重试');
       setStatus('error', t('common.connectionError'));
       finishRun(true);
     };

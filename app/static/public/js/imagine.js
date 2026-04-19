@@ -3,6 +3,7 @@
   const stopBtn = document.getElementById('stopBtn');
   const clearBtn = document.getElementById('clearBtn');
   const promptInput = document.getElementById('promptInput');
+  const modelSelect = document.getElementById('modelSelect');
   const ratioSelect = document.getElementById('ratioSelect');
   const concurrentSelect = document.getElementById('concurrentSelect');
   const autoScrollToggle = document.getElementById('autoScrollToggle');
@@ -42,6 +43,9 @@
   let streamSequence = 0;
   const streamImageMap = new Map();
   let finalMinBytesDefault = 100000;
+  let completedSseRunIds = new Set();
+  const LEGACY_IMAGE_MODEL_ID = 'grok-imagine-1.0';
+  const XAI_IMAGE_MODEL_ID = 'grok-imagine-image';
 
   function toast(message, type) {
     if (typeof showToast === 'function') {
@@ -108,6 +112,10 @@
   }
 
   function updateModeValue() {}
+
+  function isXAIImageMode() {
+    return (modelSelect ? modelSelect.value : LEGACY_IMAGE_MODEL_ID) === XAI_IMAGE_MODEL_ID;
+  }
 
   async function loadFilterDefaults() {
     try {
@@ -217,14 +225,14 @@
     }
   }
 
-  async function createImagineTask(prompt, ratio, authHeader, nsfwEnabled) {
+  async function createImagineTask(prompt, ratio, authHeader, nsfwEnabled, model) {
     const res = await fetch('/v1/public/imagine/start', {
       method: 'POST',
       headers: {
         ...buildAuthHeaders(authHeader),
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ prompt, aspect_ratio: ratio, nsfw: nsfwEnabled })
+      body: JSON.stringify({ prompt, model, aspect_ratio: ratio, nsfw: nsfwEnabled })
     });
     if (!res.ok) {
       const text = await res.text();
@@ -234,10 +242,10 @@
     return data && data.task_id ? String(data.task_id) : '';
   }
 
-  async function createImagineTasks(prompt, ratio, concurrent, authHeader, nsfwEnabled) {
+  async function createImagineTasks(prompt, ratio, concurrent, authHeader, nsfwEnabled, model) {
     const tasks = [];
     for (let i = 0; i < concurrent; i++) {
-      const taskId = await createImagineTask(prompt, ratio, authHeader, nsfwEnabled);
+      const taskId = await createImagineTask(prompt, ratio, authHeader, nsfwEnabled, model);
       if (!taskId) {
         throw new Error('Missing task id');
       }
@@ -556,6 +564,9 @@
         setStatus('connected', '生成中');
         lastRunId = data.run_id || '';
       } else if (data.status === 'stopped') {
+        if (connectionMode === 'sse' && isXAIImageMode() && data.run_id) {
+          completedSseRunIds.add(data.run_id);
+        }
         if (data.run_id && lastRunId && data.run_id !== lastRunId) {
           return;
         }
@@ -627,6 +638,7 @@
   function startSSE(taskIds, rawPublicKey) {
     connectionMode = 'sse';
     stopAllConnections();
+    completedSseRunIds = new Set();
     updateModeValue();
 
     setStatus('connected', '生成中 (SSE)');
@@ -649,6 +661,14 @@
         updateActive();
         const remaining = sseConnections.filter(e => e && e.readyState === EventSource.OPEN).length;
         if (remaining === 0) {
+          if (isXAIImageMode() && completedSseRunIds.size >= taskIds.length) {
+            setStatus('connected', '完成');
+            setButtons(false);
+            isRunning = false;
+            startBtn.disabled = false;
+            updateModeValue();
+            return;
+          }
           setStatus('error', '连接错误');
           setButtons(false);
           isRunning = false;
@@ -675,6 +695,7 @@
       return;
     }
     const rawPublicKey = normalizeAuthHeader(authHeader);
+    const model = modelSelect ? modelSelect.value : LEGACY_IMAGE_MODEL_ID;
 
     const concurrent = concurrentSelect ? parseInt(concurrentSelect.value, 10) : 1;
     const ratio = ratioSelect ? ratioSelect.value : '2:3';
@@ -696,7 +717,7 @@
 
     let taskIds = [];
     try {
-      taskIds = await createImagineTasks(prompt, ratio, concurrent, authHeader, nsfwEnabled);
+      taskIds = await createImagineTasks(prompt, ratio, concurrent, authHeader, nsfwEnabled, model);
     } catch (e) {
       setStatus('error', '创建任务失败');
       startBtn.disabled = false;
@@ -704,6 +725,11 @@
       return;
     }
     currentTaskIds = taskIds;
+
+    if (model === XAI_IMAGE_MODEL_ID) {
+      startSSE(taskIds, rawPublicKey);
+      return;
+    }
 
     if (modePreference === 'sse') {
       startSSE(taskIds, rawPublicKey);
@@ -797,6 +823,7 @@
     const nsfwEnabled = nsfwSelect ? nsfwSelect.value === 'true' : true;
     const payload = {
       type: 'start',
+      model: modelSelect ? modelSelect.value : LEGACY_IMAGE_MODEL_ID,
       prompt,
       aspect_ratio: ratio,
       nsfw: nsfwEnabled

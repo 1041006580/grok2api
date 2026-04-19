@@ -41,5 +41,6 @@ def test_image_generation_models_only_return_image_generation_models():
     ids = {item["id"] for item in result["data"]}
     assert "grok-imagine-1.0" in ids
     assert "grok-imagine-1.0-fast" in ids
+    assert "grok-imagine-image" in ids
     assert "grok-imagine-1.0-edit" not in ids
     assert "grok-4" not in ids

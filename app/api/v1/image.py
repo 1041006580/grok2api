@@ -14,6 +14,8 @@ from pydantic import BaseModel, Field, ValidationError
 from app.services.grok.services.image import ImageGenerationService
 from app.services.grok.services.image_edit import ImageEditService
 from app.services.grok.services.model import ModelService
+from app.services.grok.services.xai_image import XAIImageService
+from app.services.grok.services.xai_key_manager import load_runtime_manager
 from app.services.token import get_token_manager
 from app.core.exceptions import ValidationException, AppException, ErrorType
 from app.core.config import get_config
@@ -37,6 +39,8 @@ SIZE_TO_ASPECT = {
     "1024x1024": "1:1",
 }
 ALLOWED_ASPECT_RATIOS = {"1:1", "2:3", "3:2", "9:16", "16:9"}
+LEGACY_IMAGE_MODEL_ID = "grok-imagine-1.0"
+XAI_IMAGE_MODEL_ID = "grok-imagine-image"
 
 
 class ImageGenerationRequest(BaseModel):
@@ -129,9 +133,12 @@ def _validate_common_request(
 
 def validate_generation_request(request: ImageGenerationRequest):
     """验证图片生成请求参数"""
-    if request.model != "grok-imagine-1.0":
+    if request.model not in {LEGACY_IMAGE_MODEL_ID, XAI_IMAGE_MODEL_ID}:
         raise ValidationException(
-            message="The model `grok-imagine-1.0` is required for image generation.",
+            message=(
+                f"The model must be one of ['{LEGACY_IMAGE_MODEL_ID}', '{XAI_IMAGE_MODEL_ID}'] "
+                "for image generation."
+            ),
             param="model",
             code="model_not_supported",
         )
@@ -149,6 +156,18 @@ def validate_generation_request(request: ImageGenerationRequest):
             code="model_not_supported",
         )
     _validate_common_request(request, allow_ws_stream=True)
+
+
+def _select_xai_key_manager_and_record():
+    manager = load_runtime_manager()
+    key_record = manager.acquire_key()
+    if not key_record:
+        raise ValidationException(
+            message="xAI key pool is not configured with any enabled key",
+            param="model",
+            code="xai_api_key_missing",
+        )
+    return manager, key_record
 
 
 def resolve_response_format(response_format: Optional[str]) -> str:
@@ -274,6 +293,34 @@ async def create_image(request: ImageGenerationRequest):
         request.response_format = "b64_json"
 
     response_format = resolve_response_format(request.response_format)
+
+    if request.model == XAI_IMAGE_MODEL_ID:
+        if response_format == "base64":
+            response_format = "b64_json"
+        response_field = response_field_name(response_format)
+        manager, key_record = _select_xai_key_manager_and_record()
+        service = XAIImageService(key_manager=manager, key_record=key_record)
+        images = await service.generate(
+            prompt=request.prompt,
+            model=request.model,
+            n=request.n,
+            response_format=response_format,
+            aspect_ratio=resolve_aspect_ratio(request.size),
+        )
+        data = [{response_field: img} for img in images]
+        return JSONResponse(
+            content={
+                "created": int(time.time()),
+                "data": data,
+                "usage": {
+                    "total_tokens": 0,
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "input_tokens_details": {"text_tokens": 0, "image_tokens": 0},
+                },
+            }
+        )
+
     response_field = response_field_name(response_format)
 
     # 获取 token 和模型信息

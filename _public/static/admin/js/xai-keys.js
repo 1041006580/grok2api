@@ -5,7 +5,7 @@ let editingKeyId = null;
 const xaiById = (id) => document.getElementById(id);
 
 function maskBoolean(enabled) {
-  return enabled ? 'Enabled' : 'Disabled';
+  return enabled ? '启用' : '停用';
 }
 
 function resetCreateForm() {
@@ -47,7 +47,7 @@ function resetEditForm() {
 async function openEditModal(keyId) {
   const key = xaiKeys.find(k => k.id === keyId);
   if (!key) {
-    showToast('Key not found', 'error');
+    showToast('密钥未找到', 'error');
     return;
   }
 
@@ -97,11 +97,11 @@ function renderXAIKeys() {
       <td>${maskBoolean(item.enabled)}</td>
       <td>
         <div class="flex items-center justify-center gap-2">
-          <button type="button" class="geist-button-outline text-xs px-3" onclick="openEditModal('${item.id}')">Edit</button>
+          <button type="button" class="geist-button-outline text-xs px-3" onclick="openEditModal('${item.id}')">编辑</button>
           <button type="button" class="geist-button-outline text-xs px-3" onclick="toggleXAIKeyEnabled('${item.id}', ${item.enabled ? 'false' : 'true'})">
-            ${item.enabled ? 'Disable' : 'Enable'}
+            ${item.enabled ? '停用' : '启用'}
           </button>
-          <button type="button" class="geist-button-danger text-xs px-3" onclick="deleteXAIKey('${item.id}')">Delete</button>
+          <button type="button" class="geist-button-danger text-xs px-3" onclick="deleteXAIKey('${item.id}')">删除</button>
         </div>
       </td>
     </tr>
@@ -149,7 +149,7 @@ async function importXAIKeys() {
   closeCreateModal();
   await loadXAIKeys();
   const imported = Number(data.imported || 0);
-  showToast(`Imported ${imported} xAI keys`, 'success');
+  showToast(`已导入 ${imported} 个 xAI 密钥`, 'success');
 }
 
 async function saveXAIKey() {
@@ -158,7 +158,7 @@ async function saveXAIKey() {
 
 async function saveEditXAIKey() {
   if (!editingKeyId) {
-    showToast('No key selected', 'error');
+    showToast('未选择密钥', 'error');
     return;
   }
 
@@ -187,7 +187,7 @@ async function saveEditXAIKey() {
   }
   closeEditModal();
   await loadXAIKeys();
-  showToast('Key updated successfully', 'success');
+  showToast('密钥更新成功', 'success');
 }
 
 async function toggleXAIKeyEnabled(keyId, enabled) {
@@ -224,7 +224,7 @@ async function initXAIKeysPage() {
   try {
     await loadXAIKeys();
   } catch (error) {
-    showToast(`Load failed: ${error.message}`, 'error');
+    showToast(`加载失败: ${error.message}`, 'error');
   }
 }
 

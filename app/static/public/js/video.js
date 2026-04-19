@@ -141,6 +141,22 @@
     container.classList.remove('is-pending');
   }
 
+  function renderFailureState(message) {
+    const container = ensurePreviewSlot();
+    if (!container) return;
+    const body = container.querySelector('.video-item-body');
+    if (body) {
+      body.innerHTML = '';
+      const placeholder = document.createElement('div');
+      placeholder.className = 'video-item-placeholder';
+      placeholder.style.color = '#dc2626';
+      placeholder.textContent = message || '视频生成失败，请重试';
+      body.appendChild(placeholder);
+    }
+    updateItemLinks(container, '');
+    container.classList.remove('is-pending');
+  }
+
   function setStatus(state, text) {
     if (!statusText) return;
     statusText.textContent = text;
@@ -707,6 +723,7 @@
           return;
         }
         const detail = buildErrorMessage(payload, '生成失败');
+        renderFailureState(detail ? `生成失败：${detail}` : '视频生成失败，请重试');
         toast(`生成失败：${detail}`, 'error');
         setStatus('error', '生成失败');
         finishRun(true);
@@ -724,6 +741,7 @@
 
     es.onerror = () => {
       if (!isRunning) return;
+      renderFailureState('连接错误，生成流中断，请重试');
       toast('连接错误：生成流中断，请重试', 'error');
       setStatus('error', '连接错误');
       finishRun(true);
