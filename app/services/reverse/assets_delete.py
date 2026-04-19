@@ -54,14 +54,17 @@ class AssetsDeleteReverse:
             browser = get_config("proxy.browser")
 
             async def _do_request():
+                url = resolve_api_url(f"{DELETE_API}/{asset_id}")
+                logger.debug("[Reverse-AssetsDelete] >>> DELETE {} asset_id={}", url, asset_id)
                 try:
                     response = await session.delete(
-                        resolve_api_url(f"{DELETE_API}/{asset_id}"),
+                        url,
                         headers=headers,
                         proxies=proxies,
                         timeout=timeout,
                         impersonate=browser,
                     )
+                    logger.debug("[Reverse-AssetsDelete] <<< DELETE {} status={}", url, response.status_code)
 
                     if response.status_code != 200:
                         logger.error(

@@ -56,15 +56,18 @@ class SetBirthReverse:
             browser = get_config("proxy.browser")
 
             async def _do_request():
+                url = resolve_api_url(SET_BIRTH_API)
+                logger.debug("[Reverse-SetBirth] >>> POST {}", url)
                 try:
                     response = await session.post(
-                        resolve_api_url(SET_BIRTH_API),
+                        url,
                         headers=headers,
                         json=payload,
                         timeout=timeout,
                         proxies=proxies,
                         impersonate=browser,
                     )
+                    logger.debug("[Reverse-SetBirth] <<< POST {} status={}", url, response.status_code)
 
                     if response.status_code not in (200, 204):
                         logger.error(

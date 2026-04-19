@@ -219,9 +219,11 @@ class AppChatReverse:
                     )
                 else:
                     logger.warning("AppChatReverse proxy is empty, request will use direct network")
+                url = resolve_api_url(CHAT_API)
+                logger.debug("[Reverse-AppChat] >>> POST {} model={}", url, payload.get("modelName"))
                 try:
                     response = await session.post(
-                        resolve_api_url(CHAT_API),
+                        url,
                         headers=headers,
                         data=orjson.dumps(payload),
                         timeout=timeout,
@@ -230,6 +232,7 @@ class AppChatReverse:
                         proxies=proxies,
                         impersonate=browser,
                     )
+                    logger.debug("[Reverse-AppChat] <<< POST {} status={}", url, response.status_code)
 
                     if response.status_code != 200:
 

@@ -54,15 +54,18 @@ class VideoUpscaleReverse:
             browser = get_config("proxy.browser")
 
             async def _do_request():
+                url = resolve_api_url(VIDEO_UPSCALE_API)
+                logger.debug("[Reverse-VideoUpscale] >>> POST {} video_id={}", url, video_id)
                 try:
                     response = await session.post(
-                        resolve_api_url(VIDEO_UPSCALE_API),
+                        url,
                         headers=headers,
                         data=orjson.dumps(payload),
                         timeout=timeout,
                         proxies=proxies,
                         impersonate=browser,
                     )
+                    logger.debug("[Reverse-VideoUpscale] <<< POST {} status={}", url, response.status_code)
 
                     if response.status_code != 200:
                         content = ""

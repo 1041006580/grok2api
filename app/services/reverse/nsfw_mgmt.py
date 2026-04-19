@@ -64,15 +64,18 @@ class NsfwMgmtReverse:
             browser = get_config("proxy.browser")
 
             async def _do_request():
+                url = resolve_api_url(NSFW_MGMT_API)
+                logger.debug("[Reverse-NsfwMgmt] >>> POST {}", url)
                 try:
                     response = await session.post(
-                        resolve_api_url(NSFW_MGMT_API),
+                        url,
                         headers=headers,
                         data=payload,
                         timeout=timeout,
                         proxies=proxies,
                         impersonate=browser,
                     )
+                    logger.debug("[Reverse-NsfwMgmt] <<< POST {} status={}", url, response.status_code)
 
                     if response.status_code != 200:
                         logger.error(

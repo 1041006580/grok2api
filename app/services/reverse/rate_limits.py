@@ -64,15 +64,18 @@ class RateLimitsReverse:
                 nonlocal active_proxy_key
                 active_proxy_key, proxy_url = get_current_proxy_from("proxy.base_proxy_url")
                 proxies = build_http_proxies(proxy_url)
+                url = resolve_api_url(RATE_LIMITS_API)
+                logger.debug("[Reverse-RateLimits] >>> POST {} model={}", url, model_name)
                 try:
                     response = await session.post(
-                        resolve_api_url(RATE_LIMITS_API),
+                        url,
                         headers=headers,
                         data=orjson.dumps(payload),
                         timeout=timeout,
                         proxies=proxies,
                         impersonate=browser,
                     )
+                    logger.debug("[Reverse-RateLimits] <<< POST {} status={}", url, response.status_code)
 
                     if response.status_code != 200:
                         body = ""

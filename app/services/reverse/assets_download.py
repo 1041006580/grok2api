@@ -85,6 +85,7 @@ class AssetsDownloadReverse:
             browser = get_config("proxy.browser")
 
             async def _do_request():
+                logger.debug("[Reverse-AssetsDownload] >>> GET {}", url)
                 try:
                     response = await session.get(
                         url,
@@ -95,6 +96,7 @@ class AssetsDownloadReverse:
                         impersonate=browser,
                         stream=True,
                     )
+                    logger.debug("[Reverse-AssetsDownload] <<< GET {} status={}", url, response.status_code)
 
                     if response.status_code != 200:
                         body = ""

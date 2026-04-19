@@ -56,15 +56,18 @@ class AcceptTosReverse:
             browser = get_config("proxy.browser")
 
             async def _do_request():
+                url = resolve_accounts_url(ACCEPT_TOS_API)
+                logger.debug("[Reverse-AcceptTos] >>> POST {}", url)
                 try:
                     response = await session.post(
-                        resolve_accounts_url(ACCEPT_TOS_API),
+                        url,
                         headers=headers,
                         data=payload,
                         timeout=timeout,
                         proxies=proxies,
                         impersonate=browser,
                     )
+                    logger.debug("[Reverse-AcceptTos] <<< POST {} status={}", url, response.status_code)
 
                     if response.status_code != 200:
                         logger.error(

@@ -78,15 +78,18 @@ class LivekitTokenReverse:
             browser = get_config("proxy.browser")
 
             async def _do_request():
+                url = resolve_api_url(LIVEKIT_TOKEN_API)
+                logger.debug("[Reverse-LivekitToken] >>> POST {} voice={}", url, voice)
                 try:
                     response = await session.post(
-                        resolve_api_url(LIVEKIT_TOKEN_API),
+                        url,
                         headers=headers,
                         data=orjson.dumps(payload),
                         timeout=timeout,
                         proxies=proxies,
                         impersonate=browser,
                     )
+                    logger.debug("[Reverse-LivekitToken] <<< POST {} status={}", url, response.status_code)
 
                     if response.status_code != 200:
                         body = ""
@@ -179,11 +182,14 @@ class LivekitWebSocketReverse:
         ws_headers = build_ws_headers()
 
         try:
-            return await self._client.connect(
+            logger.debug("[Reverse-LivekitWS] >>> CONNECT {}", base)
+            conn = await self._client.connect(
                 url, headers=ws_headers, timeout=get_config("voice.timeout")
             )
+            logger.debug("[Reverse-LivekitWS] <<< CONNECT success")
+            return conn
         except Exception as e:
-            logger.error(f"LivekitWebSocketReverse: Connect failed, {e}")
+            logger.error("[Reverse-LivekitWS] <<< CONNECT failed: {}", e)
             raise UpstreamException(
                 f"LivekitWebSocketReverse: Connect failed, {str(e)}"
             )

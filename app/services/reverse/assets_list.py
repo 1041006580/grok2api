@@ -54,15 +54,18 @@ class AssetsListReverse:
             browser = get_config("proxy.browser")
 
             async def _do_request():
+                url = resolve_api_url(LIST_API)
+                logger.debug("[Reverse-AssetsList] >>> GET {} params={}", url, params)
                 try:
                     response = await session.get(
-                        resolve_api_url(LIST_API),
+                        url,
                         headers=headers,
                         params=params,
                         proxies=proxies,
                         timeout=timeout,
                         impersonate=browser,
                     )
+                    logger.debug("[Reverse-AssetsList] <<< GET {} status={}", url, response.status_code)
 
                     if response.status_code != 200:
                         logger.error(

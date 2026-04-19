@@ -328,16 +328,24 @@ class XAIChatService:
                 code="invalid_request_error",
             )
         key_record = self._key_record or self._key_manager.acquire_key()
+        key_id = getattr(key_record, "id", "?")
+        url = f"{self.base_url}/chat/deferred-completion/{request_id}"
+        logger.debug("[xAI-Chat] >>> GET {} key={}", url, key_id)
         timeout = aiohttp.ClientTimeout(total=self.timeout)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             response = await session.get(
-                f"{self.base_url}/chat/deferred-completion/{request_id}",
+                url,
                 headers=self._headers_for(key_record),
             )
             if response.status == 202:
+                logger.debug("[xAI-Chat] <<< GET {} status=202 (pending)", url)
                 response.close()
                 return 202, None
             text = await response.text()
+            logger.debug(
+                "[xAI-Chat] <<< GET {} status={} body={}",
+                url, response.status, text[:2000] if text else "<empty>",
+            )
             try:
                 data = orjson.loads(text) if text else {}
             except orjson.JSONDecodeError:

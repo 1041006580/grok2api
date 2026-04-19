@@ -603,11 +603,16 @@ def _rewrite_xai_video_result_url(
 
 
 async def _download_xai_video(url: str) -> tuple[bytes, str]:
+    logger.debug("[xAI-Video] >>> GET (download) {}", url)
     timeout = aiohttp.ClientTimeout(total=float(get_config("xai.timeout", get_config("video.timeout", 60))))
     async with aiohttp.ClientSession(timeout=timeout) as session:
         async with session.get(url) as response:
             content = await response.read()
             content_type = str(response.headers.get("Content-Type", "") or "").strip()
+            logger.debug(
+                "[xAI-Video] <<< GET (download) {} status={} content_type={} size={}",
+                url, response.status, content_type, len(content) if content else 0,
+            )
             if response.status >= 400:
                 raise UpstreamException(
                     message=f"xAI video download failed with status {response.status}",

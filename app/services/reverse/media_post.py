@@ -68,16 +68,19 @@ class MediaPostReverse:
             browser = get_config("proxy.browser")
 
             async def _do_request():
+                url = resolve_api_url(MEDIA_POST_API)
+                logger.debug("[Reverse-MediaPost] >>> POST {} mediaType={}", url, mediaType)
                 try:
                     try:
                         response = await session.post(
-                            resolve_api_url(MEDIA_POST_API),
+                            url,
                             headers=headers,
                             data=orjson.dumps(payload),
                             timeout=timeout,
                             proxies=proxies,
                             impersonate=browser,
                         )
+                        logger.debug("[Reverse-MediaPost] <<< POST {} status={}", url, response.status_code)
                     except KeyError as conn_err:
                         # curl_cffi HTTP/2 bug: KeyError on ":status" or "code"
                         logger.warning(
