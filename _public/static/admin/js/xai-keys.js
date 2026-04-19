@@ -36,11 +36,9 @@ function closeCreateModal() {
 }
 
 function resetEditForm() {
-  const nameInput = xaiById('xai-key-edit-name');
   const valueInput = xaiById('xai-key-edit-value');
   const enabledInput = xaiById('xai-key-edit-enabled');
 
-  if (nameInput) nameInput.value = '';
   if (valueInput) valueInput.value = '';
   if (enabledInput) enabledInput.checked = true;
   editingKeyId = null;
@@ -54,11 +52,9 @@ async function openEditModal(keyId) {
   }
 
   editingKeyId = keyId;
-  const nameInput = xaiById('xai-key-edit-name');
   const valueInput = xaiById('xai-key-edit-value');
   const enabledInput = xaiById('xai-key-edit-enabled');
 
-  if (nameInput) nameInput.value = key.name || '';
   if (valueInput) valueInput.value = '';
   if (enabledInput) enabledInput.checked = key.enabled;
 
@@ -97,7 +93,6 @@ function renderXAIKeys() {
   if (empty) empty.classList.add('hidden');
   tbody.innerHTML = xaiKeys.map((item) => `
     <tr>
-      <td class="text-left">${item.name || '-'}</td>
       <td class="text-left font-mono text-xs break-all">${item.value || ''}</td>
       <td>${maskBoolean(item.enabled)}</td>
       <td>
@@ -167,12 +162,10 @@ async function saveEditXAIKey() {
     return;
   }
 
-  const nameInput = xaiById('xai-key-edit-name');
   const valueInput = xaiById('xai-key-edit-value');
   const enabledInput = xaiById('xai-key-edit-enabled');
 
   const payload = {
-    name: nameInput ? nameInput.value.trim() || null : null,
     enabled: enabledInput ? enabledInput.checked : true,
   };
 
