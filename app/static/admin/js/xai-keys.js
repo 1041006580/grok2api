@@ -1,5 +1,6 @@
 let xaiAdminKey = '';
 let xaiKeys = [];
+let editingKeyId = null;
 
 const xaiById = (id) => document.getElementById(id);
 
@@ -34,6 +35,47 @@ function closeCreateModal() {
   }, 200);
 }
 
+function resetEditForm() {
+  const valueInput = xaiById('xai-key-edit-value');
+  const enabledInput = xaiById('xai-key-edit-enabled');
+
+  if (valueInput) valueInput.value = '';
+  if (enabledInput) enabledInput.checked = true;
+  editingKeyId = null;
+}
+
+async function openEditModal(keyId) {
+  const key = xaiKeys.find(k => k.id === keyId);
+  if (!key) {
+    showToast('密钥未找到', 'error');
+    return;
+  }
+
+  editingKeyId = keyId;
+  const valueInput = xaiById('xai-key-edit-value');
+  const enabledInput = xaiById('xai-key-edit-enabled');
+
+  if (valueInput) valueInput.value = '';
+  if (enabledInput) enabledInput.checked = key.enabled;
+
+  const modal = xaiById('xai-key-edit-modal');
+  if (!modal) return;
+  modal.classList.remove('hidden');
+  requestAnimationFrame(() => {
+    modal.classList.add('is-open');
+  });
+}
+
+function closeEditModal() {
+  const modal = xaiById('xai-key-edit-modal');
+  if (!modal) return;
+  modal.classList.remove('is-open');
+  setTimeout(() => {
+    modal.classList.add('hidden');
+    resetEditForm();
+  }, 200);
+}
+
 function renderXAIKeys() {
   const tbody = xaiById('xai-keys-table-body');
   const loading = xaiById('loading');
@@ -51,13 +93,13 @@ function renderXAIKeys() {
   if (empty) empty.classList.add('hidden');
   tbody.innerHTML = xaiKeys.map((item) => `
     <tr>
-      <td class="text-left">${item.name || '-'}</td>
       <td class="text-left font-mono text-xs break-all">${item.value || ''}</td>
       <td>${maskBoolean(item.enabled)}</td>
       <td>
         <div class="flex items-center justify-center gap-2">
+          <button type="button" class="geist-button-outline text-xs px-3" onclick="openEditModal('${item.id}')">编辑</button>
           <button type="button" class="geist-button-outline text-xs px-3" onclick="toggleXAIKeyEnabled('${item.id}', ${item.enabled ? 'false' : 'true'})">
-            ${item.enabled ? '禁用' : '启用'}
+            ${item.enabled ? '停用' : '启用'}
           </button>
           <button type="button" class="geist-button-danger text-xs px-3" onclick="deleteXAIKey('${item.id}')">删除</button>
         </div>
@@ -107,11 +149,45 @@ async function importXAIKeys() {
   closeCreateModal();
   await loadXAIKeys();
   const imported = Number(data.imported || 0);
-  showToast(`已导入 ${imported} 个 xAI Key`, 'success');
+  showToast(`已导入 ${imported} 个 xAI 密钥`, 'success');
 }
 
 async function saveXAIKey() {
   return importXAIKeys();
+}
+
+async function saveEditXAIKey() {
+  if (!editingKeyId) {
+    showToast('未选择密钥', 'error');
+    return;
+  }
+
+  const valueInput = xaiById('xai-key-edit-value');
+  const enabledInput = xaiById('xai-key-edit-enabled');
+
+  const payload = {
+    enabled: enabledInput ? enabledInput.checked : true,
+  };
+
+  if (valueInput && valueInput.value.trim()) {
+    payload.key = valueInput.value.trim();
+  }
+
+  const res = await fetch(`/v1/admin/xai-keys/${editingKeyId}`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      ...buildAuthHeaders(xaiAdminKey)
+    },
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  if (!res.ok || data.status !== 'success') {
+    throw new Error((data && (data.detail || data.message)) || `HTTP ${res.status}`);
+  }
+  closeEditModal();
+  await loadXAIKeys();
+  showToast('密钥更新成功', 'success');
 }
 
 async function toggleXAIKeyEnabled(keyId, enabled) {
@@ -154,8 +230,11 @@ async function initXAIKeysPage() {
 
 window.openCreateModal = openCreateModal;
 window.closeCreateModal = closeCreateModal;
+window.openEditModal = openEditModal;
+window.closeEditModal = closeEditModal;
 window.importXAIKeys = importXAIKeys;
 window.saveXAIKey = saveXAIKey;
+window.saveEditXAIKey = saveEditXAIKey;
 window.toggleXAIKeyEnabled = toggleXAIKeyEnabled;
 window.deleteXAIKey = deleteXAIKey;
 window.onload = initXAIKeysPage;

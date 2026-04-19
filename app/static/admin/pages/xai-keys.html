@@ -4,13 +4,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Grok2API - xAI Keys</title>
-  <link rel="icon" href="/static/common/img/favicon/favicon.ico">
+  <title data-i18n="xai.pageTitle">Grok2API - xAI Keys</title>
+  <link rel="icon" href="/favicon.ico">
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://cdn.jsdelivr.net/npm/geist@1.0.0/dist/fonts/geist-sans/style.css" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/geist@1.0.0/dist/fonts/geist-mono/style.css" rel="stylesheet">
-  <link href="/static/common/css/common.css?v=1.5.4" rel="stylesheet">
-  <link href="/static/admin/css/token.css?v=1.5.4" rel="stylesheet">
+  <link href="/static/common/css/common.css?v=1.6.4" rel="stylesheet">
+  <link href="/static/admin/css/token.css?v=1.6.4" rel="stylesheet">
   <link href="/static/common/css/toast.css" rel="stylesheet">
 </head>
 
@@ -23,14 +23,14 @@
     <div class="space-y-6">
       <div class="flex justify-between items-center">
         <div>
-          <h2 class="text-2xl font-semibold tracking-tight">xAI Key 列表</h2>
-          <p class="text-[var(--accents-4)] mt-1 text-sm">支持批量导入 xAI Key、人工启停，以及查看当前可用状态。</p>
+          <h2 class="text-2xl font-semibold tracking-tight" data-i18n="xai.title">xAI Keys</h2>
+          <p class="text-[var(--accents-4)] mt-1 text-sm">Manage xAI keys, batch import entries, and current availability.</p>
         </div>
         <button id="create-xai-key-btn" type="button" class="geist-button gap-2" onclick="openCreateModal()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M12 5v14M5 12h14" />
           </svg>
-          导入 Key
+          <span>Import Keys</span>
         </button>
       </div>
 
@@ -40,19 +40,18 @@
         <table class="geist-table min-w-[760px]">
           <thead>
             <tr>
-              <th class="text-left">名称</th>
-              <th class="text-left">掩码值</th>
-              <th class="text-center">启用</th>
-              <th class="text-center">操作</th>
+              <th class="text-left">Masked Value</th>
+              <th class="text-center">Enabled</th>
+              <th class="text-center">Actions</th>
             </tr>
           </thead>
           <tbody id="xai-keys-table-body">
             <!-- Dynamic Rows -->
           </tbody>
         </table>
-        <div id="loading" class="text-center py-12 text-[var(--accents-4)]">加载中...</div>
+        <div id="loading" class="text-center py-12 text-[var(--accents-4)]">Loading...</div>
         <div id="empty-state" class="hidden table-empty">
-          暂无 xAI Key，请先导入。
+          No xAI keys configured yet. Import one to begin.
         </div>
       </div>
     </div>
@@ -61,7 +60,7 @@
   <div id="xai-key-modal" class="modal-overlay hidden">
     <div class="modal-content modal-md" id="xai-key-modal-content">
       <div class="modal-header">
-        <h3 class="modal-title">批量导入 xAI Key</h3>
+        <h3 class="modal-title">Batch Import xAI Keys</h3>
         <button onclick="closeCreateModal()" class="modal-close">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <line x1="18" y1="6" x2="6" y2="18"></line>
@@ -71,16 +70,44 @@
       </div>
       <div class="space-y-3">
         <div>
-          <label for="xai-key-import-text" class="modal-label mb-1 block">Key 列表（每行一个）</label>
+          <label for="xai-key-import-text" class="modal-label mb-1 block">Key List (one per line)</label>
           <textarea id="xai-key-import-text" class="geist-input w-full font-mono h-48" placeholder="xai-...\nxai-...\n"></textarea>
         </div>
         <label class="flex items-center gap-2 text-sm text-[var(--accents-5)]">
           <input id="xai-key-enabled" type="checkbox" checked>
-          <span>导入后立即启用</span>
+          <span>Enable immediately after import</span>
         </label>
         <div class="flex justify-end gap-2 pt-2">
-          <button type="button" class="geist-button-outline text-xs px-3" onclick="closeCreateModal()">取消</button>
-          <button type="button" class="geist-button text-xs px-3" onclick="importXAIKeys()">开始导入</button>
+          <button type="button" class="geist-button-outline text-xs px-3" onclick="closeCreateModal()">Cancel</button>
+          <button type="button" class="geist-button text-xs px-3" onclick="importXAIKeys()">Import</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="xai-key-edit-modal" class="modal-overlay hidden">
+    <div class="modal-content modal-md" id="xai-key-edit-modal-content">
+      <div class="modal-header">
+        <h3 class="modal-title">Edit xAI Key</h3>
+        <button onclick="closeEditModal()" class="modal-close">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+      <div class="space-y-3">
+        <div>
+          <label for="xai-key-edit-value" class="modal-label mb-1 block">Key Value</label>
+          <input id="xai-key-edit-value" type="text" class="geist-input w-full font-mono" placeholder="xai-...">
+        </div>
+        <label class="flex items-center gap-2 text-sm text-[var(--accents-5)]">
+          <input id="xai-key-edit-enabled" type="checkbox">
+          <span>Enabled</span>
+        </label>
+        <div class="flex justify-end gap-2 pt-2">
+          <button type="button" class="geist-button-outline text-xs px-3" onclick="closeEditModal()">Cancel</button>
+          <button type="button" class="geist-button text-xs px-3" onclick="saveEditXAIKey()">Save</button>
         </div>
       </div>
     </div>
@@ -88,11 +115,12 @@
 
   <div id="app-footer"></div>
 
-  <script src="/static/common/js/admin-auth.js?v=1.5.4"></script>
-  <script src="/static/common/js/header.js?v=1.5.4"></script>
-  <script src="/static/common/js/footer.js?v=1.5.4"></script>
+  <script src="/static/i18n/i18n.js"></script>
+  <script src="/static/common/js/admin-auth.js?v=1.6.2"></script>
+  <script src="/static/common/js/header.js?v=1.6.2"></script>
+  <script src="/static/common/js/footer.js?v=1.6.2"></script>
   <script src="/static/common/js/toast.js"></script>
-  <script src="/static/admin/js/xai-keys.js?v=1.5.4"></script>
+  <script src="/static/admin/js/xai-keys.js?v=1.6.4"></script>
 </body>
 
 </html>

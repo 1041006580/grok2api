@@ -71,11 +71,17 @@ def test_xai_keys_page_uses_batch_import_without_name_input():
 
     for html in (admin_page, public_page):
         assert 'id="xai-key-name"' not in html
+        assert 'id="xai-key-edit-name"' not in html
         assert 'id="xai-key-import-text"' in html
+        assert ">名称<" not in html
+        assert ">Name<" not in html
+        assert 'id="xai-key-edit-modal"' in html
 
     for js in (admin_js, public_js):
         assert "async function importXAIKeys()" in js
         assert "/v1/admin/xai-keys/import" in js
+        assert "async function openEditModal(keyId)" in js
+        assert "async function saveEditXAIKey()" in js
 
 
 def test_chat_pages_load_models_with_auth_headers_after_auth_bootstrap():
