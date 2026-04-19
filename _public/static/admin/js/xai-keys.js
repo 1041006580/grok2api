@@ -1,5 +1,6 @@
 let xaiAdminKey = '';
 let xaiKeys = [];
+let editingKeyId = null;
 
 const xaiById = (id) => document.getElementById(id);
 
@@ -34,6 +35,51 @@ function closeCreateModal() {
   }, 200);
 }
 
+function resetEditForm() {
+  const nameInput = xaiById('xai-key-edit-name');
+  const valueInput = xaiById('xai-key-edit-value');
+  const enabledInput = xaiById('xai-key-edit-enabled');
+
+  if (nameInput) nameInput.value = '';
+  if (valueInput) valueInput.value = '';
+  if (enabledInput) enabledInput.checked = true;
+  editingKeyId = null;
+}
+
+async function openEditModal(keyId) {
+  const key = xaiKeys.find(k => k.id === keyId);
+  if (!key) {
+    showToast('Key not found', 'error');
+    return;
+  }
+
+  editingKeyId = keyId;
+  const nameInput = xaiById('xai-key-edit-name');
+  const valueInput = xaiById('xai-key-edit-value');
+  const enabledInput = xaiById('xai-key-edit-enabled');
+
+  if (nameInput) nameInput.value = key.name || '';
+  if (valueInput) valueInput.value = '';
+  if (enabledInput) enabledInput.checked = key.enabled;
+
+  const modal = xaiById('xai-key-edit-modal');
+  if (!modal) return;
+  modal.classList.remove('hidden');
+  requestAnimationFrame(() => {
+    modal.classList.add('is-open');
+  });
+}
+
+function closeEditModal() {
+  const modal = xaiById('xai-key-edit-modal');
+  if (!modal) return;
+  modal.classList.remove('is-open');
+  setTimeout(() => {
+    modal.classList.add('hidden');
+    resetEditForm();
+  }, 200);
+}
+
 function renderXAIKeys() {
   const tbody = xaiById('xai-keys-table-body');
   const loading = xaiById('loading');
@@ -56,6 +102,7 @@ function renderXAIKeys() {
       <td>${maskBoolean(item.enabled)}</td>
       <td>
         <div class="flex items-center justify-center gap-2">
+          <button type="button" class="geist-button-outline text-xs px-3" onclick="openEditModal('${item.id}')">Edit</button>
           <button type="button" class="geist-button-outline text-xs px-3" onclick="toggleXAIKeyEnabled('${item.id}', ${item.enabled ? 'false' : 'true'})">
             ${item.enabled ? 'Disable' : 'Enable'}
           </button>
@@ -114,6 +161,42 @@ async function saveXAIKey() {
   return importXAIKeys();
 }
 
+async function saveEditXAIKey() {
+  if (!editingKeyId) {
+    showToast('No key selected', 'error');
+    return;
+  }
+
+  const nameInput = xaiById('xai-key-edit-name');
+  const valueInput = xaiById('xai-key-edit-value');
+  const enabledInput = xaiById('xai-key-edit-enabled');
+
+  const payload = {
+    name: nameInput ? nameInput.value.trim() || null : null,
+    enabled: enabledInput ? enabledInput.checked : true,
+  };
+
+  if (valueInput && valueInput.value.trim()) {
+    payload.key = valueInput.value.trim();
+  }
+
+  const res = await fetch(`/v1/admin/xai-keys/${editingKeyId}`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      ...buildAuthHeaders(xaiAdminKey)
+    },
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  if (!res.ok || data.status !== 'success') {
+    throw new Error((data && (data.detail || data.message)) || `HTTP ${res.status}`);
+  }
+  closeEditModal();
+  await loadXAIKeys();
+  showToast('Key updated successfully', 'success');
+}
+
 async function toggleXAIKeyEnabled(keyId, enabled) {
   const res = await fetch(`/v1/admin/xai-keys/${keyId}`, {
     method: 'PATCH',
@@ -154,8 +237,11 @@ async function initXAIKeysPage() {
 
 window.openCreateModal = openCreateModal;
 window.closeCreateModal = closeCreateModal;
+window.openEditModal = openEditModal;
+window.closeEditModal = closeEditModal;
 window.importXAIKeys = importXAIKeys;
 window.saveXAIKey = saveXAIKey;
+window.saveEditXAIKey = saveEditXAIKey;
 window.toggleXAIKeyEnabled = toggleXAIKeyEnabled;
 window.deleteXAIKey = deleteXAIKey;
 window.onload = initXAIKeysPage;

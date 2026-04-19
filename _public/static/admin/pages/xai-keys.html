@@ -86,6 +86,38 @@
     </div>
   </div>
 
+  <div id="xai-key-edit-modal" class="modal-overlay hidden">
+    <div class="modal-content modal-md" id="xai-key-edit-modal-content">
+      <div class="modal-header">
+        <h3 class="modal-title">Edit xAI Key</h3>
+        <button onclick="closeEditModal()" class="modal-close">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+      <div class="space-y-3">
+        <div>
+          <label for="xai-key-edit-name" class="modal-label mb-1 block">Name (optional)</label>
+          <input id="xai-key-edit-name" type="text" class="geist-input w-full" placeholder="My xAI Key">
+        </div>
+        <div>
+          <label for="xai-key-edit-value" class="modal-label mb-1 block">Key Value</label>
+          <input id="xai-key-edit-value" type="text" class="geist-input w-full font-mono" placeholder="xai-...">
+        </div>
+        <label class="flex items-center gap-2 text-sm text-[var(--accents-5)]">
+          <input id="xai-key-edit-enabled" type="checkbox">
+          <span>Enabled</span>
+        </label>
+        <div class="flex justify-end gap-2 pt-2">
+          <button type="button" class="geist-button-outline text-xs px-3" onclick="closeEditModal()">Cancel</button>
+          <button type="button" class="geist-button text-xs px-3" onclick="saveEditXAIKey()">Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div id="app-footer"></div>
 
   <script src="/static/i18n/i18n.js"></script>
@@ -93,7 +125,7 @@
   <script src="/static/common/js/header.js?v=1.6.2"></script>
   <script src="/static/common/js/footer.js?v=1.6.2"></script>
   <script src="/static/common/js/toast.js"></script>
-  <script src="/static/admin/js/xai-keys.js?v=1.6.2"></script>
+  <script src="/static/admin/js/xai-keys.js?v=1.6.4"></script>
 </body>
 
 </html>
