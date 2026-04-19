@@ -9,6 +9,7 @@ import orjson
 
 from app.core.config import get_config
 from app.core.exceptions import UpstreamException, ValidationException
+from app.core.logger import logger
 from app.services.grok.services.xai_key_manager import (
     XAIKeyInfo,
     XAIKeyManager,
@@ -108,6 +109,19 @@ class XAIChatService:
 
         return ordered
 
+    @staticmethod
+    def _safe_debug_payload(payload: Any, limit: int = 2000) -> str:
+        """Serialize payload for debug logging, masking auth and truncating."""
+        if payload is None:
+            return "<none>"
+        try:
+            text = orjson.dumps(payload).decode()
+        except Exception:
+            text = str(payload)
+        if len(text) > limit:
+            return text[:limit] + f"...(truncated, total {len(text)})"
+        return text
+
     async def _request_json(
         self,
         session: aiohttp.ClientSession,
@@ -117,12 +131,22 @@ class XAIChatService:
         *,
         key_record: Optional[XAIKeyInfo],
     ) -> Dict[str, Any]:
+        key_id = getattr(key_record, "id", "?")
+        logger.debug(
+            "[xAI-Chat] >>> {} {} key={} payload={}",
+            method, url, key_id, self._safe_debug_payload(payload),
+        )
+
         kwargs: Dict[str, Any] = {"headers": self._headers_for(key_record)}
         if payload is not None:
             kwargs["data"] = orjson.dumps(payload)
 
         async with session.request(method, url, **kwargs) as response:
             text = await response.text()
+            logger.debug(
+                "[xAI-Chat] <<< {} {} status={} body={}",
+                method, url, response.status, text[:2000] if text else "<empty>",
+            )
             try:
                 data = orjson.loads(text) if text else {}
             except orjson.JSONDecodeError:
@@ -152,13 +176,20 @@ class XAIChatService:
         *,
         key_record: XAIKeyInfo,
     ) -> aiohttp.ClientResponse:
+        key_id = getattr(key_record, "id", "?")
+        logger.debug(
+            "[xAI-Chat] >>> STREAM POST {} key={} payload={}",
+            url, key_id, self._safe_debug_payload(payload),
+        )
         response = await session.post(
             url,
             data=orjson.dumps(payload),
             headers=self._headers_for(key_record),
         )
+        logger.debug("[xAI-Chat] <<< STREAM POST {} status={}", url, response.status)
         if response.status >= 400:
             text = await response.text()
+            logger.debug("[xAI-Chat] <<< STREAM error body={}", text[:2000] if text else "<empty>")
             try:
                 data = orjson.loads(text) if text else {}
             except orjson.JSONDecodeError:
@@ -218,13 +249,10 @@ class XAIChatService:
             )
 
         if stream:
-            from app.core.logger import logger
-            logger.debug(f"xAI chat stream request: model={model}, candidates={len(candidate_keys)}")
             session = aiohttp.ClientSession(timeout=timeout)
             last_error: Optional[Exception] = None
             for index, candidate in enumerate(candidate_keys):
                 try:
-                    logger.debug(f"xAI trying key #{index+1}/{len(candidate_keys)}")
                     response = await self._open_stream(
                         session,
                         f"{self.base_url}/chat/completions",
@@ -232,19 +260,12 @@ class XAIChatService:
                         key_record=candidate,
                     )
                     self._key_record = candidate
-                    logger.debug(f"xAI stream opened successfully, status={response.status}")
 
                     async def _stream() -> AsyncGenerator[str, None]:
-                        from app.core.logger import logger
                         try:
-                            chunk_count = 0
                             async for chunk in response.content:
-                                chunk_count += 1
                                 decoded = chunk.decode(errors="ignore") if isinstance(chunk, bytes) else str(chunk)
-                                if chunk_count <= 3:
-                                    logger.debug(f"xAI stream chunk #{chunk_count}: {decoded[:200]}")
                                 yield decoded
-                            logger.debug(f"xAI stream finished, total chunks: {chunk_count}")
                         finally:
                             response.close()
                             await session.close()
@@ -253,7 +274,7 @@ class XAIChatService:
                 except Exception as exc:
                     if self._status_from_exception(exc) == 429 and candidate:
                         await disable_runtime_key(candidate.id, last_error=str(exc))
-                    logger.error(f"xAI key #{index+1} failed: {exc}")
+                    logger.error("[xAI-Chat] key #{}/{} failed: {}", index + 1, len(candidate_keys), exc)
                     if not self._is_retryable_create_error(exc) or index >= len(candidate_keys) - 1:
                         await session.close()
                         raise

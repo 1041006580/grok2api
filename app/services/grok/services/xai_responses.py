@@ -145,6 +145,19 @@ class XAIResponsesService:
 
         return ordered
 
+    @staticmethod
+    def _safe_debug_payload(payload: Any, limit: int = 2000) -> str:
+        """Serialize payload for debug logging, masking auth and truncating."""
+        if payload is None:
+            return "<none>"
+        try:
+            text = orjson.dumps(payload).decode()
+        except Exception:
+            text = str(payload)
+        if len(text) > limit:
+            return text[:limit] + f"...(truncated, total {len(text)})"
+        return text
+
     async def _request_json(
         self,
         session: aiohttp.ClientSession,
@@ -154,12 +167,22 @@ class XAIResponsesService:
         *,
         key_record: Optional[XAIKeyInfo],
     ) -> Dict[str, Any]:
+        key_id = getattr(key_record, "id", "?")
+        logger.debug(
+            "[xAI-Responses] >>> {} {} key={} payload={}",
+            method, url, key_id, self._safe_debug_payload(payload),
+        )
+
         kwargs: Dict[str, Any] = {"headers": self._headers_for(key_record)}
         if payload is not None:
             kwargs["data"] = orjson.dumps(payload)
 
         async with session.request(method, url, **kwargs) as response:
             text = await response.text()
+            logger.debug(
+                "[xAI-Responses] <<< {} {} status={} body={}",
+                method, url, response.status, text[:2000] if text else "<empty>",
+            )
             try:
                 data = orjson.loads(text) if text else {}
             except orjson.JSONDecodeError:
@@ -189,13 +212,20 @@ class XAIResponsesService:
         *,
         key_record: XAIKeyInfo,
     ) -> aiohttp.ClientResponse:
+        key_id = getattr(key_record, "id", "?")
+        logger.debug(
+            "[xAI-Responses] >>> STREAM POST {} key={} payload={}",
+            url, key_id, self._safe_debug_payload(payload),
+        )
         response = await session.post(
             url,
             data=orjson.dumps(payload),
             headers=self._headers_for(key_record),
         )
+        logger.debug("[xAI-Responses] <<< STREAM POST {} status={}", url, response.status)
         if response.status >= 400:
             text = await response.text()
+            logger.debug("[xAI-Responses] <<< STREAM error body={}", text[:2000] if text else "<empty>")
             try:
                 data = orjson.loads(text) if text else {}
             except orjson.JSONDecodeError:

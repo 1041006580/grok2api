@@ -172,6 +172,19 @@ class XAIVideoService:
 
         return ordered
 
+    @staticmethod
+    def _safe_debug_payload(payload: Any, limit: int = 2000) -> str:
+        """Serialize payload for debug logging, masking auth and truncating."""
+        if payload is None:
+            return "<none>"
+        try:
+            text = orjson.dumps(payload).decode()
+        except Exception:
+            text = str(payload)
+        if len(text) > limit:
+            return text[:limit] + f"...(truncated, total {len(text)})"
+        return text
+
     async def _request_json(
         self,
         session: aiohttp.ClientSession,
@@ -180,6 +193,12 @@ class XAIVideoService:
         payload: Optional[Dict[str, Any]] = None,
         key_record: Optional[XAIKeyInfo] = None,
     ) -> Dict[str, Any]:
+        key_id = getattr(key_record, "id", None) if key_record else getattr(self._key_record, "id", "?")
+        logger.debug(
+            "[xAI-Video] >>> {} {} key={} payload={}",
+            method, url, key_id, self._safe_debug_payload(payload),
+        )
+
         kwargs: Dict[str, Any] = {
             "headers": self._headers_for(key_record) if key_record else self._headers()
         }
@@ -188,6 +207,10 @@ class XAIVideoService:
 
         async with session.request(method, url, **kwargs) as response:
             text = await response.text()
+            logger.debug(
+                "[xAI-Video] <<< {} {} status={} body={}",
+                method, url, response.status, text[:2000] if text else "<empty>",
+            )
             try:
                 data = orjson.loads(text) if text else {}
             except orjson.JSONDecodeError:
