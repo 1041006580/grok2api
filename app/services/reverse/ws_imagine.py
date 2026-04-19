@@ -191,8 +191,10 @@ class ImagineWebSocketReverse:
         medium_min_bytes = int(get_config("image.medium_min_bytes"))
 
         try:
+            ws_url = resolve_api_url(WS_IMAGINE_URL)
+            logger.debug("[Reverse-ImagineWS] >>> CONNECT {} prompt={}", ws_url, prompt[:50])
             conn = await self._client.connect(
-                resolve_api_url(WS_IMAGINE_URL),
+                ws_url,
                 headers=headers,
                 timeout=timeout,
                 ws_kwargs={
@@ -200,12 +202,13 @@ class ImagineWebSocketReverse:
                     "receive_timeout": stream_timeout,
                 },
             )
+            logger.debug("[Reverse-ImagineWS] <<< CONNECT success")
         except Exception as e:
             status = getattr(e, "status", None)
             error_code = (
                 "rate_limit_exceeded" if status == 429 else "connection_failed"
             )
-            logger.error(f"WebSocket connect failed: {e}")
+            logger.error("[Reverse-ImagineWS] <<< CONNECT failed: status={} error={}", status, e)
             yield {
                 "type": "error",
                 "error_code": error_code,

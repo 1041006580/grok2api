@@ -138,9 +138,12 @@ class UploadService:
             lock_timeout = max(1, int(get_config("asset.upload_timeout")))
             async with _file_lock(lock_name, timeout=lock_timeout):
                 session = await self.create()
+                logger.debug("[Upload] >>> GET {}", url)
                 response = await session.get(
                     url, timeout=timeout, proxies=proxies, stream=True
                 )
+                logger.debug("[Upload] <<< GET {} status={} content_type={}",
+                    url, response.status_code, response.headers.get("content-type", ""))
                 if response.status_code >= 400:
                     raise UpstreamException(
                         message=f"Failed to fetch: {response.status_code}",
@@ -158,7 +161,7 @@ class UploadService:
                 else:
                     b64 = base64.b64encode(response.content).decode()
 
-                logger.debug(f"Fetched: {url}")
+                logger.debug("[Upload] Fetched {} size={}", url, len(b64))
                 return filename, b64, content_type
         except Exception as e:
             if isinstance(e, AppException):
