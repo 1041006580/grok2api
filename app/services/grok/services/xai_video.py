@@ -18,6 +18,11 @@ from app.services.grok.services.xai_key_manager import disable_runtime_key
 
 DEFAULT_XAI_BASE_URL = "https://api.x.ai/v1"
 RETRYABLE_XAI_STATUS_CODES = {429, 500, 502, 503, 504}
+DISABLE_XAI_KEY_STATUS_CODES = {403, 429}
+# 403 is key-specific, so create requests can fail over after disabling it.
+FALLBACK_XAI_CREATE_STATUS_CODES = (
+    RETRYABLE_XAI_STATUS_CODES | DISABLE_XAI_KEY_STATUS_CODES
+)
 
 
 class XAIVideoService:
@@ -88,12 +93,17 @@ class XAIVideoService:
     @classmethod
     def _is_retryable_create_error(cls, exc: Exception) -> bool:
         status = cls._status_from_exception(exc)
-        return status in RETRYABLE_XAI_STATUS_CODES
+        return status in FALLBACK_XAI_CREATE_STATUS_CODES
 
     @classmethod
     def _is_retryable_poll_error(cls, exc: Exception) -> bool:
         status = cls._status_from_exception(exc)
         return status in RETRYABLE_XAI_STATUS_CODES
+
+    @classmethod
+    def _should_disable_key_for_error(cls, exc: Exception) -> bool:
+        status = cls._status_from_exception(exc)
+        return status in DISABLE_XAI_KEY_STATUS_CODES
 
     def _headers_for(self, key_record: Optional[XAIKeyInfo]) -> Dict[str, str]:
         if not key_record:
@@ -340,7 +350,7 @@ class XAIVideoService:
                     self._key_record = candidate
                     return result
                 except Exception as exc:
-                    if self._status_from_exception(exc) == 429 and candidate:
+                    if self._should_disable_key_for_error(exc) and candidate:
                         await disable_runtime_key(candidate.id, last_error=str(exc))
                     self._log_upstream_failure(
                         candidate_index=index + 1,
@@ -387,7 +397,7 @@ class XAIVideoService:
                         key_record=bound_key,
                     )
                 except Exception as exc:
-                    if self._status_from_exception(exc) == 429 and bound_key:
+                    if self._should_disable_key_for_error(exc) and bound_key:
                         await disable_runtime_key(bound_key.id, last_error=str(exc))
                     self._log_upstream_failure(
                         candidate_index=attempt,

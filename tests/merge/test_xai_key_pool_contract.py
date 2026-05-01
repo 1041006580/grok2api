@@ -425,6 +425,56 @@ def test_xai_video_service_disables_rate_limited_key_before_fallback():
     assert result["request_id"] == "vidreq_123"
 
 
+def test_xai_video_service_disables_forbidden_key_before_fallback():
+    manager = XAIKeyManager.from_config(
+        {
+            "xai": {
+                "keys": [
+                    {"id": "k1", "key": "dummy001", "enabled": True, "status": "active"},
+                    {"id": "k2", "key": "dummy002", "enabled": True, "status": "active"},
+                ]
+            }
+        }
+    )
+    service = XAIVideoService(key_manager=manager)
+
+    async def fake_request_json(self, session, method, url, payload=None, **kwargs):
+        key_record = kwargs.get("key_record")
+        if key_record.id == "k1":
+            raise UpstreamException(
+                message="xAI video API request failed with status 403",
+                details={"status": 403, "body": "forbidden"},
+            )
+        return {"request_id": "vidreq_123", "status": "pending"}
+
+    original = XAIVideoService._request_json
+    XAIVideoService._request_json = fake_request_json
+    try:
+        import app.services.grok.services.xai_video as xai_video_module
+        from unittest.mock import AsyncMock, patch
+        with patch.object(
+            xai_video_module, "disable_runtime_key", new=AsyncMock()
+        ) as mock_disable:
+            result = asyncio.run(
+                service.start_generation(
+                    prompt="launch a rocket",
+                    model="grok-imagine-video",
+                    duration=10,
+                    aspect_ratio="16:9",
+                    resolution="720p",
+                )
+            )
+            mock_disable.assert_awaited_once_with(
+                "k1", last_error="xAI video API request failed with status 403"
+            )
+    finally:
+        XAIVideoService._request_json = original
+
+    assert result["request_id"] == "vidreq_123"
+    assert service._key_record is not None
+    assert service._key_record.id == "k2"
+
+
 def test_xai_video_service_logs_upstream_400_response_details():
     manager = XAIKeyManager.from_config(
         {
