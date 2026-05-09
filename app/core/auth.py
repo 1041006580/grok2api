@@ -4,7 +4,7 @@ API 认证模块
 
 import hashlib
 from typing import Optional, Iterable
-from fastapi import HTTPException, status, Security
+from fastapi import HTTPException, status, Security, Header
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from app.core.config import get_config
@@ -125,10 +125,13 @@ def _match_public_key(credentials: str, public_key: str) -> bool:
 
 async def verify_api_key(
     auth: Optional[HTTPAuthorizationCredentials] = Security(security),
+    x_api_key: Optional[str] = Header(default=None, alias="x-api-key"),
 ) -> Optional[str]:
     """
-    验证 Bearer Token
+    验证 Bearer Token 或 X-API-Key header。
 
+    支持 Authorization: Bearer <key> (OpenAI 风格)
+    和 X-API-Key: <key> (Anthropic SDK 风格)。
     如果 config.toml 中未配置 api_key，则不启用认证。
     """
     api_key = get_admin_api_key()
@@ -136,16 +139,16 @@ async def verify_api_key(
     if not api_keys:
         return None
 
-    if not auth:
+    token = (auth.credentials if auth else None) or x_api_key
+    if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing authentication token",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # 标准 api_key 验证
-    if auth.credentials in api_keys:
-        return auth.credentials
+    if token in api_keys:
+        return token
 
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
