@@ -82,7 +82,7 @@ def explicit_auth_failure(error: Exception) -> bool:
 
     details = error.details or {}
     status = details.get("status")
-    if status != 401:
+    if status not in (400, 401, 403):
         return False
 
     body = str(details.get("body") or details.get("error") or "").lower()
@@ -104,9 +104,13 @@ def explicit_auth_failure(error: Exception) -> bool:
         "not logged in",
         "unauthenticated",
         "bad-credentials",
+        "invalid-credentials",
         "invalid_api_key",
         "invalid token",
         "auth_failed",
+        "blocked-user",
+        "email-domain-rejected",
+        "failed to look up session id",
     )
     return any(marker in body for marker in auth_error_markers)
 
