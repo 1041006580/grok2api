@@ -80,14 +80,31 @@ class RateLimitsReverse:
                             body = response.text[:500]
                         except Exception:
                             pass
+
+                        is_token_expired = False
+                        server_header = response.headers.get("Server", "").lower()
+                        content_type = response.headers.get("Content-Type", "").lower()
+                        is_cloudflare = "cloudflare" in server_header or "challenge-platform" in body
+
+                        if response.status_code == 401 and "application/json" in content_type:
+                            if "unauthorized" in body.lower() or "not logged in" in body.lower():
+                                is_token_expired = True
+
                         safe_body = body.replace("{", "{{").replace("}", "}}")
                         logger.error(
-                            f"RateLimitsReverse: Request failed, {response.status_code}, body={safe_body}",
+                            f"RateLimitsReverse: Request failed, status={response.status_code}, "
+                            f"is_token_expired={is_token_expired}, is_cloudflare={is_cloudflare}, "
+                            f"body={safe_body}",
                             extra={"error_type": "UpstreamException"},
                         )
                         raise UpstreamException(
                             message=f"RateLimitsReverse: Request failed, {response.status_code}",
-                            details={"status": response.status_code, "body": body},
+                            details={
+                                "status": response.status_code,
+                                "body": body,
+                                "is_token_expired": is_token_expired,
+                                "is_cloudflare": is_cloudflare,
+                            },
                         )
 
                     return response
