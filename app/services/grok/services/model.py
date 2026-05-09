@@ -187,6 +187,18 @@ class ModelService:
             is_video=False,
         ),
         ModelInfo(
+            model_id="grok-4.3-beta",
+            grok_model="grok-420-computer-use-sa",
+            model_mode="grok-420-computer-use-sa",
+            tier=Tier.SUPER,
+            cost=Cost.LOW,
+            display_name="GROK-4.3-BETA",
+            description="Grok 4.3 Beta (Super+ only)",
+            is_image=False,
+            is_image_edit=False,
+            is_video=False,
+        ),
+        ModelInfo(
             model_id="grok-imagine-1.0-fast",
             grok_model="grok-3",
             model_mode="MODEL_MODE_FAST",
