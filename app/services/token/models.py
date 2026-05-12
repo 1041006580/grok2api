@@ -51,6 +51,10 @@ class TokenInfo(BaseModel):
     status: TokenStatus = TokenStatus.ACTIVE
     quota: int = BASIC__DEFAULT_QUOTA
 
+    # 消耗记录（本地累加，不依赖 API 返回值）
+    # 仅在 consumed_mode_enabled=true 时使用
+    consumed: int = 0
+
     # 统计
     created_at: int = Field(
         default_factory=lambda: int(datetime.now().timestamp() * 1000)
@@ -111,7 +115,7 @@ class TokenInfo(BaseModel):
 
     def consume(self, effort: EffortType = EffortType.LOW) -> int:
         """
-        消耗配额
+        消耗配额（默认：扣减 quota）
 
         Args:
             effort: LOW 扣 1 配额并计 1 次，HIGH 扣 4 配额并计 4 次
@@ -123,17 +127,36 @@ class TokenInfo(BaseModel):
         actual_cost = min(cost, self.quota)
 
         self.last_used_at = int(datetime.now().timestamp() * 1000)
-        self.use_count += actual_cost  # 使用 actual_cost 避免配额不足时过度计数
+        self.consumed += cost
+        self.use_count += actual_cost
         self.quota = max(0, self.quota - actual_cost)
-
-        # 注意：不在这里清零 fail_count，只有 record_success() 才清零
-        # 这样可以避免失败后调用 consume 导致失败计数被重置
 
         return actual_cost
 
+    def consume_with_consumed(self, effort: EffortType = EffortType.LOW) -> int:
+        """
+        消耗配额（consumed 模式：累加 consumed 而非扣减 quota）
+
+        Args:
+            effort: LOW 计 1 次，HIGH 计 4 次
+
+        Returns:
+            实际计入的消耗次数
+        """
+        cost = EFFORT_COST[effort]
+
+        self.consumed += cost
+        self.last_used_at = int(datetime.now().timestamp() * 1000)
+        self.use_count += 1
+
+        if self.status == TokenStatus.COOLING:
+            self.status = TokenStatus.ACTIVE
+
+        return cost
+
     def update_quota(self, new_quota: int):
         """
-        更新配额（用于 API 同步）
+        更新配额（用于 API 同步 - 默认模式）
 
         Args:
             new_quota: 新的配额值
@@ -146,6 +169,15 @@ class TokenInfo(BaseModel):
         ]:
             self.status = TokenStatus.ACTIVE
 
+    def update_quota_with_consumed(self, new_quota: int):
+        """
+        更新配额（consumed 模式）
+
+        Args:
+            new_quota: 新的配额值
+        """
+        self.quota = max(0, new_quota)
+
     def reset(self, default_quota: Optional[int] = None):
         """重置配额到默认值"""
         quota = BASIC__DEFAULT_QUOTA if default_quota is None else default_quota
@@ -153,6 +185,7 @@ class TokenInfo(BaseModel):
         self.status = TokenStatus.ACTIVE
         self.fail_count = 0
         self.last_fail_reason = None
+        self.consumed = 0
 
     def record_fail(
         self,
@@ -199,6 +232,13 @@ class TokenInfo(BaseModel):
         """标记已同步"""
         self.last_sync_at = int(datetime.now().timestamp() * 1000)
 
+    def should_cool_down(self, remaining_tokens: int, threshold: int = 10) -> bool:
+        """根据 Rate Limits 返回值判断是否应该冷却"""
+        if remaining_tokens <= threshold:
+            self.status = TokenStatus.COOLING
+            return True
+        return False
+
 
 class TokenPoolStats(BaseModel):
     """Token 池统计"""
@@ -210,6 +250,8 @@ class TokenPoolStats(BaseModel):
     cooling: int = 0
     total_quota: int = 0
     avg_quota: float = 0.0
+    total_consumed: int = 0
+    avg_consumed: float = 0.0
 
 
 __all__ = [

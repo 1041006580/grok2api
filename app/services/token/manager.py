@@ -600,7 +600,16 @@ class TokenManager:
             token = pool.get(raw_token)
             if token:
                 old_status = token.status
-                consumed = token.consume(effort)
+                consumed_mode = False
+                try:
+                    consumed_mode = get_config("token.consumed_mode_enabled", False)
+                except Exception:
+                    pass
+
+                if consumed_mode:
+                    consumed = token.consume_with_consumed(effort)
+                else:
+                    consumed = token.consume(effort)
                 logger.debug(
                     f"Token {mask_token_for_log(raw_token)}: consumed {consumed} quota, use_count={token.use_count}"
                 )
@@ -1064,7 +1073,18 @@ class TokenManager:
                             old_quota = token_info.quota
                             old_status = token_info.status
 
-                            token_info.update_quota(new_quota)
+                            consumed_mode = False
+                            try:
+                                consumed_mode = get_config("token.consumed_mode_enabled", False)
+                            except Exception:
+                                pass
+
+                            if consumed_mode:
+                                token_info.update_quota_with_consumed(new_quota)
+                                if new_quota > 0:
+                                    token_info.consumed = 0
+                            else:
+                                token_info.update_quota(new_quota)
                             token_info.mark_synced()
 
                             current_pool = self.get_pool_name_for_token(token_info.token)
