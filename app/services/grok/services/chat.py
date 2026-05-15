@@ -5,7 +5,7 @@ Grok Chat 服务
 import asyncio
 import re
 import uuid
-from typing import Dict, List, Any, AsyncGenerator, AsyncIterable
+from typing import Dict, List, Any, AsyncGenerator, AsyncIterable, Optional
 
 import orjson
 from curl_cffi.requests.errors import RequestsError
@@ -601,7 +601,9 @@ class StreamProcessor(proc_base.BaseProcessor):
                     url = item["url"]
                     if url not in self._web_search_urls_seen:
                         self._web_search_urls_seen.add(url)
-                        self._web_search_results.append(item)
+                        entry = dict(item)
+                        entry["type"] = "web"
+                        self._web_search_results.append(entry)
 
         xsr = resp.get("xSearchResults")
         if isinstance(xsr, dict):
@@ -615,7 +617,20 @@ class StreamProcessor(proc_base.BaseProcessor):
                             title = f"𝕏/@{item['username']}: {raw[:50]}{'...' if len(raw) > 50 else ''}"
                         else:
                             title = f"𝕏/@{item['username']}"
-                        self._web_search_results.append({"url": url, "title": title})
+                        self._web_search_results.append({"url": url, "title": title, "type": "x_post"})
+
+    def search_sources_list(self) -> Optional[List[Dict[str, str]]]:
+        """返回结构化搜索信源 [{url, title, type}] 或 None。"""
+        if not self._web_search_results:
+            return None
+        return [
+            {
+                "url": item.get("url", ""),
+                "title": item.get("title") or item.get("url", ""),
+                "type": item.get("type", "web"),
+            }
+            for item in self._web_search_results
+        ]
 
     def _format_sources_suffix(self) -> str:
         """格式化为 ## Sources markdown 段落（带可识别的标记行用于多轮剥离）。"""
@@ -800,6 +815,7 @@ class StreamProcessor(proc_base.BaseProcessor):
         finish: str = None,
         tool_calls: list = None,
         usage: dict | None = None,
+        search_sources: list | None = None,
     ) -> str:
         """Build SSE response."""
         delta = {}
@@ -823,6 +839,8 @@ class StreamProcessor(proc_base.BaseProcessor):
         }
         if usage is not None:
             chunk["usage"] = usage
+        if search_sources:
+            chunk["search_sources"] = search_sources
         return f"data: {orjson.dumps(chunk).decode()}\n\n"
 
     async def process(self, response: AsyncIterable[bytes]) -> AsyncGenerator[str, None]:
@@ -1000,6 +1018,7 @@ class StreamProcessor(proc_base.BaseProcessor):
                         content="".join(self._completion_parts),
                         tool_calls=self._completion_tool_calls or None,
                     ),
+                    search_sources=self.search_sources_list(),
                 )
             else:
                 yield self._sse(
@@ -1009,6 +1028,7 @@ class StreamProcessor(proc_base.BaseProcessor):
                         content="".join(self._completion_parts),
                         tool_calls=self._completion_tool_calls or None,
                     ),
+                    search_sources=self.search_sources_list(),
                 )
 
             yield "data: [DONE]\n\n"
@@ -1076,7 +1096,9 @@ class CollectProcessor(proc_base.BaseProcessor):
                     url = item["url"]
                     if url not in self._web_search_urls_seen:
                         self._web_search_urls_seen.add(url)
-                        self._web_search_results.append(item)
+                        entry = dict(item)
+                        entry["type"] = "web"
+                        self._web_search_results.append(entry)
 
         xsr = resp.get("xSearchResults")
         if isinstance(xsr, dict):
@@ -1090,7 +1112,20 @@ class CollectProcessor(proc_base.BaseProcessor):
                             title = f"𝕏/@{item['username']}: {raw[:50]}{'...' if len(raw) > 50 else ''}"
                         else:
                             title = f"𝕏/@{item['username']}"
-                        self._web_search_results.append({"url": url, "title": title})
+                        self._web_search_results.append({"url": url, "title": title, "type": "x_post"})
+
+    def search_sources_list(self) -> Optional[List[Dict[str, str]]]:
+        """返回结构化搜索信源 [{url, title, type}] 或 None。"""
+        if not self._web_search_results:
+            return None
+        return [
+            {
+                "url": item.get("url", ""),
+                "title": item.get("title") or item.get("url", ""),
+                "type": item.get("type", "web"),
+            }
+            for item in self._web_search_results
+        ]
 
     def _format_sources_suffix(self) -> str:
         """格式化为 ## Sources markdown 段落。"""
@@ -1315,6 +1350,11 @@ class CollectProcessor(proc_base.BaseProcessor):
                 prompt_tokens=self.prompt_tokens,
                 content=content,
                 tool_calls=tool_calls_result,
+            ),
+            **(
+                {"search_sources": sources}
+                if (sources := self.search_sources_list())
+                else {}
             ),
         }
 
