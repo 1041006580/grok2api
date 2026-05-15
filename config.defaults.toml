@@ -252,3 +252,9 @@ r2_key_prefix = "tmp"
 [token]
 # 是否启用 consumed 模式（按消耗次数选择 token，而非剩余配额）
 consumed_mode_enabled = false
+# 是否启用多 mode 配额追踪（per-mode QuotaWindow，而非单整数 quota）
+multi_mode_quota_enabled = false
+# 是否启用 inflight 感知的 token 选择评分
+inflight_enabled = false
+# 池推断方法: "window"（legacy windowSizeSeconds）或 "auto_total"（auto.total 值）
+pool_inference_method = "window"

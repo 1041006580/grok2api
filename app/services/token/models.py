@@ -9,7 +9,7 @@ Token 数据模型
 """
 
 from enum import Enum
-from typing import Optional, List
+from typing import Optional, List, Dict
 from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
 
@@ -17,6 +17,7 @@ from datetime import datetime
 # 默认配额
 BASIC__DEFAULT_QUOTA = 80
 SUPER_DEFAULT_QUOTA = 140
+HEAVY_DEFAULT_QUOTA = 150
 
 # 失败阈值
 FAIL_THRESHOLD = 5
@@ -38,10 +39,37 @@ class EffortType(str, Enum):
     HIGH = "high"  # 扣 4
 
 
+class ModeId(str, Enum):
+    """Grok rate-limits API 的 modelName 枚举"""
+
+    AUTO = "auto"
+    FAST = "fast"
+    EXPERT = "expert"
+    HEAVY = "heavy"
+    GROK_4_3 = "grok-420-computer-use-sa"
+
+
+# 池层级 -> 主 mode 映射（用于 legacy quota 字段双写）
+PRIMARY_MODE_BY_TIER: Dict[str, str] = {
+    "basic": ModeId.FAST.value,
+    "super": ModeId.AUTO.value,
+    "heavy": ModeId.AUTO.value,
+}
+
+
 EFFORT_COST = {
     EffortType.LOW: 1,
     EffortType.HIGH: 4,
 }
+
+
+class QuotaWindow(BaseModel):
+    """单个 mode 的配额窗口"""
+
+    remaining: int = 0
+    total: int = 0
+    window_seconds: int = 7200
+    last_sync_at: Optional[int] = None
 
 
 class TokenInfo(BaseModel):
@@ -54,6 +82,9 @@ class TokenInfo(BaseModel):
     # 消耗记录（本地累加，不依赖 API 返回值）
     # 仅在 consumed_mode_enabled=true 时使用
     consumed: int = 0
+
+    # 多 mode 配额窗口（可选，multi_mode_quota_enabled=true 时使用）
+    quotas: Optional[Dict[str, QuotaWindow]] = None
 
     # 统计
     created_at: int = Field(
@@ -239,6 +270,37 @@ class TokenInfo(BaseModel):
             return True
         return False
 
+    def get_effective_quota(self, mode: str = "fast") -> int:
+        """获取指定 mode 的剩余配额；若 quotas 不存在则 fallback 到 legacy quota"""
+        if self.quotas and mode in self.quotas:
+            return self.quotas[mode].remaining
+        return self.quota
+
+    def ensure_quotas(self, pool_tier: str = "basic"):
+        """懒初始化 quotas 字典（从 legacy quota 字段迁移）。
+
+        Args:
+            pool_tier: 池层级 (basic/super/heavy)，决定 primary mode
+        """
+        if self.quotas is not None:
+            return
+        primary_mode = PRIMARY_MODE_BY_TIER.get(pool_tier, ModeId.FAST.value)
+        self.quotas = {
+            primary_mode: QuotaWindow(
+                remaining=self.quota,
+                total=self.quota,
+                last_sync_at=self.last_sync_at,
+            )
+        }
+
+    def sync_legacy_quota(self, pool_tier: str = "basic"):
+        """从 quotas 中的 primary mode 同步到 legacy quota 字段（双写保持一致）"""
+        if not self.quotas:
+            return
+        primary_mode = PRIMARY_MODE_BY_TIER.get(pool_tier, ModeId.FAST.value)
+        if primary_mode in self.quotas:
+            self.quota = max(0, self.quotas[primary_mode].remaining)
+
 
 class TokenPoolStats(BaseModel):
     """Token 池统计"""
@@ -262,5 +324,9 @@ __all__ = [
     "EFFORT_COST",
     "BASIC__DEFAULT_QUOTA",
     "SUPER_DEFAULT_QUOTA",
+    "HEAVY_DEFAULT_QUOTA",
     "FAIL_THRESHOLD",
+    "QuotaWindow",
+    "ModeId",
+    "PRIMARY_MODE_BY_TIER",
 ]
