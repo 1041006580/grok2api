@@ -14,6 +14,7 @@ from app.services.token.models import (
     TokenStatus,
     BASIC__DEFAULT_QUOTA,
     SUPER_DEFAULT_QUOTA,
+    HEAVY_DEFAULT_QUOTA,
 )
 from app.core.storage import get_storage, LocalStorage
 from app.core.config import get_config
@@ -34,9 +35,12 @@ SUPER_WINDOW_THRESHOLD_SECONDS = 14400
 
 SUPER_POOL_NAME = "ssoSuper"
 BASIC_POOL_NAME = "ssoBasic"
+HEAVY_POOL_NAME = "ssoHeavy"
 
 
 def _default_quota_for_pool(pool_name: str) -> int:
+    if pool_name == HEAVY_POOL_NAME:
+        return HEAVY_DEFAULT_QUOTA
     if pool_name == SUPER_POOL_NAME:
         return SUPER_DEFAULT_QUOTA
     return BASIC__DEFAULT_QUOTA
@@ -213,12 +217,48 @@ class TokenManager:
                         return None
         return None
 
+    def _extract_total_queries(self, result: dict) -> Optional[int]:
+        """Extract totalQueries / totalTokens from rate-limits result."""
+        if not isinstance(result, dict):
+            return None
+        for key in ("totalQueries", "totalTokens"):
+            value = result.get(key)
+            if value is not None:
+                try:
+                    return int(value)
+                except (TypeError, ValueError):
+                    pass
+        for limits_key in ("limits", "rateLimits"):
+            limits = result.get(limits_key)
+            if isinstance(limits, dict):
+                for key in ("totalQueries", "totalTokens"):
+                    if key in limits:
+                        try:
+                            return int(limits.get(key))
+                        except (TypeError, ValueError):
+                            pass
+        return None
+
     def _resolve_pool_from_usage_result(
         self,
         result: dict,
         fallback_pool_name: Optional[str] = None,
+        model_name: Optional[str] = None,
     ) -> Tuple[Optional[str], Optional[str], Optional[int]]:
         remaining = extract_remaining_quota(result)
+
+        # 新方法：当查询的是 auto mode 时，按 total 值推断池
+        method = get_config("token.pool_inference_method", "window")
+        if method == "auto_total" and model_name == "auto":
+            total = self._extract_total_queries(result)
+            if total is not None:
+                if total <= 20:
+                    return BASIC_POOL_NAME, f"auto.total={total}", remaining
+                if total <= 50:
+                    return SUPER_POOL_NAME, f"auto.total={total}", remaining
+                return HEAVY_POOL_NAME, f"auto.total={total}", remaining
+
+        # Legacy: windowSizeSeconds 阈值法
         window_size = self._extract_window_size_seconds(result)
         if window_size is not None:
             if window_size >= SUPER_WINDOW_THRESHOLD_SECONDS:

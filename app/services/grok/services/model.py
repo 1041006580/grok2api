@@ -14,6 +14,7 @@ class Tier(str, Enum):
 
     BASIC = "basic"
     SUPER = "super"
+    HEAVY = "heavy"
 
 
 class Cost(str, Enum):
@@ -101,7 +102,7 @@ class ModelService:
             model_id="grok-4-heavy",
             grok_model="grok-4",
             model_mode="MODEL_MODE_HEAVY",
-            tier=Tier.SUPER,
+            tier=Tier.HEAVY,
             cost=Cost.HIGH,
             display_name="GROK-4-HEAVY",
             is_image=False,
@@ -286,6 +287,8 @@ class ModelService:
     def pool_for_model(cls, model_id: str) -> str:
         """根据模型选择 Token 池"""
         model = cls.get(model_id)
+        if model and model.tier == Tier.HEAVY:
+            return "ssoHeavy"
         if model and model.tier == Tier.SUPER:
             return "ssoSuper"
         return "ssoBasic"
@@ -294,10 +297,11 @@ class ModelService:
     def pool_candidates_for_model(cls, model_id: str) -> List[str]:
         """按优先级返回可用 Token 池列表"""
         model = cls.get(model_id)
+        if model and model.tier == Tier.HEAVY:
+            return ["ssoHeavy"]
         if model and model.tier == Tier.SUPER:
-            return ["ssoSuper"]
-        # 基础模型优先使用 basic 池，缺失时可回退到 super 池
-        return ["ssoBasic", "ssoSuper"]
+            return ["ssoSuper", "ssoHeavy"]
+        return ["ssoBasic", "ssoSuper", "ssoHeavy"]
 
 
 __all__ = ["ModelService"]
