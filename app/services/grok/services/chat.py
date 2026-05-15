@@ -283,6 +283,7 @@ class GrokChatService:
         tool_overrides: Dict[str, Any] = None,
         model_config_override: Dict[str, Any] = None,
         request_overrides: Dict[str, Any] = None,
+        deepsearch_preset: str = None,
     ):
         """发送聊天请求"""
         if stream is None:
@@ -307,6 +308,7 @@ class GrokChatService:
                 tool_overrides=tool_overrides,
                 model_config_override=model_config_override,
                 request_overrides=request_overrides,
+                deepsearch_preset=deepsearch_preset,
             )
             logger.info(f"Chat connected: model={model}, stream={stream}")
         except Exception:

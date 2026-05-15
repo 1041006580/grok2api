@@ -70,6 +70,7 @@ class AppChatReverse:
         tool_overrides: Dict[str, Any] = None,
         model_config_override: Dict[str, Any] = None,
         request_overrides: Dict[str, Any] = None,
+        deepsearch_preset: str = None,
     ) -> Dict[str, Any]:
         """Build chat payload for Grok app-chat API."""
 
@@ -126,6 +127,9 @@ class AppChatReverse:
         if model_config_override:
             payload["responseMetadata"]["modelConfigOverride"] = model_config_override
 
+        if deepsearch_preset:
+            payload["deepsearchPreset"] = deepsearch_preset
+
         if request_overrides:
             payload.update({k: v for k, v in request_overrides.items() if v is not None})
 
@@ -172,6 +176,7 @@ class AppChatReverse:
         tool_overrides: Dict[str, Any] = None,
         model_config_override: Dict[str, Any] = None,
         request_overrides: Dict[str, Any] = None,
+        deepsearch_preset: str = None,
         payload_override: Dict[str, Any] = None,
         referer_override: str | None = None,
         extra_cookies: str | None = None,
@@ -211,6 +216,7 @@ class AppChatReverse:
                 tool_overrides=tool_overrides,
                 model_config_override=model_config_override,
                 request_overrides=request_overrides,
+                deepsearch_preset=deepsearch_preset,
             )
             logger.debug(
                 "AppChatReverse payload: {}",
