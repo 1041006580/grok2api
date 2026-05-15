@@ -621,6 +621,22 @@ class TokenManager:
                 return pool_name
         return None
 
+    def acquire_token(self, token_str: str) -> bool:
+        """标记 token 为 in-flight（请求发出前调用）"""
+        raw_token = token_str.removeprefix("sso=")
+        for pool in self.pools.values():
+            if pool.get(raw_token):
+                return pool.acquire(raw_token)
+        return False
+
+    def release_token(self, token_str: str):
+        """释放 in-flight 标记（请求完成后调用）"""
+        raw_token = token_str.removeprefix("sso=")
+        for pool in self.pools.values():
+            if pool.get(raw_token):
+                pool.release(raw_token)
+                return
+
     async def consume(
         self, token_str: str, effort: EffortType = EffortType.LOW
     ) -> bool:

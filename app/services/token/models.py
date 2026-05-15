@@ -314,6 +314,7 @@ class TokenPoolStats(BaseModel):
     avg_quota: float = 0.0
     total_consumed: int = 0
     avg_consumed: float = 0.0
+    total_inflight: int = 0
 
 
 __all__ = [
