@@ -29,6 +29,12 @@ custom_instruction = ""
 # 过滤的特殊标签列表
 filter_tags = ["xaiartifact","xai:tool_usage_card","grok:render"]
 
+# ==================== 功能开关 ====================
+[features]
+# 是否在响应末尾追加搜索信源（## Sources 段落）
+# Grok SSE 流中的 webSearchResults 和 xSearchResults 透传给下游
+show_search_sources = false
+
 
 # ==================== 代理配置 ====================
 [proxy]

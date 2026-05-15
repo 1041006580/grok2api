@@ -112,6 +112,11 @@ def _get_chat_semaphore() -> asyncio.Semaphore:
     return _CHAT_SEMAPHORE
 
 
+_SOURCES_STRIP_RE = re.compile(
+    r"(?:^|\r?\n\r?\n)## Sources\r?\n\[grok2api-sources\]: #\r?\n[\s\S]*$"
+)
+
+
 class MessageExtractor:
     """消息内容提取器"""
 
@@ -138,6 +143,8 @@ class MessageExtractor:
             parts = []
 
             if isinstance(content, str):
+                if role == "assistant":
+                    content = _SOURCES_STRIP_RE.sub("", content)
                 if content.strip():
                     parts.append(content)
             elif isinstance(content, dict):
@@ -147,7 +154,10 @@ class MessageExtractor:
                         continue
                     item_type = item.get("type", "")
                     if item_type == "text":
-                        if text := item.get("text", "").strip():
+                        text = item.get("text", "").strip()
+                        if role == "assistant" and text:
+                            text = _SOURCES_STRIP_RE.sub("", text).strip()
+                        if text:
                             parts.append(text)
                     elif item_type == "image_url":
                         image_data = item.get("image_url", {})
@@ -171,7 +181,10 @@ class MessageExtractor:
                     item_type = item.get("type", "")
 
                     if item_type == "text":
-                        if text := item.get("text", "").strip():
+                        text = item.get("text", "").strip()
+                        if role == "assistant" and text:
+                            text = _SOURCES_STRIP_RE.sub("", text).strip()
+                        if text:
                             parts.append(text)
 
                     elif item_type == "image_url":
@@ -572,10 +585,50 @@ class StreamProcessor(proc_base.BaseProcessor):
         self.prompt_tokens = max(0, int(prompt_tokens or 0))
         self._completion_parts: list[str] = []
         self._completion_tool_calls: list[dict[str, Any]] = []
+        self._web_search_results: list[dict] = []
+        self._web_search_urls_seen: set[str] = set()
 
     def _record_content(self, content: str) -> None:
         if content:
             self._completion_parts.append(content)
+
+    def _collect_search_sources(self, resp: Dict[str, Any]) -> None:
+        """采集 webSearchResults 和 xSearchResults，多帧累积去重。"""
+        wsr = resp.get("webSearchResults")
+        if isinstance(wsr, dict):
+            for item in wsr.get("results") or []:
+                if isinstance(item, dict) and item.get("url"):
+                    url = item["url"]
+                    if url not in self._web_search_urls_seen:
+                        self._web_search_urls_seen.add(url)
+                        self._web_search_results.append(item)
+
+        xsr = resp.get("xSearchResults")
+        if isinstance(xsr, dict):
+            for item in xsr.get("results") or []:
+                if isinstance(item, dict) and item.get("postId") and item.get("username"):
+                    url = f"https://x.com/{item['username']}/status/{item['postId']}"
+                    if url not in self._web_search_urls_seen:
+                        self._web_search_urls_seen.add(url)
+                        raw = re.sub(r"\s+", " ", (item.get("text") or "")).strip()
+                        if raw:
+                            title = f"𝕏/@{item['username']}: {raw[:50]}{'...' if len(raw) > 50 else ''}"
+                        else:
+                            title = f"𝕏/@{item['username']}"
+                        self._web_search_results.append({"url": url, "title": title})
+
+    def _format_sources_suffix(self) -> str:
+        """格式化为 ## Sources markdown 段落（带可识别的标记行用于多轮剥离）。"""
+        if not self._web_search_results:
+            return ""
+        if not get_config("features.show_search_sources", False):
+            return ""
+        lines = ["\n\n## Sources", "[grok2api-sources]: #"]
+        for item in self._web_search_results:
+            title = item.get("title") or item.get("url", "")
+            title = title.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")
+            lines.append(f"- [{title}]({item['url']})")
+        return "\n".join(lines) + "\n"
 
     def _record_tool_call(self, tool_call: Any) -> None:
         if isinstance(tool_call, dict):
@@ -807,6 +860,8 @@ class StreamProcessor(proc_base.BaseProcessor):
                 if rid := resp.get("rolloutId"):
                     self.rollout_id = str(rid)
 
+                self._collect_search_sources(resp)
+
                 if not self.role_sent:
                     yield self._sse(role="assistant")
                     self.role_sent = True
@@ -924,6 +979,11 @@ class StreamProcessor(proc_base.BaseProcessor):
             if self.think_opened:
                 yield self._sse("</think>\n")
 
+            sources_suffix = self._format_sources_suffix()
+            if sources_suffix:
+                self._record_content(sources_suffix)
+                yield self._sse(sources_suffix)
+
             if self._tool_stream_enabled:
                 for kind, payload in self._flush_tool_stream():
                     if kind == "text":
@@ -1004,6 +1064,46 @@ class CollectProcessor(proc_base.BaseProcessor):
         self.tools = tools
         self.tool_choice = tool_choice
         self.prompt_tokens = max(0, int(prompt_tokens or 0))
+        self._web_search_results: list[dict] = []
+        self._web_search_urls_seen: set[str] = set()
+
+    def _collect_search_sources(self, resp: Dict[str, Any]) -> None:
+        """采集 webSearchResults 和 xSearchResults。"""
+        wsr = resp.get("webSearchResults")
+        if isinstance(wsr, dict):
+            for item in wsr.get("results") or []:
+                if isinstance(item, dict) and item.get("url"):
+                    url = item["url"]
+                    if url not in self._web_search_urls_seen:
+                        self._web_search_urls_seen.add(url)
+                        self._web_search_results.append(item)
+
+        xsr = resp.get("xSearchResults")
+        if isinstance(xsr, dict):
+            for item in xsr.get("results") or []:
+                if isinstance(item, dict) and item.get("postId") and item.get("username"):
+                    url = f"https://x.com/{item['username']}/status/{item['postId']}"
+                    if url not in self._web_search_urls_seen:
+                        self._web_search_urls_seen.add(url)
+                        raw = re.sub(r"\s+", " ", (item.get("text") or "")).strip()
+                        if raw:
+                            title = f"𝕏/@{item['username']}: {raw[:50]}{'...' if len(raw) > 50 else ''}"
+                        else:
+                            title = f"𝕏/@{item['username']}"
+                        self._web_search_results.append({"url": url, "title": title})
+
+    def _format_sources_suffix(self) -> str:
+        """格式化为 ## Sources markdown 段落。"""
+        if not self._web_search_results:
+            return ""
+        if not get_config("features.show_search_sources", False):
+            return ""
+        lines = ["\n\n## Sources", "[grok2api-sources]: #"]
+        for item in self._web_search_results:
+            title = item.get("title") or item.get("url", "")
+            title = title.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")
+            lines.append(f"- [{title}]({item['url']})")
+        return "\n".join(lines) + "\n"
 
     def _filter_content(self, content: str) -> str:
         """Filter special tags in content."""
@@ -1063,6 +1163,8 @@ class CollectProcessor(proc_base.BaseProcessor):
 
                 if (llm := resp.get("llmInfo")) and not fingerprint:
                     fingerprint = llm.get("modelHash", "")
+
+                self._collect_search_sources(resp)
 
                 # 收集非 thinking 且无 messageStepId 的 token（最终内容兜底）
                 is_thinking = bool(resp.get("isThinking"))
@@ -1175,6 +1277,7 @@ class CollectProcessor(proc_base.BaseProcessor):
             content = "".join(fallback_tokens)
 
         content = self._filter_content(content)
+        content += self._format_sources_suffix()
 
         # Parse for tool calls if tools were provided
         finish_reason = "stop"
