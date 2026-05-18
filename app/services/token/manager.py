@@ -15,6 +15,7 @@ from app.services.token.models import (
     BASIC__DEFAULT_QUOTA,
     SUPER_DEFAULT_QUOTA,
     HEAVY_DEFAULT_QUOTA,
+    QuotaWindow,
 )
 from app.core.storage import get_storage, LocalStorage
 from app.core.config import get_config
@@ -36,6 +37,13 @@ SUPER_WINDOW_THRESHOLD_SECONDS = 14400
 SUPER_POOL_NAME = "ssoSuper"
 BASIC_POOL_NAME = "ssoBasic"
 HEAVY_POOL_NAME = "ssoHeavy"
+
+# 每个池在 multi_mode 模式下需要查询的 modelName 列表
+POOL_SYNC_MODES: Dict[str, List[str]] = {
+    BASIC_POOL_NAME: ["fast"],
+    SUPER_POOL_NAME: ["auto", "fast", "expert", "grok-420-computer-use-sa"],
+    HEAVY_POOL_NAME: ["auto", "fast", "expert", "heavy", "grok-420-computer-use-sa"],
+}
 
 
 def _default_quota_for_pool(pool_name: str) -> int:
@@ -238,6 +246,27 @@ class TokenManager:
                         except (TypeError, ValueError):
                             pass
         return None
+
+    def _update_quota_window(
+        self, token_info: TokenInfo, mode: str, result: dict
+    ) -> None:
+        """从 rate-limits result 更新 token 的指定 mode QuotaWindow。"""
+        remaining = extract_remaining_quota(result)
+        if remaining is None:
+            return
+        if token_info.quotas is None:
+            token_info.quotas = {}
+        if mode not in token_info.quotas:
+            token_info.quotas[mode] = QuotaWindow()
+        window = token_info.quotas[mode]
+        window.remaining = max(0, remaining)
+        total = self._extract_total_queries(result)
+        if total is not None:
+            window.total = total
+        win_size = self._extract_window_size_seconds(result)
+        if win_size is not None:
+            window.window_seconds = win_size
+        window.last_sync_at = int(datetime.now().timestamp() * 1000)
 
     def _resolve_pool_from_usage_result(
         self,
@@ -638,7 +667,7 @@ class TokenManager:
                 return
 
     async def consume(
-        self, token_str: str, effort: EffortType = EffortType.LOW
+        self, token_str: str, effort: EffortType = EffortType.LOW, mode: Optional[str] = None
     ) -> bool:
         """
         消耗配额（本地预估）
@@ -646,6 +675,7 @@ class TokenManager:
         Args:
             token_str: Token 字符串
             effort: 消耗力度
+            mode: 可选 mode id（multi_mode 启用时按 mode 扣减 quotas）
 
         Returns:
             是否成功
@@ -657,8 +687,10 @@ class TokenManager:
             if token:
                 old_status = token.status
                 consumed_mode = False
+                multi_mode = False
                 try:
                     consumed_mode = get_config("token.consumed_mode_enabled", False)
+                    multi_mode = get_config("token.multi_mode_quota_enabled", False)
                 except Exception:
                     pass
 
@@ -666,6 +698,14 @@ class TokenManager:
                     consumed = token.consume_with_consumed(effort)
                 else:
                     consumed = token.consume(effort)
+
+                if multi_mode and mode and token.quotas and mode in token.quotas:
+                    from app.services.token.models import EFFORT_COST
+                    cost = EFFORT_COST[effort]
+                    window = token.quotas[mode]
+                    window.remaining = max(0, window.remaining - cost)
+                    token.sync_legacy_quota(pool.name.replace("sso", "").lower())
+
                 logger.debug(
                     f"Token {mask_token_for_log(raw_token)}: consumed {consumed} quota, use_count={token.use_count}"
                 )
@@ -683,6 +723,7 @@ class TokenManager:
         fallback_effort: EffortType = EffortType.LOW,
         consume_on_fail: bool = True,
         is_usage: bool = True,
+        mode: Optional[str] = None,
     ) -> bool:
         """
         同步 Token 用量
@@ -694,6 +735,7 @@ class TokenManager:
             fallback_effort: 降级时的消耗力度
             consume_on_fail: 失败时是否降级扣费
             is_usage: 是否记录为一次使用（影响 use_count）
+            mode: 可选 mode id（multi_mode 启用时更新对应 QuotaWindow）
 
         Returns:
             是否成功
@@ -727,9 +769,32 @@ class TokenManager:
                 target_token.record_success(is_usage=is_usage)
                 target_token.mark_synced()
 
+                # multi-mode: 更新对应 QuotaWindow
+                multi_mode = False
+                try:
+                    multi_mode = get_config("token.multi_mode_quota_enabled", False)
+                except Exception:
+                    pass
+                if multi_mode and mode:
+                    pool_tier = (target_pool_name or "").replace("sso", "").lower() or "basic"
+                    target_token.ensure_quotas(pool_tier)
+                    if mode not in target_token.quotas:
+                        target_token.quotas[mode] = QuotaWindow()
+                    window = target_token.quotas[mode]
+                    window.remaining = max(0, new_quota)
+                    total = self._extract_total_queries(result)
+                    if total is not None:
+                        window.total = total
+                    win_size = self._extract_window_size_seconds(result)
+                    if win_size is not None:
+                        window.window_seconds = win_size
+                    window.last_sync_at = int(datetime.now().timestamp() * 1000)
+                    target_token.sync_legacy_quota(pool_tier)
+
                 detected_pool_name, reason, _ = self._resolve_pool_from_usage_result(
                     result,
                     fallback_pool_name=target_pool_name,
+                    model_name=mode,
                 )
                 if (
                     target_pool_name
@@ -1147,6 +1212,7 @@ class TokenManager:
                             detected_pool_name, reason, _ = self._resolve_pool_from_usage_result(
                                 result,
                                 fallback_pool_name=current_pool,
+                                model_name=rate_limit_model_name,
                             )
                             if (
                                 current_pool
@@ -1159,6 +1225,38 @@ class TokenManager:
                                     detected_pool_name,
                                     reason=reason or "cooling_refresh",
                                 )
+                                current_pool = detected_pool_name
+
+                            # Multi-mode 同步：填充对应池的所有 mode quotas
+                            multi_mode = False
+                            try:
+                                multi_mode = get_config("token.multi_mode_quota_enabled", False)
+                            except Exception:
+                                pass
+                            if multi_mode:
+                                pool_tier = (current_pool or "").replace("sso", "").lower() or "basic"
+                                token_info.ensure_quotas(pool_tier)
+                                modes_to_query = POOL_SYNC_MODES.get(current_pool, ["fast"])
+                                # 第一次查询的 mode 已有 result，先填充
+                                if rate_limit_model_name in modes_to_query:
+                                    self._update_quota_window(
+                                        token_info, rate_limit_model_name, result
+                                    )
+                                # 查询其他 mode
+                                for m in modes_to_query:
+                                    if m == rate_limit_model_name:
+                                        continue
+                                    try:
+                                        m_result = await usage_service.get(
+                                            token_str, model_name=m
+                                        )
+                                        self._update_quota_window(token_info, m, m_result)
+                                    except Exception as me:
+                                        logger.debug(
+                                            f"Token {mask_token_for_log(token_info.token)}: "
+                                            f"multi-mode query mode={m} failed: {me}"
+                                        )
+                                token_info.sync_legacy_quota(pool_tier)
 
                             logger.info(
                                 f"Token {mask_token_for_log(token_info.token)}: refreshed "
