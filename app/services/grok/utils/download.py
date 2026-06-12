@@ -99,6 +99,15 @@ class DownloadService:
     ) -> str:
         asset_url = path_or_url
         path = path_or_url
+
+        # imagine-public URLs are already publicly accessible — skip proxy
+        if path_or_url.startswith("http"):
+            host = urlparse(path_or_url).hostname or ""
+            if host.startswith("imagine-public") and not get_config(
+                "features.imagine_public_image_proxy", False
+            ):
+                return path_or_url
+
         if path_or_url.startswith("http"):
             parsed = urlparse(path_or_url)
             path = parsed.path or ""
