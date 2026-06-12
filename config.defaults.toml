@@ -34,6 +34,14 @@ filter_tags = ["xaiartifact","xai:tool_usage_card","grok:render"]
 # 是否在响应末尾追加搜索信源（## Sources 段落）
 # Grok SSE 流中的 webSearchResults 和 xSearchResults 透传给下游
 show_search_sources = false
+# 是否把文中 [N] 引用标记 inline 化为 [[N]](url) markdown 链接（仅非流式）
+# 同时自动去重连续相同引用如 [1][1] -> [1]
+inline_citations = true
+# auto mode 配额耗尽时自动降级到 fast → expert（仅 chat 模型）
+auto_chat_mode_fallback = true
+# 是否把 imagine-public.x.ai 的图片 URL 也走本服务代理（默认 false 直接透传）
+# 这些 URL 本身公开可访问，透传可节省带宽和延迟
+imagine_public_image_proxy = false
 
 
 # ==================== 代理配置 ====================
@@ -102,6 +110,18 @@ save_delay_ms = 500
 usage_flush_interval_sec = 5
 # 多 worker 状态同步间隔（秒）
 reload_interval_sec = 30
+# 是否启用 consumed 模式（按消耗次数选择 token，而非剩余配额）
+consumed_mode_enabled = false
+# 是否启用多 mode 配额追踪（per-mode QuotaWindow，而非单整数 quota）
+multi_mode_quota_enabled = false
+# 是否启用 inflight 感知的 token 选择评分
+inflight_enabled = false
+# inflight 超时秒数（acquire 后超过此时间未 release 则自动清理）
+inflight_timeout_sec = 120
+# inflight 周期清理间隔秒数（scheduler 每隔 N 秒主动 sweep 所有 pool）
+inflight_cleanup_interval_sec = 60
+# 池推断方法: "window"（legacy windowSizeSeconds）或 "auto_total"（auto.total 值）
+pool_inference_method = "window"
 
 # ==================== 缓存管理 ====================
 [cache]
@@ -247,14 +267,3 @@ r2_secret_access_key = ""
 r2_region = "auto"
 # object key prefix in bucket
 r2_key_prefix = "tmp"
-
-# ==================== Token 设置 ====================
-[token]
-# 是否启用 consumed 模式（按消耗次数选择 token，而非剩余配额）
-consumed_mode_enabled = false
-# 是否启用多 mode 配额追踪（per-mode QuotaWindow，而非单整数 quota）
-multi_mode_quota_enabled = false
-# 是否启用 inflight 感知的 token 选择评分
-inflight_enabled = false
-# 池推断方法: "window"（legacy windowSizeSeconds）或 "auto_total"（auto.total 值）
-pool_inference_method = "window"

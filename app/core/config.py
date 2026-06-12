@@ -5,6 +5,7 @@
 - config.defaults.toml: 默认配置基线
 """
 
+import os
 from copy import deepcopy
 import asyncio
 from pathlib import Path
@@ -332,9 +333,58 @@ def get_config(key: str, default: Any = None) -> Any:
     return config.get(key, default)
 
 
+# 灰度开关白名单：这些 key 优先读环境变量，方便不改 toml 灰度
+# 环境变量名规则：GROK2API_<TOKEN_MULTI_MODE_QUOTA_ENABLED>（key 大写、点改下划线）
+_FEATURE_FLAG_ALLOWLIST = {
+    "token.multi_mode_quota_enabled",
+    "token.inflight_enabled",
+    "token.consumed_mode_enabled",
+    "features.auto_chat_mode_fallback",
+    "features.inline_citations",
+    "features.imagine_public_image_proxy",
+    "features.show_search_sources",
+}
+
+
+def _parse_bool(value: str) -> bool:
+    return value.strip().lower() in ("1", "true", "yes", "on", "y", "t")
+
+
+def feature_enabled(key: str, default: bool = False) -> bool:
+    """
+    检查特性开关，优先读环境变量再回落 config。
+
+    环境变量名 = "GROK2API_" + key.upper().replace(".", "_")
+    例：token.multi_mode_quota_enabled -> GROK2API_TOKEN_MULTI_MODE_QUOTA_ENABLED
+    """
+    if key in _FEATURE_FLAG_ALLOWLIST:
+        env_name = "GROK2API_" + key.upper().replace(".", "_")
+        env_val = os.environ.get(env_name)
+        if env_val is not None:
+            return _parse_bool(env_val)
+    val = config.get(key, default)
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, str):
+        return _parse_bool(val)
+    return bool(val) if val is not None else default
+
+
+def feature_flags_summary() -> Dict[str, bool]:
+    """启动期打印特性开关状态用。"""
+    return {key: feature_enabled(key) for key in sorted(_FEATURE_FLAG_ALLOWLIST)}
+
+
 def register_defaults(defaults: Dict[str, Any]):
     """注册默认配置"""
     config.register_defaults(defaults)
 
 
-__all__ = ["Config", "config", "get_config", "register_defaults"]
+__all__ = [
+    "Config",
+    "config",
+    "get_config",
+    "feature_enabled",
+    "feature_flags_summary",
+    "register_defaults",
+]

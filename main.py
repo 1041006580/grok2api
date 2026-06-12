@@ -49,7 +49,11 @@ from fastapi.staticfiles import StaticFiles
 
 # 初始化日志
 setup_logging(
-    level=os.getenv("LOG_LEVEL", "INFO"), json_console=False, file_logging=True
+    level=os.getenv("LOG_LEVEL", "INFO"),
+    json_console=False,
+    file_logging=True,
+    file_level=os.getenv("LOG_FILE_LEVEL"),
+    max_files=int(os.getenv("LOG_MAX_FILES", "14")),
 )
 
 
@@ -94,6 +98,19 @@ async def lifespan(app: FastAPI):
 
     from app.services.cf_refresh import start as cf_refresh_start
     cf_refresh_start()
+
+    # 打印当前生效的特性开关（含环境变量覆盖）
+    try:
+        from app.core.config import feature_flags_summary
+        flags = feature_flags_summary()
+        on = [k for k, v in flags.items() if v]
+        off = [k for k, v in flags.items() if not v]
+        if on:
+            logger.info(f"Feature flags ON:  {', '.join(on)}")
+        if off:
+            logger.debug(f"Feature flags OFF: {', '.join(off)}")
+    except Exception as e:
+        logger.warning(f"Failed to print feature flags: {e}")
 
     logger.info("Application startup complete.")
     yield
