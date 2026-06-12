@@ -33,34 +33,40 @@ class TokenService:
         return manager.get_token(pool_name)
 
     @staticmethod
-    async def consume(token: str, effort: EffortType = EffortType.LOW) -> bool:
+    async def consume(
+        token: str, effort: EffortType = EffortType.LOW, mode: Optional[str] = None
+    ) -> bool:
         """
         消耗 Token 配额（本地预估）
 
         Args:
             token: Token 字符串
             effort: 消耗力度
+            mode: 可选 mode id（multi_mode 启用时按 mode 扣减 quotas）
 
         Returns:
             是否成功
         """
         manager = await TokenService._get_manager()
-        return await manager.consume(token, effort)
+        return await manager.consume(token, effort, mode=mode)
 
     @staticmethod
-    async def sync_usage(token: str, effort: EffortType = EffortType.LOW) -> bool:
+    async def sync_usage(
+        token: str, effort: EffortType = EffortType.LOW, mode: Optional[str] = None
+    ) -> bool:
         """
         同步 Token 使用量（优先 API，降级本地）
 
         Args:
             token: Token 字符串
             effort: 降级时的消耗力度
+            mode: 可选 mode id（multi_mode 启用时更新对应 QuotaWindow）
 
         Returns:
             是否成功
         """
         manager = await TokenService._get_manager()
-        return await manager.sync_usage(token, effort)
+        return await manager.sync_usage(token, effort, mode=mode)
 
     @staticmethod
     async def record_fail(token: str, status_code: int = 401, reason: str = "") -> bool:

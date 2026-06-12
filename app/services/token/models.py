@@ -248,8 +248,20 @@ class TokenInfo(BaseModel):
             self.last_used_at = int(datetime.now().timestamp() * 1000)
 
     def need_refresh(self, interval_hours: int = 8) -> bool:
-        """检查是否需要刷新配额"""
-        if self.status != TokenStatus.COOLING:
+        """
+        检查是否需要刷新配额
+
+        触发条件（任一即触发）：
+        1. status == COOLING（整 token 冷却，旧逻辑）
+        2. ACTIVE token 但有任何 mode 桶 remaining=0（per-mode rate limit 路径）
+
+        刷新间隔由 last_sync_at 控制；从未同步过的 token 立即刷新。
+        """
+        any_zero_mode = (
+            self.quotas is not None
+            and any(w.remaining == 0 for w in self.quotas.values())
+        )
+        if self.status != TokenStatus.COOLING and not any_zero_mode:
             return False
 
         if self.last_sync_at is None:

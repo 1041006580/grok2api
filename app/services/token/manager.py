@@ -18,7 +18,7 @@ from app.services.token.models import (
     QuotaWindow,
 )
 from app.core.storage import get_storage, LocalStorage
-from app.core.config import get_config
+from app.core.config import get_config, feature_enabled
 from app.core.exceptions import UpstreamException
 from app.services.grok.utils.retry import explicit_auth_failure
 from app.services.token.pool import TokenPool
@@ -528,13 +528,14 @@ class TokenManager:
             if self._dirty:
                 self._schedule_save()
 
-    def get_token(self, pool_name: str = "ssoBasic", exclude: set = None, prefer_tags: Optional[Set[str]] = None) -> Optional[str]:
+    def get_token(self, pool_name: str = "ssoBasic", exclude: set = None, prefer_tags: Optional[Set[str]] = None, mode: Optional[str] = None) -> Optional[str]:
         """
         获取可用 Token
 
         Args:
             pool_name: Token 池名称
             exclude: 需要排除的 token 字符串集合
+            mode: 可选 mode id（multi_mode 启用时按 mode 配额选择）
 
         Returns:
             Token 字符串或 None
@@ -544,7 +545,7 @@ class TokenManager:
             logger.warning(f"Pool '{pool_name}' not found")
             return None
 
-        token_info = pool.select(exclude=exclude, prefer_tags=prefer_tags)
+        token_info = pool.select(exclude=exclude, prefer_tags=prefer_tags, mode=mode)
         if not token_info:
             logger.warning(f"No available token in pool '{pool_name}'")
             return None
@@ -554,12 +555,13 @@ class TokenManager:
             return token[4:]
         return token
 
-    def get_token_info(self, pool_name: str = "ssoBasic", prefer_tags: Optional[Set[str]] = None) -> Optional["TokenInfo"]:
+    def get_token_info(self, pool_name: str = "ssoBasic", prefer_tags: Optional[Set[str]] = None, mode: Optional[str] = None) -> Optional["TokenInfo"]:
         """
         获取可用 Token 的完整信息
 
         Args:
             pool_name: Token 池名称
+            mode: 可选 mode id（multi_mode 启用时按 mode 配额选择）
 
         Returns:
             TokenInfo 对象或 None
@@ -569,7 +571,7 @@ class TokenManager:
             logger.warning(f"Pool '{pool_name}' not found")
             return None
 
-        token_info = pool.select(prefer_tags=prefer_tags)
+        token_info = pool.select(prefer_tags=prefer_tags, mode=mode)
         if not token_info:
             logger.warning(f"No available token in pool '{pool_name}'")
             return None
@@ -689,8 +691,8 @@ class TokenManager:
                 consumed_mode = False
                 multi_mode = False
                 try:
-                    consumed_mode = get_config("token.consumed_mode_enabled", False)
-                    multi_mode = get_config("token.multi_mode_quota_enabled", False)
+                    consumed_mode = feature_enabled("token.consumed_mode_enabled", False)
+                    multi_mode = feature_enabled("token.multi_mode_quota_enabled", False)
                 except Exception:
                     pass
 
@@ -772,7 +774,7 @@ class TokenManager:
                 # multi-mode: 更新对应 QuotaWindow
                 multi_mode = False
                 try:
-                    multi_mode = get_config("token.multi_mode_quota_enabled", False)
+                    multi_mode = feature_enabled("token.multi_mode_quota_enabled", False)
                 except Exception:
                     pass
                 if multi_mode and mode:
@@ -897,24 +899,48 @@ class TokenManager:
         logger.warning(f"Token {mask_token_for_log(raw_token)}: not found for failure record")
         return False
 
-    async def mark_rate_limited(self, token_str: str) -> bool:
+    async def mark_rate_limited(self, token_str: str, mode: Optional[str] = None) -> bool:
         """
-        将 Token 标记为配额耗尽（COOLING）
+        将 Token 标记为配额耗尽
 
-        当 Grok API 返回 429 时调用，将 quota 设为 0 并标记 COOLING，
-        使该 Token 不再被选中，等待下次 Scheduler 刷新恢复。
+        当 Grok API 返回 429 时调用：
+        - 默认行为：将 quota 设为 0 并标记整个 token 为 COOLING
+        - multi_mode + mode 已知：仅将 quotas[mode] 清零，token 保持 ACTIVE
+          其他 mode 仍可使用
 
         Args:
             token_str: Token 字符串
+            mode: 可选 mode id（multi_mode 启用且 mode 已知时仅清零该桶）
 
         Returns:
             是否成功
         """
         raw_token = token_str.removeprefix("sso=")
 
+        multi_mode = False
+        try:
+            multi_mode = feature_enabled("token.multi_mode_quota_enabled", False)
+        except Exception:
+            pass
+
         for pool in self.pools.values():
             token = pool.get(raw_token)
             if token:
+                # multi_mode 且 mode 已知 -> 只清零该 mode，保留 ACTIVE
+                if multi_mode and mode and token.quotas and mode in token.quotas:
+                    old_remaining = token.quotas[mode].remaining
+                    token.quotas[mode].remaining = 0
+                    pool_tier = pool.name.replace("sso", "").lower() or "basic"
+                    token.sync_legacy_quota(pool_tier)
+                    logger.warning(
+                        f"Token {mask_token_for_log(raw_token)}: mode '{mode}' rate limited "
+                        f"(remaining {old_remaining} -> 0, token stays active for other modes)"
+                    )
+                    self._track_token_change(token, pool.name, "state")
+                    self._schedule_save()
+                    return True
+
+                # 默认行为：整个 token 进入 COOLING
                 old_quota = token.quota
                 token.quota = 0
                 token.status = TokenStatus.COOLING
@@ -1196,7 +1222,7 @@ class TokenManager:
 
                             consumed_mode = False
                             try:
-                                consumed_mode = get_config("token.consumed_mode_enabled", False)
+                                consumed_mode = feature_enabled("token.consumed_mode_enabled", False)
                             except Exception:
                                 pass
 
@@ -1230,22 +1256,15 @@ class TokenManager:
                             # Multi-mode 同步：填充对应池的所有 mode quotas
                             multi_mode = False
                             try:
-                                multi_mode = get_config("token.multi_mode_quota_enabled", False)
+                                multi_mode = feature_enabled("token.multi_mode_quota_enabled", False)
                             except Exception:
                                 pass
                             if multi_mode:
                                 pool_tier = (current_pool or "").replace("sso", "").lower() or "basic"
                                 token_info.ensure_quotas(pool_tier)
                                 modes_to_query = POOL_SYNC_MODES.get(current_pool, ["fast"])
-                                # 第一次查询的 mode 已有 result，先填充
-                                if rate_limit_model_name in modes_to_query:
-                                    self._update_quota_window(
-                                        token_info, rate_limit_model_name, result
-                                    )
-                                # 查询其他 mode
+                                # 每个 mode 单独查询，避免误把 grok_model 的 result 写入 mode 桶
                                 for m in modes_to_query:
-                                    if m == rate_limit_model_name:
-                                        continue
                                     try:
                                         m_result = await usage_service.get(
                                             token_str, model_name=m

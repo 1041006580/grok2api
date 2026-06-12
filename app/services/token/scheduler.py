@@ -3,9 +3,13 @@
 import asyncio
 from typing import Optional
 
+from app.core.config import get_config
 from app.core.logger import logger
 from app.core.storage import get_storage, StorageError, RedisStorage
 from app.services.token.manager import get_token_manager
+
+
+DEFAULT_INFLIGHT_CLEANUP_INTERVAL_SEC = 60
 
 
 class TokenRefreshScheduler:
@@ -15,6 +19,7 @@ class TokenRefreshScheduler:
         self.interval_hours = interval_hours
         self.interval_seconds = interval_hours * 3600
         self._task: Optional[asyncio.Task] = None
+        self._cleanup_task: Optional[asyncio.Task] = None
         self._running = False
 
     async def _refresh_loop(self):
@@ -80,6 +85,41 @@ class TokenRefreshScheduler:
                 logger.error(f"Scheduler: refresh error - {e}")
                 await asyncio.sleep(self.interval_seconds)
 
+    async def _cleanup_loop(self):
+        """周期性清理过期 inflight 条目"""
+        while self._running:
+            try:
+                interval = get_config(
+                    "token.inflight_cleanup_interval_sec",
+                    DEFAULT_INFLIGHT_CLEANUP_INTERVAL_SEC,
+                )
+                try:
+                    interval = float(interval)
+                except (TypeError, ValueError):
+                    interval = float(DEFAULT_INFLIGHT_CLEANUP_INTERVAL_SEC)
+                if interval <= 0:
+                    interval = float(DEFAULT_INFLIGHT_CLEANUP_INTERVAL_SEC)
+
+                await asyncio.sleep(interval)
+
+                manager = await get_token_manager()
+                total_cleaned = 0
+                for pool in manager.pools.values():
+                    try:
+                        total_cleaned += pool.cleanup_stale_inflight()
+                    except Exception as e:
+                        logger.warning(
+                            f"Inflight cleanup failed for pool '{pool.name}': {e}"
+                        )
+                if total_cleaned > 0:
+                    logger.info(f"Inflight cleanup: removed {total_cleaned} stale entries")
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.warning(f"Inflight cleanup loop error: {e}")
+                await asyncio.sleep(DEFAULT_INFLIGHT_CLEANUP_INTERVAL_SEC)
+
     def start(self):
         """启动调度器"""
         if self._running:
@@ -88,6 +128,7 @@ class TokenRefreshScheduler:
 
         self._running = True
         self._task = asyncio.create_task(self._refresh_loop())
+        self._cleanup_task = asyncio.create_task(self._cleanup_loop())
         logger.info("Scheduler: enabled")
 
     def stop(self):
@@ -98,6 +139,8 @@ class TokenRefreshScheduler:
         self._running = False
         if self._task:
             self._task.cancel()
+        if self._cleanup_task:
+            self._cleanup_task.cancel()
         logger.info("Scheduler: stopped")
 
 
