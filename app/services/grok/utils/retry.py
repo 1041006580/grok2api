@@ -2,10 +2,38 @@
 Retry helpers for token switching.
 """
 
-from typing import Optional, Set
+from typing import Optional, Set, Tuple
 
+from app.core.config import get_config, feature_enabled
 from app.core.exceptions import UpstreamException
 from app.services.grok.services.model import ModelService
+
+
+# Auto chat mode fallback chain: when primary mode quota is exhausted across
+# all tokens, try these alternatives in order.
+_AUTO_CHAT_FALLBACK = ("auto", "fast", "expert")
+
+
+def _mode_candidates(model_id: str) -> Tuple[Optional[str], ...]:
+    """Return mode IDs to try for *model_id* in priority order.
+
+    When the primary mode is "auto" and `features.auto_chat_mode_fallback`
+    is enabled (default), also try fast and expert.
+    """
+    try:
+        primary = ModelService.quota_mode_for_model(model_id)
+    except Exception:
+        return (None,)
+
+    fallback_enabled = True
+    try:
+        fallback_enabled = feature_enabled("features.auto_chat_mode_fallback", True)
+    except Exception:
+        pass
+
+    if primary == "auto" and fallback_enabled:
+        return _AUTO_CHAT_FALLBACK
+    return (primary,)
 
 
 async def pick_token(
@@ -18,21 +46,26 @@ async def pick_token(
     if preferred and preferred not in tried:
         return preferred
 
-    token = None
-    for pool_name in ModelService.pool_candidates_for_model(model_id):
-        token = token_mgr.get_token(pool_name, exclude=tried, prefer_tags=prefer_tags)
-        if token:
-            break
+    candidates = _mode_candidates(model_id)
+    pools = ModelService.pool_candidates_for_model(model_id)
 
-    if not token:
-        result = await token_mgr.refresh_cooling_tokens(model_id)
-        if result.get("recovered", 0) > 0:
-            for pool_name in ModelService.pool_candidates_for_model(model_id):
-                token = token_mgr.get_token(pool_name, exclude=tried, prefer_tags=prefer_tags)
+    # Try each (mode, pool) combination, primary mode first
+    for mode in candidates:
+        for pool_name in pools:
+            token = token_mgr.get_token(pool_name, exclude=tried, prefer_tags=prefer_tags, mode=mode)
+            if token:
+                return token
+
+    # No token found across any mode → trigger refresh and retry
+    result = await token_mgr.refresh_cooling_tokens(model_id)
+    if result.get("recovered", 0) > 0:
+        for mode in candidates:
+            for pool_name in pools:
+                token = token_mgr.get_token(pool_name, exclude=tried, prefer_tags=prefer_tags, mode=mode)
                 if token:
-                    break
+                    return token
 
-    return token
+    return None
 
 
 def rate_limited(error: Exception) -> bool:
