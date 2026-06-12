@@ -18,6 +18,7 @@ class VoiceService:
         voice: str = "ara",
         personality: str = "assistant",
         speed: float = 1.0,
+        custom_instruction: str = "",
     ) -> Dict[str, Any]:
         browser = get_config("proxy.browser")
         async with ResettableSession(impersonate=browser) as session:
@@ -27,5 +28,6 @@ class VoiceService:
                 voice=voice,
                 personality=personality,
                 speed=speed,
+                custom_instruction=custom_instruction,
             )
             return response.json()

@@ -31,15 +31,18 @@ class LivekitTokenReverse:
         voice: str = "ara",
         personality: str = "assistant",
         speed: float = 1.0,
+        custom_instruction: str = "",
     ) -> Dict[str, Any]:
         """Fetch LiveKit token.
-        
+
         Args:
             session: AsyncSession, the session to use for the request.
             token: str, the SSO token.
             voice: str, the voice to use for the request.
             personality: str, the personality to use for the request.
             speed: float, the speed to use for the request.
+            custom_instruction: str, when non-empty, sent as raw instructions
+                instead of using personality preset.
 
         Returns:
             Dict[str, Any]: The LiveKit token.
@@ -57,17 +60,23 @@ class LivekitTokenReverse:
                 referer="https://grok.com/",
             )
 
+            # Build session payload — custom instructions take precedence over personality
+            session_payload: Dict[str, Any] = {
+                "voice": voice,
+                "personality": None,
+                "playback_speed": speed,
+                "enable_vision": False,
+                "turn_detection": {"type": "server_vad"},
+            }
+            if custom_instruction:
+                session_payload["instructions"] = custom_instruction
+                session_payload["is_raw_instructions"] = True
+            else:
+                session_payload["personality"] = personality
+
             # Build payload
             payload = {
-                "sessionPayload": orjson.dumps(
-                    {
-                        "voice": voice,
-                        "personality": personality,
-                        "playback_speed": speed,
-                        "enable_vision": False,
-                        "turn_detection": {"type": "server_vad"},
-                    }
-                ).decode(),
+                "sessionPayload": orjson.dumps(session_payload).decode(),
                 "requestAgentDispatch": False,
                 "livekitUrl": LIVEKIT_WS_URL,
                 "params": {"enable_markdown_transcript": "true"},

@@ -25,6 +25,7 @@ async def public_voice_token(
     voice: str = "ara",
     personality: str = "assistant",
     speed: float = 1.0,
+    instruction: str = "",
 ):
     """获取 Grok Voice Mode (LiveKit) Token"""
     token_mgr = await get_token_manager()
@@ -48,6 +49,7 @@ async def public_voice_token(
             voice=voice,
             personality=personality,
             speed=speed,
+            custom_instruction=instruction,
         )
         token = data.get("token")
         if not token:

@@ -407,11 +407,16 @@
 
       log('正在获取 Token...');
 
+      const instructionEl = document.getElementById('instructionInput');
+      const instruction = instructionEl ? (instructionEl.value || '').trim() : '';
       const params = new URLSearchParams({
         voice: voiceSelect.value,
         personality: personalitySelect.value,
         speed: speedRange.value
       });
+      if (instruction) {
+        params.set('instruction', instruction);
+      }
 
       const headers = buildAuthHeaders(authHeader);
 
