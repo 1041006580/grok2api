@@ -2,6 +2,10 @@
 
 **中文** | [English](docs/README.en.md) | [文档](https://blog.cheny.me/blog/posts/grok2api)
 
+> [!IMPORTANT]  
+> **V2 架构已就绪**：基于上游 chenyme/grok2api 64a71f1 + 独有功能（xAI Official API keys、metrics endpoint）。  
+> 切换到 v2 分支：`git checkout v2` | 迁移指南：[docs/MIGRATION.md](docs/MIGRATION.md) | 变更日志：[docs/CHANGELOG.md](docs/CHANGELOG.md)
+
 > [!NOTE]
 > 本项目仅供学习与研究，使用者必须在遵循 Grok 的 **使用条款** 以及 **法律法规** 的情况下使用，不得用于非法用途。
 
