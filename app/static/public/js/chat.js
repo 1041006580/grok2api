@@ -469,7 +469,24 @@
 
   function renderBasicMarkdown(rawText) {
     const text = (rawText || '').replace(/\\n/g, '\n');
-    const escaped = escapeHtml(text);
+
+    // KaTeX: 提取数学表达式到 placeholder（在 escapeHtml 之前）
+    const mathPlaceholders = [];
+    let mathSafe = text;
+    if (window.katex) {
+      mathSafe = mathSafe.replace(/\$\$([\s\S]+?)\$\$/g, (_, tex) => {
+        const i = mathPlaceholders.length;
+        mathPlaceholders.push({ tex, display: true });
+        return `@@MATH_${i}@@`;
+      });
+      mathSafe = mathSafe.replace(/\$([^\n$]+?)\$/g, (_, tex) => {
+        const i = mathPlaceholders.length;
+        mathPlaceholders.push({ tex, display: false });
+        return `@@MATH_${i}@@`;
+      });
+    }
+
+    const escaped = escapeHtml(mathSafe);
     const codeBlocks = [];
     const fenced = escaped.replace(/```([a-zA-Z0-9_-]+)?\n([\s\S]*?)```/g, (match, lang, code) => {
       const safeLang = lang ? escapeHtml(lang) : '';
@@ -692,6 +709,21 @@
     codeBlocks.forEach((html, index) => {
       output = output.replace(`@@CODEBLOCK_${index}@@`, html);
     });
+    // KaTeX: 渲染数学 placeholder
+    if (window.katex && mathPlaceholders.length) {
+      output = output.replace(/@@MATH_(\d+)@@/g, (_, idx) => {
+        const m = mathPlaceholders[parseInt(idx, 10)];
+        if (!m) return '';
+        try {
+          return window.katex.renderToString(m.tex, {
+            displayMode: m.display,
+            throwOnError: false,
+          });
+        } catch (_e) {
+          return escapeHtml(m.display ? `$$${m.tex}$$` : `$${m.tex}$`);
+        }
+      });
+    }
     return output;
   }
 

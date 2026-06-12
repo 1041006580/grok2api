@@ -166,6 +166,7 @@ function processTokens(data) {
             token: t.token,
             status: t.status || 'active',
             quota: t.quota || 0,
+            quotas: t.quotas || null,
             note: t.note || '',
             fail_count: t.fail_count || 0,
             use_count: t.use_count || 0,
@@ -313,10 +314,19 @@ function renderTable() {
     }
     tdStatus.innerHTML = statusHtml;
 
-    // Quota (Center)
+    // Quota (Center) - 主配额；有 per-mode quotas 时附带 tooltip 详情
     const tdQuota = document.createElement('td');
     tdQuota.className = 'text-center font-mono text-xs';
-    tdQuota.innerText = item.quota;
+    if (item.quotas && typeof item.quotas === 'object' && Object.keys(item.quotas).length > 0) {
+      const modeLines = Object.entries(item.quotas)
+        .map(([mode, w]) => `${mode}: ${w.remaining}/${w.total || '?'}`)
+        .join('\n');
+      const hasZero = Object.values(item.quotas).some(w => w.remaining === 0);
+      const dotColor = hasZero ? 'text-orange-500' : 'text-gray-400';
+      tdQuota.innerHTML = `${item.quota} <span class="${dotColor}" title="${escapeHtml(modeLines)}" style="cursor:help">●</span>`;
+    } else {
+      tdQuota.innerText = item.quota;
+    }
 
     // Note (Left)
     const tdNote = document.createElement('td');
@@ -625,6 +635,7 @@ async function syncToServer() {
     if (typeof t.last_sync_at === 'number') payload.last_sync_at = t.last_sync_at;
     if (typeof t.last_asset_clear_at === 'number') payload.last_asset_clear_at = t.last_asset_clear_at;
     if (typeof t.last_fail_reason === 'string' && t.last_fail_reason) payload.last_fail_reason = t.last_fail_reason;
+    if (t.quotas && typeof t.quotas === 'object') payload.quotas = t.quotas;
     newTokens[t.pool].push(payload);
   });
 
