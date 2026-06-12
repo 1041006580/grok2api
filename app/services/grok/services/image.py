@@ -11,7 +11,7 @@ from typing import Any, AsyncGenerator, AsyncIterable, Dict, List, Optional, Uni
 
 import orjson
 
-from app.core.config import get_config
+from app.core.config import get_config, feature_enabled
 from app.core.logger import logger
 from app.core.mask import mask_token_for_log
 from app.core.exceptions import AppException, ErrorType, UpstreamException
@@ -24,6 +24,7 @@ from app.services.grok.services.image_edit import (
     ImageStreamProcessor as AppChatImageStreamProcessor,
     ImageCollectProcessor as AppChatImageCollectProcessor,
 )
+from app.services.grok.services.model import ModelService
 from app.services.media_storage import get_media_storage
 from app.services.token import EffortType
 from app.services.reverse.ws_imagine import ImagineWebSocketReverse
@@ -102,6 +103,10 @@ class ImageGenerationService:
                         )
 
                     tried_tokens.add(current_token)
+                    inflight = feature_enabled("token.inflight_enabled", False)
+                    if inflight:
+                        token_mgr.acquire_token(current_token)
+                    released = False
                     yielded = False
                     try:
                         try:
@@ -143,13 +148,19 @@ class ImageGenerationService:
                         if rate_limited(e):
                             if yielded:
                                 raise
-                            await token_mgr.mark_rate_limited(current_token)
+                            mid = getattr(model_info, "model_id", None)
+                            rl_mode = ModelService.quota_mode_for_model(mid) if mid else None
+                            await token_mgr.mark_rate_limited(current_token, mode=rl_mode)
                             logger.warning(
                                 f"Token {mask_token_for_log(current_token)} rate limited (429), "
                                 f"trying next token (attempt {attempt + 1}/{max_token_retries})"
                             )
                             continue
                         raise
+                    finally:
+                        if inflight and not released:
+                            token_mgr.release_token(current_token)
+                            released = True
 
                 if last_error:
                     raise last_error
@@ -182,6 +193,9 @@ class ImageGenerationService:
                 )
 
             tried_tokens.add(current_token)
+            inflight = feature_enabled("token.inflight_enabled", False)
+            if inflight:
+                token_mgr.acquire_token(current_token)
             try:
                 try:
                     return await self._collect_app_chat(
@@ -214,13 +228,18 @@ class ImageGenerationService:
             except UpstreamException as e:
                 last_error = e
                 if rate_limited(e):
-                    await token_mgr.mark_rate_limited(current_token)
+                    mid = getattr(model_info, "model_id", None)
+                    rl_mode = ModelService.quota_mode_for_model(mid) if mid else None
+                    await token_mgr.mark_rate_limited(current_token, mode=rl_mode)
                     logger.warning(
                         f"Token {mask_token_for_log(current_token)} rate limited (429), "
                         f"trying next token (attempt {attempt + 1}/{max_token_retries})"
                     )
                     continue
                 raise
+            finally:
+                if inflight:
+                    token_mgr.release_token(current_token)
 
         if last_error:
             raise last_error
@@ -511,7 +530,9 @@ class ImageGenerationService:
             )
 
         try:
-            await token_mgr.consume(token, self._get_effort(model_info))
+            model_id = getattr(model_info, "model_id", None) if model_info else None
+            mode = ModelService.quota_mode_for_model(model_id) if model_id else "fast"
+            await token_mgr.consume(token, self._get_effort(model_info), mode=mode)
         except Exception as e:
             logger.warning(f"Failed to consume token: {e}")
 

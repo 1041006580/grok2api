@@ -12,7 +12,7 @@ from curl_cffi.requests.errors import RequestsError
 
 from app.core.logger import logger
 from app.core.mask import mask_token_for_log
-from app.core.config import get_config
+from app.core.config import get_config, feature_enabled
 from app.core.exceptions import (
     AppException,
     ValidationException,
@@ -101,6 +101,68 @@ def extract_tool_text(raw: str, rollout_id: str = "") -> str:
         return text
     # Fallback: strip tags to keep any raw text.
     return re.sub(r"<[^>]+>", "", raw, flags=re.DOTALL).strip()
+
+
+_CITATION_RE = re.compile(r"\[(\d+)\]")
+_CONSECUTIVE_CITATION_RE = re.compile(r"(\[(\d+)\])(\s*\1)+")
+
+
+def _build_url_citations(
+    text: str, sources: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    """
+    扫描文本中的 [N] 引用标记，生成 OpenAI url_citation annotations。
+
+    Returns:
+        [{"type": "url_citation", "url_citation": {"url", "title", "start_index", "end_index"}}]
+    """
+    if not text or not sources:
+        return []
+    annotations = []
+    seen_positions: set = set()
+    for m in _CITATION_RE.finditer(text):
+        idx = int(m.group(1)) - 1
+        if idx < 0 or idx >= len(sources):
+            continue
+        start = m.start()
+        end = m.end()
+        key = (idx, start)
+        if key in seen_positions:
+            continue
+        seen_positions.add(key)
+        src = sources[idx]
+        annotations.append({
+            "type": "url_citation",
+            "url_citation": {
+                "url": src.get("url", ""),
+                "title": src.get("title") or src.get("url", ""),
+                "start_index": start,
+                "end_index": end,
+            },
+        })
+    return annotations
+
+
+def _inline_citations(text: str, sources: List[Dict[str, Any]]) -> str:
+    """
+    把文本中的 [N] 引用标记转为 [[N]](url) 可点击 markdown 链接。
+    连续重复的相同引用去重（如 [1][1] → [[1]](url)）。
+    """
+    if not text or not sources:
+        return text
+    # 先去重连续相同引用
+    text = _CONSECUTIVE_CITATION_RE.sub(r"\1", text)
+
+    def _replace(m: re.Match) -> str:
+        idx = int(m.group(1)) - 1
+        if idx < 0 or idx >= len(sources):
+            return m.group(0)
+        url = sources[idx].get("url", "")
+        if not url:
+            return m.group(0)
+        return f"[[{m.group(1)}]]({url})"
+
+    return _CITATION_RE.sub(_replace, text)
 
 
 def _get_chat_semaphore() -> asyncio.Semaphore:
@@ -447,6 +509,10 @@ class ChatService:
                 )
 
             tried_tokens.add(token)
+            inflight = feature_enabled("token.inflight_enabled", False)
+            if inflight:
+                token_mgr.acquire_token(token)
+            stream_transferred = False
 
             try:
                 # 请求 Grok
@@ -475,6 +541,7 @@ class ChatService:
                         tool_choice=tool_choice,
                         prompt_tokens=prompt_tokens,
                     )
+                    stream_transferred = True
                     return wrap_stream_with_usage(
                         processor.process(response), token_mgr, token, model
                     )
@@ -495,8 +562,9 @@ class ChatService:
                         if (model_info and model_info.cost.value == "high")
                         else EffortType.LOW
                     )
-                    await token_mgr.consume(token, effort)
-                    logger.info(f"Chat completed: model={model}, effort={effort.value}")
+                    mode = ModelService.quota_mode_for_model(model)
+                    await token_mgr.consume(token, effort, mode=mode)
+                    logger.info(f"Chat completed: model={model}, effort={effort.value}, mode={mode}")
                 except Exception as e:
                     logger.warning(f"Failed to record usage: {e}")
                 return result
@@ -507,7 +575,9 @@ class ChatService:
                 if rate_limited(e):
                     if should_cool_token_on_rate_limit(model, e):
                         # 配额不足，标记 token 为 cooling 并换 token 重试
-                        await token_mgr.mark_rate_limited(token)
+                        await token_mgr.mark_rate_limited(
+                            token, mode=ModelService.quota_mode_for_model(model)
+                        )
                         logger.warning(
                             f"Token {mask_token_for_log(token)} rate limited (429), "
                             f"trying next token (attempt {attempt + 1}/{max_token_retries})"
@@ -522,8 +592,9 @@ class ChatService:
 
                 if transient_upstream(e):
                     has_alternative_token = False
+                    alt_mode = ModelService.quota_mode_for_model(model)
                     for pool_name in ModelService.pool_candidates_for_model(model):
-                        if token_mgr.get_token(pool_name, exclude=tried_tokens):
+                        if token_mgr.get_token(pool_name, exclude=tried_tokens, mode=alt_mode):
                             has_alternative_token = True
                             break
                     if not has_alternative_token:
@@ -536,6 +607,10 @@ class ChatService:
 
                 # 非 429 错误，不换 token，直接抛出
                 raise
+
+            finally:
+                if inflight and not stream_transferred:
+                    token_mgr.release_token(token)
 
         # 所有 token 都 429，抛出最后的错误
         if last_error:
@@ -638,7 +713,7 @@ class StreamProcessor(proc_base.BaseProcessor):
         """格式化为 ## Sources markdown 段落（带可识别的标记行用于多轮剥离）。"""
         if not self._web_search_results:
             return ""
-        if not get_config("features.show_search_sources", False):
+        if not feature_enabled("features.show_search_sources", False):
             return ""
         lines = ["\n\n## Sources", "[grok2api-sources]: #"]
         for item in self._web_search_results:
@@ -818,6 +893,7 @@ class StreamProcessor(proc_base.BaseProcessor):
         tool_calls: list = None,
         usage: dict | None = None,
         search_sources: list | None = None,
+        annotations: list | None = None,
     ) -> str:
         """Build SSE response."""
         delta = {}
@@ -828,6 +904,8 @@ class StreamProcessor(proc_base.BaseProcessor):
             delta["tool_calls"] = tool_calls
         elif content:
             delta["content"] = content
+        if annotations:
+            delta["annotations"] = annotations
 
         chunk = {
             "id": self.response_id or f"chatcmpl-{uuid.uuid4().hex[:24]}",
@@ -1013,24 +1091,28 @@ class StreamProcessor(proc_base.BaseProcessor):
                         self._record_tool_call(payload)
                         yield self._sse(tool_calls=[payload])
                 finish_reason = "tool_calls" if self._tool_calls_seen else "stop"
+                full_content = "".join(self._completion_parts)
                 yield self._sse(
                     finish=finish_reason,
                     usage=estimate_chat_usage(
                         prompt_tokens=self.prompt_tokens,
-                        content="".join(self._completion_parts),
+                        content=full_content,
                         tool_calls=self._completion_tool_calls or None,
                     ),
                     search_sources=self.search_sources_list(),
+                    annotations=_build_url_citations(full_content, self._web_search_results),
                 )
             else:
+                full_content = "".join(self._completion_parts)
                 yield self._sse(
                     finish="stop",
                     usage=estimate_chat_usage(
                         prompt_tokens=self.prompt_tokens,
-                        content="".join(self._completion_parts),
+                        content=full_content,
                         tool_calls=self._completion_tool_calls or None,
                     ),
                     search_sources=self.search_sources_list(),
+                    annotations=_build_url_citations(full_content, self._web_search_results),
                 )
 
             yield "data: [DONE]\n\n"
@@ -1133,7 +1215,7 @@ class CollectProcessor(proc_base.BaseProcessor):
         """格式化为 ## Sources markdown 段落。"""
         if not self._web_search_results:
             return ""
-        if not get_config("features.show_search_sources", False):
+        if not feature_enabled("features.show_search_sources", False):
             return ""
         lines = ["\n\n## Sources", "[grok2api-sources]: #"]
         for item in self._web_search_results:
@@ -1314,6 +1396,11 @@ class CollectProcessor(proc_base.BaseProcessor):
             content = "".join(fallback_tokens)
 
         content = self._filter_content(content)
+        # 计算 annotations 时基于原文 [N] 位置
+        annotations = _build_url_citations(content or "", self._web_search_results)
+        # 可选：把 [N] inline 化为 [[N]](url) markdown 链接（默认开启）
+        if feature_enabled("features.inline_citations", True):
+            content = _inline_citations(content, self._web_search_results)
         content += self._format_sources_suffix()
 
         # Parse for tool calls if tools were provided
@@ -1330,7 +1417,7 @@ class CollectProcessor(proc_base.BaseProcessor):
             "role": "assistant",
             "content": content,
             "refusal": None,
-            "annotations": [],
+            "annotations": annotations,
         }
         if tool_calls_result:
             message_obj["tool_calls"] = tool_calls_result

@@ -13,7 +13,7 @@ from typing import AsyncGenerator, AsyncIterable, Dict, List, Tuple, Union, Any
 import orjson
 from curl_cffi.requests.errors import RequestsError
 
-from app.core.config import get_config
+from app.core.config import get_config, feature_enabled
 from app.core.exceptions import (
     AppException,
     ErrorType,
@@ -93,6 +93,10 @@ class ImageEditService:
                 )
 
             tried_tokens.add(current_token)
+            inflight = feature_enabled("token.inflight_enabled", False)
+            if inflight:
+                token_mgr.acquire_token(current_token)
+            stream_transferred = False
             try:
                 file_attachments = await self._upload_images(images, current_token)
                 tool_overrides: Dict[str, Any] | None = None
@@ -116,6 +120,7 @@ class ImageEditService:
                         response_format=response_format,
                         chat_format=chat_format,
                     )
+                    stream_transferred = True
                     return ImageEditResult(
                         stream=True,
                         data=wrap_stream_with_usage(
@@ -140,9 +145,11 @@ class ImageEditService:
                         if (model_info and model_info.cost.value == "high")
                         else EffortType.LOW
                     )
-                    await token_mgr.consume(current_token, effort)
+                    model_id = getattr(model_info, "model_id", None) if model_info else None
+                    mode = ModelService.quota_mode_for_model(model_id) if model_id else "fast"
+                    await token_mgr.consume(current_token, effort, mode=mode)
                     logger.debug(
-                        f"Image edit completed, recorded usage (effort={effort.value})"
+                        f"Image edit completed, recorded usage (effort={effort.value}, mode={mode})"
                     )
                 except Exception as e:
                     logger.warning(f"Failed to record image edit usage: {e}")
@@ -151,13 +158,18 @@ class ImageEditService:
             except UpstreamException as e:
                 last_error = e
                 if rate_limited(e):
-                    await token_mgr.mark_rate_limited(current_token)
+                    mid = getattr(model_info, "model_id", None) if model_info else None
+                    rl_mode = ModelService.quota_mode_for_model(mid) if mid else None
+                    await token_mgr.mark_rate_limited(current_token, mode=rl_mode)
                     logger.warning(
                         f"Token {mask_token_for_log(current_token)} rate limited (429), "
                         f"trying next token (attempt {attempt + 1}/{max_token_retries})"
                     )
                     continue
                 raise
+            finally:
+                if inflight and not stream_transferred:
+                    token_mgr.release_token(current_token)
 
         if last_error:
             raise last_error

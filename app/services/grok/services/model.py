@@ -284,6 +284,40 @@ class ModelService:
         return model.grok_model
 
     @classmethod
+    def quota_mode_for_model(cls, model_id: str) -> str:
+        """
+        Resolve the quota bucket (mode) charged by Grok upstream for this model.
+
+        Returned values match POOL_SYNC_MODES entries:
+        - "fast"    : MODEL_MODE_FAST and basic-tier default
+        - "expert"  : MODEL_MODE_EXPERT
+        - "heavy"   : MODEL_MODE_HEAVY
+        - "auto"    : default for super/heavy-tier non-fast/expert/heavy models
+        - "grok-420-computer-use-sa" : the Grok 4.3 Beta dedicated bucket
+        """
+        model = cls.get(model_id)
+        if not model:
+            return "fast"
+
+        # Grok 4.3 Beta has its own dedicated bucket
+        if model.grok_model == "grok-420-computer-use-sa":
+            return "grok-420-computer-use-sa"
+
+        mode = (model.model_mode or "").upper()
+        if "HEAVY" in mode:
+            return "heavy"
+        if "EXPERT" in mode:
+            return "expert"
+        if "FAST" in mode:
+            return "fast"
+
+        # Non-fast/expert/heavy models on super/heavy tier consume the "auto" bucket
+        if model.tier in {Tier.SUPER, Tier.HEAVY}:
+            return "auto"
+        # Basic tier only tracks "fast" in POOL_SYNC_MODES
+        return "fast"
+
+    @classmethod
     def pool_for_model(cls, model_id: str) -> str:
         """根据模型选择 Token 池"""
         model = cls.get(model_id)

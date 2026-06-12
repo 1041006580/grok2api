@@ -187,8 +187,9 @@ class VideoExtendService:
             if (model_info and model_info.cost.value == "high")
             else EffortType.LOW
         )
+        mode = ModelService.quota_mode_for_model(VIDEO_MODEL_ID)
         try:
-            await token_mgr.consume(token, effort)
+            await token_mgr.consume(token, effort, mode=mode)
         except Exception as e:
             logger.warning(f"Failed to record video usage: {e}")
 
