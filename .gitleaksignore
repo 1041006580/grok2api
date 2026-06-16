@@ -1,0 +1,23 @@
+# Gitleaks 忽略列表 - 已知误报（测试占位符 / 文档示例）
+# 每行一个 fingerprint，格式: commit:file:rule:line
+# 这些都是测试桩数据和文档示例，非真实密钥
+
+# docs/MIGRATION.md 中的 curl 示例（X-Admin-Key 占位符）
+ae54783d1296813892fcc376a9ad960497941cc1:docs/MIGRATION.md:curl-auth-header:61
+
+# tests/test_upstream_low_risk_merge.py 中的 xai-secret-* 测试桩
+1644d0592815a0e7c68132dfe49465c23e2f33b8:tests/test_upstream_low_risk_merge.py:generic-api-key:1841
+88c7af04479858ed36e3765388dc3facce4e58e6:tests/test_upstream_low_risk_merge.py:generic-api-key:1799
+88c7af04479858ed36e3765388dc3facce4e58e6:tests/test_upstream_low_risk_merge.py:generic-api-key:1804
+4aa775e163cbcdb0d3951b7aeb3ee456966beca0:tests/test_upstream_low_risk_merge.py:generic-api-key:1741
+970c49e60efd22e32396822b4970079d722469ca:tests/test_upstream_low_risk_merge.py:generic-api-key:1617
+970c49e60efd22e32396822b4970079d722469ca:tests/test_upstream_low_risk_merge.py:generic-api-key:1636
+b78d320101a7e1640f0f1635a441400164f36906:tests/test_upstream_low_risk_merge.py:generic-api-key:1835
+b78d320101a7e1640f0f1635a441400164f36906:tests/test_upstream_low_risk_merge.py:generic-api-key:1858
+6f82a094a053b082cd1169677cfb0dd50bc4db6b:tests/test_upstream_low_risk_merge.py:generic-api-key:1864
+6f82a094a053b082cd1169677cfb0dd50bc4db6b:tests/test_upstream_low_risk_merge.py:generic-api-key:1890
+a04307d5fa5fdaecf12ae90fb09bf98d073fac1a:tests/test_upstream_low_risk_merge.py:generic-api-key:1657
+a04307d5fa5fdaecf12ae90fb09bf98d073fac1a:tests/test_upstream_low_risk_merge.py:generic-api-key:1683
+a1824c120cdb76309cb54f2e40b7ba4e0b18a7d7:tests/test_upstream_low_risk_merge.py:generic-api-key:1718
+a1824c120cdb76309cb54f2e40b7ba4e0b18a7d7:tests/test_upstream_low_risk_merge.py:generic-api-key:1750
+a1824c120cdb76309cb54f2e40b7ba4e0b18a7d7:tests/test_upstream_low_risk_merge.py:generic-api-key:1753
