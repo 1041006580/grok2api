@@ -1,0 +1,64 @@
+# Gitleaks configuration for grok2api
+# 排除测试文件和文档中的示例密钥
+
+title = "grok2api gitleaks config"
+
+# 全局允许列表
+[allowlist]
+description = "Allowlist for test fixtures and documentation examples"
+
+# 排除特定路径
+paths = [
+    '''tests/.*\.py$''',
+    '''docs/.*\.md$''',
+    '''scripts/migrate-from-legacy\.py$''',
+]
+
+# 排除特定正则模式 - 测试中的示例密钥
+regexes = [
+    '''xai-secret-12345678''',  # 测试中的占位符密钥
+    '''your_app_key''',          # 文档中的占位符
+]
+
+# 排除特定提交（历史迁移文档提交）
+commits = [
+    "ae54783d1296813892fcc376a9ad960497941cc1",  # docs: V2 migration guide
+    "1644d0592815a0e7c68132dfe49465c23e2f33b8",  # 测试文件提交
+    "88c7af04479858ed36e3765388dc3facce4e58e6",
+    "4aa775e163cbcdb0d3951b7aeb3ee456966beca0",
+    "970c49e60efd22e32396822b4970079d722469ca",
+    "b78d320101a7e1640f0f1635a441400164f36906",
+    "6f82a094a053b082cd1169677cfb0dd50bc4db6b",
+    "a04307d5fa5fdaecf12ae90fb09bf98d073fac1a",
+    "a1824c120cdb76309cb54f2e40b7ba4e0b18a7d7",
+]
+
+# 自定义规则覆盖
+[[rules]]
+id = "generic-api-key"
+description = "Generic API Key"
+regex = '''(?i)(api|key|token|secret|password)([_-])?([a-z0-9]{8,})'''
+tags = ["key", "API", "generic"]
+
+# 排除测试文件中的匹配
+[rules.allowlist]
+paths = [
+    '''tests/.*''',
+    '''test_.*\.py$''',
+]
+regexes = [
+    '''xai-secret-\d+''',  # 测试用的格式化密钥
+]
+
+[[rules]]
+id = "curl-auth-header"
+description = "Curl command with authorization header"
+regex = '''curl\s+.*(-H|--header)\s+["'](Authorization|X-Admin-Key):.*["']'''
+tags = ["curl", "auth", "header"]
+
+# 文档中的 curl 示例不检查
+[rules.allowlist]
+paths = [
+    '''docs/.*\.md$''',
+    '''README.*\.md$''',
+]
