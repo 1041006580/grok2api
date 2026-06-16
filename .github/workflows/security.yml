@@ -29,12 +29,13 @@ jobs:
           git remote add pr-head "https://github.com/${{ github.event.pull_request.head.repo.full_name }}.git"
           git fetch --no-tags --prune --depth=1 pr-head \
             "+${{ github.event.pull_request.head.sha }}:refs/remotes/pr-head/current"
-            
+
           docker run --rm \
             -v "$PWD:/repo" \
             -w /repo \
             zricethezav/gitleaks:v8.24.3 \
             detect --source . --redact -v --exit-code=2 \
+            --config=/repo/.gitleaks.toml \
             --log-opts="--no-merges refs/remotes/origin/pr-base..refs/remotes/pr-head/current"
 
       # 针对 Push 和 Schedule：使用官方 Action
