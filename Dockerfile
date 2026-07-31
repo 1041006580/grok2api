@@ -41,7 +41,9 @@ COPY backend/docs/docs.go ./docs/docs.go
 RUN --mount=type=cache,id=grok2api-go-mod,target=/go/pkg/mod,sharing=locked \
     --mount=type=cache,id=grok2api-go-build,target=/root/.cache/go-build,sharing=locked \
     CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
-    go build -buildvcs=false -trimpath -ldflags="-s -w" -o /out/grok2api ./cmd/grok2api
+    go build -buildvcs=false -trimpath -ldflags="-s -w" -o /out/grok2api ./cmd/grok2api && \
+    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
+    go build -buildvcs=false -trimpath -ldflags="-s -w" -o /out/grok2api-migrate-v2 ./cmd/grok2api-migrate-v2
 
 
 FROM alpine:${ALPINE_VERSION}
@@ -58,6 +60,7 @@ RUN apk add --no-cache ca-certificates su-exec tzdata && \
 WORKDIR /app
 
 COPY --from=backend-builder --chmod=0755 /out/grok2api /app/grok2api
+COPY --from=backend-builder --chmod=0755 /out/grok2api-migrate-v2 /app/grok2api-migrate-v2
 COPY --from=frontend-builder /src/frontend/dist /app/frontend/dist
 COPY VERSION /app/VERSION
 COPY --chmod=0755 docker/entrypoint.sh /usr/local/bin/grok2api-entrypoint
