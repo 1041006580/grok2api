@@ -23,7 +23,7 @@ func NewMediaAssetRepository(db *Database) *MediaAssetRepository {
 func (r *MediaAssetRepository) CreateMediaAsset(ctx context.Context, value media.Asset) error {
 	row := mediaAssetModel{
 		ID: value.ID, Kind: value.Kind, StorageKey: value.StorageKey, MIMEType: value.MIMEType,
-		SizeBytes: value.SizeBytes, SHA256: value.SHA256, CreatedAt: value.CreatedAt,
+		SizeBytes: value.SizeBytes, SHA256: value.SHA256, Origin: value.Origin, CreatedAt: value.CreatedAt,
 	}
 	return r.db.db.WithContext(ctx).Create(&row).Error
 }
@@ -35,7 +35,7 @@ func (r *MediaAssetRepository) GetMediaAsset(ctx context.Context, id string) (me
 	}
 	return media.Asset{
 		ID: row.ID, Kind: row.Kind, StorageKey: row.StorageKey, MIMEType: row.MIMEType,
-		SizeBytes: row.SizeBytes, SHA256: row.SHA256, CreatedAt: row.CreatedAt,
+		SizeBytes: row.SizeBytes, SHA256: row.SHA256, Origin: row.Origin, CreatedAt: row.CreatedAt,
 	}, nil
 }
 

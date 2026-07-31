@@ -438,6 +438,7 @@ type mediaAssetModel struct {
 	MIMEType   string    `gorm:"size:64;not null;check:chk_media_assets_mime,mime_type IN ('image/jpeg','image/png','image/webp','image/gif','video/mp4','video/webm','video/quicktime')"`
 	SizeBytes  int64     `gorm:"not null;check:chk_media_assets_size,size_bytes > 0 AND size_bytes <= 268435456"`
 	SHA256     string    `gorm:"size:64;not null;check:chk_media_assets_sha,length(sha256) = 64"`
+	Origin     string    `gorm:"size:32;not null;default:''"`
 	CreatedAt  time.Time `gorm:"not null"`
 }
 
