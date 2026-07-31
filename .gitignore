@@ -53,3 +53,5 @@ htmlcov/
 
 # Project specific
 .ace-tool/
+.worktrees/
+tools/
