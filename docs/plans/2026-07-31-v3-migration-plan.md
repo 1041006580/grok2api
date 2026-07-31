@@ -57,8 +57,8 @@
 
    ```bash
    git tag v2-final-20260731 main
-   git branch legacy/v2-production main
-   git push origin v2-final-20260731 legacy/v2-production
+   git branch legacy-v2-production main
+   git push origin v2-final-20260731 legacy-v2-production
    ```
 
 3. 确认 GitHub 上 tag 与分支可见。
@@ -149,7 +149,7 @@
 ### Phase 7:收尾
 
 1. **v3 提升为 main**(设计第 1 部分:验收后才提升):
-   - 前置核对:`legacy/v2-production` 分支与 `v2-final-20260731` tag 确认已在 GitHub 存在。
+   - 前置核对:`legacy-v2-production` 分支与 `v2-final-20260731` tag 确认已在 GitHub 存在。
    - `git push origin v3-main:main --force-with-lease`;将 `ghcr-image.yml` 的触发分支改回 `main`。
    - 之后上游同步:定期 `git fetch upstream && git merge <新 tag>`,冲突集中在四个扩展提交组。
 2. 观察期 ≥ 2 周:v2 服务保持暂停不删除;Redis、持久化卷、旧镜像、RDB 备份全部保留。
@@ -194,5 +194,5 @@
 | 托管 Redis 是否支持 `--rdb` 远程 dump | 备份方式变化 | 逻辑导出(`export` 命令产物)本身就是完整备份;RDB 只是额外保险,不行就用 `BGSAVE` + 卷 |
 | 媒体体量未知,HTTP 拉取耗时不可控 | 演练超时 | Phase 5 演练实测;过大则改方案 B(tar 打包) |
 | `credentialEncryptionKey` 丢失 | v3 全部凭据作废 | 生成时即三处备份(Zeabur 配置、密码库、离线) |
-| force push main | 误覆盖历史 | 仅在 `legacy/v2-production` + tag 双重确认后执行,用 `--force-with-lease` |
+| force push main | 误覆盖历史 | 仅在 `legacy-v2-production` + tag 双重确认后执行,用 `--force-with-lease` |
 | 上游 v3 持续更新 | v3-main 落后 | 切换前只跟安全修复;切换后按提交组定期 merge 上游 tag |

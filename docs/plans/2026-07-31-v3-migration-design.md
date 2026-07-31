@@ -20,7 +20,7 @@
 | 议题 | 决策 |
 |---|---|
 | 新基线 | `upstream/v3.0.11`,不合并旧 `main` 历史 |
-| 现网 v2 | 冻结为 `legacy/v2-production` 分支 + 不可移动 tag,只作迁移来源和回滚版本 |
+| 现网 v2 | 冻结为 `legacy-v2-production` 分支 + 不可移动 tag,只作迁移来源和回滚版本 |
 | v3 持久化 | 独立 PostgreSQL(账号、配置、Key、媒体元数据)+ 独立 Redis(仅运行态) |
 | 迁移方式 | 一次性完整停机离线迁移(约 40~50 个账号),不做双写/CDC |
 | 功能取舍 | 全面采用 v3(React Creative Console、图库、标准 Docker);不迁移旧 WebUI/Masonry、ChatKit/Voice、Vercel/Render 部署 |
@@ -53,7 +53,7 @@ v3 迁移工具
 
 ### Git 主线
 
-- 当前 `f989f27` 固定为 `legacy/v2-production`。
+- 当前 `f989f27` 固定为 `legacy-v2-production`。
 - 创建不可移动的 `v2-final-<日期>` 标签。
 - v3 开发分支直接从 `upstream/v3.0.11` 创建。
 - 当前 `main` 在正式切换前仍代表 v2 生产版;v3 验收后才提升为新的 `main`。
