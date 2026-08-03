@@ -1,6 +1,6 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, ClipboardPaste, Compass, Download, ExternalLink, FileUp, Link, MoreHorizontal, Pencil, Plus, RefreshCw, RotateCw, Search, SquareTerminal, Trash2, TriangleAlert, Webhook } from "lucide-react";
+import { ArrowRight, ClipboardPaste, Compass, Download, ExternalLink, FileUp, KeyRound, Link, MoreHorizontal, Pencil, Plus, RefreshCw, RotateCw, Search, SquareTerminal, Trash2, TriangleAlert, Webhook } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useForm, useWatch } from "react-hook-form";
 import { useTranslation } from "react-i18next";
@@ -49,6 +49,7 @@ import {
   importAccounts,
   importConsoleAccounts,
   importWebAccounts,
+  importXAIOfficialAccounts,
   listAccounts,
   pollDeviceAuthorization,
   refreshAccountBilling,
@@ -84,7 +85,7 @@ import {
   type DeviceSessionDTO,
   type QuotaDTO,
 } from "@/features/accounts/accounts-api";
-import { AccountQuota, ConsoleQuota, WebQuota } from "@/features/accounts/account-quota";
+import { AccountQuota, ConsoleQuota, WebQuota, XAIOfficialQuota } from "@/features/accounts/account-quota";
 import { AccountNameCell } from "@/features/accounts/account-name-cell";
 import { WebAccountScriptsDialog } from "@/features/accounts/web-account-scripts";
 import { WebAccountSettingsDialogs, WebAccountSettingsMenu, type WebAccountConfirmationTarget } from "@/features/accounts/web-account-settings";
@@ -254,12 +255,13 @@ export function AccountsPage() {
         maxConcurrent: values.maxConcurrent,
         minimumRemaining: values.minimumRemaining,
       };
-      if (editing.provider !== "grok_build") {
-        if (values.clearCloudflareCookies) input.clearCloudflareCookies = true;
-        else if (values.cloudflareCookies.trim()) input.cloudflareCookies = values.cloudflareCookies;
-      } else {
+      if (editing.provider === "grok_build") {
         input.buildRouteMode = values.buildRouteMode;
         if (values.buildSuperEntitled !== editing.buildSuperEntitled) input.buildSuperEntitled = values.buildSuperEntitled;
+      } else if (editing.provider !== "xai_official") {
+        // 官方 API Key 直连 api.x.ai，不经过 Cloudflare 挑战。
+        if (values.clearCloudflareCookies) input.clearCloudflareCookies = true;
+        else if (values.cloudflareCookies.trim()) input.cloudflareCookies = values.cloudflareCookies;
       }
       return updateAccount(editing.id, input);
     },
@@ -309,24 +311,23 @@ export function AccountsPage() {
   }, [batchDeleteOpen, deleting, linkedDeleteTargets, provider, selectedIdsKey, t]);
 
 
+  // 官方 API Key 账号没有跨渠道关联，既不是关联删除目标，也不需要在其账号池里选择目标。
   const linkedTargetOptions = (current: AccountProvider): AccountProvider[] =>
-    (["grok_web", "grok_build", "grok_console"] as AccountProvider[]).filter((item) => item !== current);
+    current === "xai_official" ? [] : (["grok_web", "grok_build", "grok_console"] as AccountProvider[]).filter((item) => item !== current);
 
-  const linkedTargetLabel = (value: AccountProvider) => {
-    if (value === "grok_build") return "Grok Build";
-    if (value === "grok_console") return "Grok Console";
-    return "Grok Web";
-  };
+  const linkedTargetLabel = (value: AccountProvider) => accountProviderLabel(value);
 
   const linkedTargetIcon = (value: AccountProvider) => {
     if (value === "grok_build") return SquareTerminal;
     if (value === "grok_console") return Webhook;
+    if (value === "xai_official") return KeyRound;
     return Compass;
   };
 
   const linkedTargetIconClass = (value: AccountProvider) => {
     if (value === "grok_build") return "text-quota-product-1";
     if (value === "grok_console") return "text-quota-product-4";
+    if (value === "xai_official") return "text-quota-product-5";
     return "text-quota-product-2";
   };
 
@@ -482,6 +483,7 @@ export function AccountsPage() {
       setQuotaSyncProgress(null);
       if (targetProvider === "grok_web") return refreshAllWebAccountQuotas(setQuotaSyncProgress, controller.signal);
       if (targetProvider === "grok_console") return refreshAllConsoleAccountQuotas(setQuotaSyncProgress, controller.signal);
+      // xai_official 没有全量额度端点,入口按钮已对其隐藏;放开按钮前必须先加分派,否则会打到 Build 端点。
       return refreshAllAccountBilling(setQuotaSyncProgress, controller.signal);
     },
     onSuccess: (result) => {
@@ -582,6 +584,7 @@ export function AccountsPage() {
       };
       if (provider === "grok_web") return importWebAccounts(files, onProgress, controller.signal);
       if (provider === "grok_console") return importConsoleAccounts(files, onProgress, controller.signal);
+      if (provider === "xai_official") return importXAIOfficialAccounts(files, onProgress, controller.signal);
       return importAccounts(files, onProgress, controller.signal);
     },
     onSuccess: (result) => {
@@ -873,7 +876,7 @@ export function AccountsPage() {
   function submitQuickImport(): void {
     const value = quickImportTokens.trim();
     if (!value) return;
-    const filename = provider === "grok_console" ? "grok-console-sso-tokens.txt" : "grok-web-sso-tokens.txt";
+    const filename = provider === "grok_console" ? "grok-console-sso-tokens.txt" : provider === "xai_official" ? "xai-api-keys.txt" : "grok-web-sso-tokens.txt";
     importMutation.mutate([new File([value], filename, { type: "text/plain" })]);
   }
 
@@ -1026,9 +1029,10 @@ export function AccountsPage() {
   const buildSummary = summary?.providers.grok_build ?? { total: 0, available: 0 };
   const webSummary = summary?.providers.grok_web ?? { total: 0, available: 0 };
   const consoleSummary = summary?.providers.grok_console ?? { total: 0, available: 0 };
+  const xaiOfficialSummary = summary?.providers.xai_official ?? { total: 0, available: 0 };
   const summaryLoading = summaryQuery.isPending;
   const summaryUnavailable = summaryQuery.isError;
-  const providerAccountTotal = provider === "grok_build" ? buildSummary.total : provider === "grok_web" ? webSummary.total : consoleSummary.total;
+  const providerAccountTotal = provider === "grok_build" ? buildSummary.total : provider === "grok_web" ? webSummary.total : provider === "xai_official" ? xaiOfficialSummary.total : consoleSummary.total;
   const hasProviderAccounts = providerAccountTotal > 0 || (result?.total ?? 0) > 0;
   const bindableEgressNodes = (egressNodesQuery.data?.items ?? []).filter((node) => node.enabled && node.proxyConfigured && scopeSupportsAccountProvider(node.scope, provider));
   const bulkTaskPending = quotaSyncMutation.isPending
@@ -1055,10 +1059,11 @@ export function AccountsPage() {
         <h1 className="text-xl font-medium">{t("accounts.title")}</h1>
         <p className="sr-only">{t("console.accountsDescription")}</p>
       </header>
-      <section className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+      <section className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
         <AccountMetricPanel tone="text-quota-product-1" icon={<SquareTerminal />} loading={summaryLoading} label={t("accounts.buildAccountCount")} value={summaryUnavailable ? "-" : formatNumber(buildSummary.total, i18n.language, 0)} detail={t("accounts.routableAccountCount", { count: formatNumber(buildSummary.available, i18n.language, 0) })} />
         <AccountMetricPanel tone="text-quota-product-2" icon={<Compass />} loading={summaryLoading} label={t("accounts.webAccountCount")} value={summaryUnavailable ? "-" : formatNumber(webSummary.total, i18n.language, 0)} detail={t("accounts.routableAccountCount", { count: formatNumber(webSummary.available, i18n.language, 0) })} />
         <AccountMetricPanel tone="text-quota-product-4" icon={<Webhook />} loading={summaryLoading} label={t("accounts.consoleAccountCount")} value={summaryUnavailable ? "-" : formatNumber(consoleSummary.total, i18n.language, 0)} detail={t("accounts.routableAccountCount", { count: formatNumber(consoleSummary.available, i18n.language, 0) })} />
+        <AccountMetricPanel tone="text-quota-product-5" icon={<KeyRound />} loading={summaryLoading} label={t("accounts.xaiOfficialAccountCount")} value={summaryUnavailable ? "-" : formatNumber(xaiOfficialSummary.total, i18n.language, 0)} detail={t("accounts.routableAccountCount", { count: formatNumber(xaiOfficialSummary.available, i18n.language, 0) })} />
         <AccountMetricPanel
           tone={abnormalAccounts > 0 ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}
           icon={<TriangleAlert />}
@@ -1089,14 +1094,18 @@ export function AccountsPage() {
                 <Webhook className="size-3.5 text-quota-product-4" />
                 <span>Grok Console</span>
               </TabsTrigger>
+              <TabsTrigger value="xai_official" className="gap-1.5">
+                <KeyRound className="size-3.5 text-quota-product-5" />
+                <span>xAI Official</span>
+              </TabsTrigger>
             </TabsList>
           </Tabs>
           <DropdownMenu>
             <DropdownMenuTrigger asChild><Button size="sm"><Plus />{t("accounts.connectAccount")}</Button></DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               {provider === "grok_build" ? <DropdownMenuItem onClick={() => void startDeviceLogin()}><ExternalLink />{t("accounts.deviceLogin")}</DropdownMenuItem> : null}
-              {provider !== "grok_build" ? <DropdownMenuItem disabled={bulkTaskPending} onClick={() => setQuickImportOpen(true)}><ClipboardPaste />{t("accounts.quickImportSSO")}</DropdownMenuItem> : null}
-              <DropdownMenuItem disabled={bulkTaskPending} onClick={() => fileInputRef.current?.click()}><FileUp />{provider === "grok_build" ? t("accounts.importAuth") : provider === "grok_console" ? t("console.importFile") : t("accounts.importWebFile")}</DropdownMenuItem>
+              {provider !== "grok_build" ? <DropdownMenuItem disabled={bulkTaskPending} onClick={() => setQuickImportOpen(true)}><ClipboardPaste />{provider === "xai_official" ? t("xaiOfficial.quickImport") : t("accounts.quickImportSSO")}</DropdownMenuItem> : null}
+              <DropdownMenuItem disabled={bulkTaskPending} onClick={() => fileInputRef.current?.click()}><FileUp />{provider === "grok_build" ? t("accounts.importAuth") : provider === "grok_console" ? t("console.importFile") : provider === "xai_official" ? t("xaiOfficial.importFile") : t("accounts.importWebFile")}</DropdownMenuItem>
               {hasProviderAccounts ? (
                 <>
                   <DropdownMenuSeparator />
@@ -1130,7 +1139,7 @@ export function AccountsPage() {
                 <Input className="h-8 pl-9 text-xs" value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder={t("accounts.search")} aria-label={t("accounts.search")} />
               </div>
               <DataTableFilters filters={[
-                ...(provider === "grok_console" ? [] : [{ id: "type", label: t("accountType.label"), value: typeFilter, onChange: (value: string) => { setTypeFilter(value); setPage(1); }, options: provider === "grok_web" ? [
+                ...(provider === "grok_console" || provider === "xai_official" ? [] : [{ id: "type", label: t("accountType.label"), value: typeFilter, onChange: (value: string) => { setTypeFilter(value); setPage(1); }, options: provider === "grok_web" ? [
                   { value: "auto", label: t("accountType.auto") },
                   { value: "basic", label: t("accountType.free") },
                   { value: "super", label: t("accountType.super") },
@@ -1168,7 +1177,7 @@ export function AccountsPage() {
                   { value: "allAccepted", label: t("accounts.agreementAllAccepted") },
                   { value: "allNotAccepted", label: t("accounts.agreementAllNotAccepted") },
                 ] }] : []),
-                { id: "association", label: t("accounts.associationFilter"), value: associationFilter, onChange: (value: string) => { setAssociationFilter(value); setPage(1); }, options: provider === "grok_web" ? [
+                ...(provider === "xai_official" ? [] : [{ id: "association", label: t("accounts.associationFilter"), value: associationFilter, onChange: (value: string) => { setAssociationFilter(value); setPage(1); }, options: provider === "grok_web" ? [
                   { value: "buildLinked", label: t("accounts.associationBuildLinked") },
                   { value: "buildUnlinked", label: t("accounts.associationBuildUnlinked") },
                   { value: "consoleLinked", label: t("accounts.associationConsoleLinked") },
@@ -1178,7 +1187,7 @@ export function AccountsPage() {
                 ] : [
                   { value: "webLinked", label: t("accounts.associationWebLinked") },
                   { value: "webUnlinked", label: t("accounts.associationWebUnlinked") },
-                ] },
+                ] }]),
               ]} />
             </div>
             {selected.size > 0 ? (
@@ -1213,7 +1222,7 @@ export function AccountsPage() {
               <div className="flex flex-wrap items-center justify-end gap-1.5">
                 {provider === "grok_web" && hasProviderAccounts ? <Button variant="secondary" size="sm" disabled={bulkTaskPending} onClick={() => openWebConversion("all")}>{t("accountConversion.action")}</Button> : null}
                 {provider === "grok_web" && hasProviderAccounts ? <Button variant="secondary" size="sm" disabled={bulkTaskPending} onClick={() => setWebAccountScriptsTargets("all")}>{t("webAccountScripts.action")}</Button> : null}
-                {hasProviderAccounts ? <Button variant="secondary" size="sm" disabled={bulkTaskPending} onClick={() => { setAllQuotaTask("sync"); setSyncAllOpen(true); }}>{t("accountCredential.quotaSyncAction")}</Button> : null}
+                {hasProviderAccounts && provider !== "xai_official" ? <Button variant="secondary" size="sm" disabled={bulkTaskPending} onClick={() => { setAllQuotaTask("sync"); setSyncAllOpen(true); }}>{t("accountCredential.quotaSyncAction")}</Button> : null}
                 {hasProviderAccounts && provider === "grok_build" ? <Button variant="secondary" size="sm" disabled={bulkTaskPending} onClick={() => setRenewAllOpen(true)}>{t("accountCredential.refreshAction")}</Button> : null}
                 {hasProviderAccounts ? <Button variant="secondary" size="sm" className="bg-destructive/10 text-destructive hover:bg-destructive/15 hover:text-destructive" disabled={bulkTaskPending} onClick={() => { resetCleanupState(); setCleanupOpen(true); }}><Trash2 />{t("accounts.cleanupAction")}</Button> : null}
               </div>
@@ -1259,9 +1268,9 @@ export function AccountsPage() {
 	                  <TableRow className="group h-14 [&>td]:py-1.5" key={account.id} data-state={selected.has(account.id) ? "selected" : undefined}>
                     <TableCell className="px-2"><Checkbox checked={selected.has(account.id)} onCheckedChange={(checked) => toggleAccount(account.id, checked === true)} aria-label={t("common.selectItem", { name: account.name })} /></TableCell>
 	                    <TableCell className="min-w-0"><AccountNameCell account={account} /></TableCell>
-                    <TableCell className="text-center whitespace-nowrap">{provider === "grok_web" ? <WebAccountType tier={account.webTier} /> : provider === "grok_console" ? <AccountTypeText label={t("accountType.console")} variant="free" /> : <AccountType quota={account.quota} />}</TableCell>
+                    <TableCell className="text-center whitespace-nowrap">{provider === "grok_web" ? <WebAccountType tier={account.webTier} /> : provider === "grok_console" ? <AccountTypeText label={t("accountType.console")} variant="free" /> : provider === "xai_official" ? <AccountTypeText label={t("accountType.xaiOfficial")} variant="free" /> : <AccountType quota={account.quota} />}</TableCell>
                     <TableCell className="text-center whitespace-nowrap"><AccountStatus account={account} /></TableCell>
-                    <TableCell className={provider === "grok_build" ? undefined : "px-6"}>{provider === "grok_web" ? <WebQuota windows={account.quotaWindows ?? []} locale={i18n.language} tier={account.webTier} /> : provider === "grok_console" ? <ConsoleQuota windows={account.quotaWindows ?? []} locale={i18n.language} /> : <AccountQuota quota={account.quota} billing={account.billing} locale={i18n.language} />}</TableCell>
+                    <TableCell className={provider === "grok_build" ? undefined : "px-6"}>{provider === "grok_web" ? <WebQuota windows={account.quotaWindows ?? []} locale={i18n.language} tier={account.webTier} /> : provider === "grok_console" ? <ConsoleQuota windows={account.quotaWindows ?? []} locale={i18n.language} /> : provider === "xai_official" ? <XAIOfficialQuota windows={account.quotaWindows ?? []} locale={i18n.language} /> : <AccountQuota quota={account.quota} billing={account.billing} locale={i18n.language} />}</TableCell>
                     {provider === "grok_build" ? <TableCell className="whitespace-nowrap pl-4 text-xs">
                       {account.refreshable ? (
                         <Tooltip>
@@ -1399,7 +1408,7 @@ export function AccountsPage() {
 
       <AlertDialog open={exportOpen} onOpenChange={(open) => { if (!open && !exportMutation.isPending) setExportOpen(false); }}>
         <AlertDialogContent>
-          <AlertDialogHeader><AlertDialogTitle>{t("accounts.exportTitle", { provider: provider === "grok_build" ? "Grok Build" : provider === "grok_web" ? "Grok Web" : "Grok Console" })}</AlertDialogTitle><AlertDialogDescription>{t("accounts.exportDescription")}</AlertDialogDescription></AlertDialogHeader>
+          <AlertDialogHeader><AlertDialogTitle>{t("accounts.exportTitle", { provider: accountProviderLabel(provider) })}</AlertDialogTitle><AlertDialogDescription>{t("accounts.exportDescription")}</AlertDialogDescription></AlertDialogHeader>
           {selected.size > 0 ? <p className="text-sm text-muted-foreground">{t("common.selectedCount", { count: selected.size })}</p> : <div className="grid gap-2">
             <Label htmlFor="account-export-limit">{t("accounts.exportCount")}</Label>
             <Input id="account-export-limit" type="number" min={1} max={10000} value={exportLimit} disabled={exportSnapshotMaxId !== "0"} onChange={(event) => setExportLimit(event.target.value)} />
@@ -1466,12 +1475,12 @@ export function AccountsPage() {
       <Dialog open={quickImportOpen} onOpenChange={(open) => { setQuickImportOpen(open); if (!open) { setQuickImportTokens(""); if (quickImportFileInputRef.current) quickImportFileInputRef.current.value = ""; } }}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{t(provider === "grok_console" ? "console.quickImportTitle" : "accounts.quickImportTitle")}</DialogTitle>
-            <DialogDescription>{t(provider === "grok_console" ? "console.quickImportDescription" : "accounts.quickImportDescription")}</DialogDescription>
+            <DialogTitle>{t(provider === "grok_console" ? "console.quickImportTitle" : provider === "xai_official" ? "xaiOfficial.quickImportTitle" : "accounts.quickImportTitle")}</DialogTitle>
+            <DialogDescription>{t(provider === "grok_console" ? "console.quickImportDescription" : provider === "xai_official" ? "xaiOfficial.quickImportDescription" : "accounts.quickImportDescription")}</DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-3">
-              <Label htmlFor="quick-sso-tokens">{t("accounts.ssoTokens")}</Label>
+              <Label htmlFor="quick-sso-tokens">{t(provider === "xai_official" ? "xaiOfficial.apiKeys" : "accounts.ssoTokens")}</Label>
               <Button type="button" variant="secondary" size="sm" disabled={importMutation.isPending} onClick={() => quickImportFileInputRef.current?.click()}><FileUp />{t("accounts.uploadTXT")}</Button>
               <input
                 ref={quickImportFileInputRef}
@@ -1491,7 +1500,7 @@ export function AccountsPage() {
               spellCheck={false}
               value={quickImportTokens}
               onChange={(event) => setQuickImportTokens(event.target.value)}
-              placeholder={t("accounts.ssoTokenPlaceholder")}
+              placeholder={t(provider === "xai_official" ? "xaiOfficial.apiKeyPlaceholder" : "accounts.ssoTokenPlaceholder")}
             />
           </div>
           <DialogFooter>
@@ -1546,7 +1555,7 @@ export function AccountsPage() {
                 </div>
               </div>
             ) : null}
-            {editing && editing.provider !== "grok_build" ? (
+            {editing && (editing.provider === "grok_web" || editing.provider === "grok_console") ? (
               <div className="space-y-2">
                 <Label htmlFor="account-cloudflare-cookie">{t("settings.egress.cloudflareCookie")}</Label>
                 <Textarea
@@ -1583,6 +1592,7 @@ export function AccountsPage() {
         <AlertDialogContent>
           <AlertDialogHeader><AlertDialogTitle>{t("accounts.deleteTitle")}</AlertDialogTitle><AlertDialogDescription>{t("accounts.deleteDescription")}</AlertDialogDescription></AlertDialogHeader>
 
+          {linkedTargetOptions(provider).length > 0 ? (
             <div className="space-y-3 border-t pt-3">
               <div className="flex items-center justify-between gap-3">
                 <p className="text-sm font-medium">{t("accounts.linkedDeleteTitle")}</p>
@@ -1623,6 +1633,7 @@ export function AccountsPage() {
                 {linkedDeletePreviewError ? t("accounts.linkedDeletePreviewFailed") : t("accounts.linkedDeleteHint")}
               </p>
             </div>
+          ) : null}
 
           <AlertDialogFooter><AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel><AlertDialogAction className="bg-destructive text-white hover:bg-destructive/90" disabled={deleteMutation.isPending || !deleting || linkedPreviewBlocking} onClick={(event) => {
               event.preventDefault();
@@ -1676,6 +1687,7 @@ export function AccountsPage() {
         <AlertDialogContent>
           <AlertDialogHeader><AlertDialogTitle>{t("accounts.batchDeleteTitle", { count: selected.size })}</AlertDialogTitle><AlertDialogDescription>{t("accounts.deleteDescription")}</AlertDialogDescription></AlertDialogHeader>
 
+          {linkedTargetOptions(provider).length > 0 ? (
             <div className="space-y-3 border-t pt-3">
               <div className="flex items-center justify-between gap-3">
                 <p className="text-sm font-medium">{t("accounts.linkedDeleteTitle")}</p>
@@ -1715,6 +1727,7 @@ export function AccountsPage() {
                 {linkedDeletePreviewError ? t("accounts.linkedDeletePreviewFailed") : t("accounts.linkedDeleteHint")}
               </p>
             </div>
+          ) : null}
 
           <AlertDialogFooter><AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel><AlertDialogAction className="bg-destructive text-white hover:bg-destructive/90" disabled={batchDeleteMutation.isPending || selected.size === 0 || linkedPreviewBlocking} onClick={(event) => {
               event.preventDefault();
@@ -1821,7 +1834,7 @@ export function AccountsPage() {
       <Dialog open={cleanupOpen} onOpenChange={(open) => { if (!cleanupMutation.isPending) { setCleanupOpen(open); if (!open) resetCleanupState(); } }}>
         <DialogContent className="max-w-[440px]">
           <DialogHeader>
-            <DialogTitle>{t("accounts.cleanupTitle", { provider: provider === "grok_build" ? "Grok Build" : provider === "grok_web" ? "Grok Web" : "Grok Console" })}</DialogTitle>
+            <DialogTitle>{t("accounts.cleanupTitle", { provider: accountProviderLabel(provider) })}</DialogTitle>
             <DialogDescription>{t("accounts.cleanupDescription")}</DialogDescription>
           </DialogHeader>
           <div className="space-y-1.5">
@@ -1874,50 +1887,54 @@ export function AccountsPage() {
           >
             <div className="overflow-hidden">
               <div className="space-y-3 border-t pt-3">
-                <div className="flex items-center justify-between gap-3">
-                  <p className="text-sm font-medium">{t("accounts.linkedDeleteTitle")}</p>
-                  <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" disabled={cleanupMutation.isPending} onClick={selectAllCleanupTargets}>
-                    {linkedTargetOptions(provider).every((item) => cleanupLinkedTargets.includes(item)) ? t("accounts.linkedDeleteClearAll") : t("accounts.linkedDeleteSelectAll")}
-                  </Button>
-                </div>
-                <div className="flex flex-wrap gap-x-6 gap-y-2">
-                  {linkedTargetOptions(provider).map((target) => {
-                    const checked = cleanupLinkedTargets.includes(target);
-                    const TargetIcon = linkedTargetIcon(target);
-                    const pending = checked && !cleanupPreviewError && !cleanupPreviewFresh;
-                    return (
-                      <label key={target} className="flex min-h-6 items-center gap-2 text-sm">
-                        <Checkbox checked={checked} disabled={cleanupMutation.isPending} onCheckedChange={(value) => toggleCleanupTarget(target, value === true)} />
-                        <TargetIcon className={cn("size-3.5 shrink-0", linkedTargetIconClass(target))} aria-hidden />
-                        <span className="inline-flex min-w-0 items-center gap-1.5">
-                          <span>{linkedTargetLabel(target)}</span>
-                          <span
-                            className={cn(
-                              "inline-flex h-4 min-w-[2.75rem] items-center justify-start tabular-nums text-xs",
-                              cleanupPreviewError ? "text-destructive" : "text-muted-foreground",
-                              !checked && "invisible",
-                            )}
-                            aria-hidden={!checked}
-                            aria-busy={pending}
-                          >
-                            {!checked ? "" : cleanupPreviewError ? t("accounts.linkedDeleteExtraFailed") : pending ? <Spinner className="size-3.5" /> : t("accounts.linkedDeleteExtra", { count: cleanupPreviewTotals?.linkedByProvider?.[target] ?? 0 })}
-                          </span>
-                        </span>
-                      </label>
-                    );
-                  })}
-                </div>
-                {/* Stacked messages: the container keeps the tallest variant's height,
-                    so switching hint/warning/error never resizes the dialog. */}
-                <div className="grid text-xs">
-                  {([
-                    ["error", cleanupPreviewError, t("accounts.cleanupPreviewFailed"), "text-destructive"],
-                    ["warning", !cleanupPreviewError && cleanupLinkedTargets.length > 0, t("accounts.cleanupLinkedWarning"), "text-destructive"],
-                    ["hint", !cleanupPreviewError && cleanupLinkedTargets.length === 0, t("accounts.linkedDeleteHint"), "text-muted-foreground"],
-                  ] as const).map(([key, visible, text, tone]) => (
-                    <p key={key} aria-hidden={!visible} className={cn("col-start-1 row-start-1", tone, !visible && "invisible")}>{text}</p>
-                  ))}
-                </div>
+                {linkedTargetOptions(provider).length > 0 ? (
+                  <>
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-sm font-medium">{t("accounts.linkedDeleteTitle")}</p>
+                      <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" disabled={cleanupMutation.isPending} onClick={selectAllCleanupTargets}>
+                        {linkedTargetOptions(provider).every((item) => cleanupLinkedTargets.includes(item)) ? t("accounts.linkedDeleteClearAll") : t("accounts.linkedDeleteSelectAll")}
+                      </Button>
+                    </div>
+                    <div className="flex flex-wrap gap-x-6 gap-y-2">
+                      {linkedTargetOptions(provider).map((target) => {
+                        const checked = cleanupLinkedTargets.includes(target);
+                        const TargetIcon = linkedTargetIcon(target);
+                        const pending = checked && !cleanupPreviewError && !cleanupPreviewFresh;
+                        return (
+                          <label key={target} className="flex min-h-6 items-center gap-2 text-sm">
+                            <Checkbox checked={checked} disabled={cleanupMutation.isPending} onCheckedChange={(value) => toggleCleanupTarget(target, value === true)} />
+                            <TargetIcon className={cn("size-3.5 shrink-0", linkedTargetIconClass(target))} aria-hidden />
+                            <span className="inline-flex min-w-0 items-center gap-1.5">
+                              <span>{linkedTargetLabel(target)}</span>
+                              <span
+                                className={cn(
+                                  "inline-flex h-4 min-w-[2.75rem] items-center justify-start tabular-nums text-xs",
+                                  cleanupPreviewError ? "text-destructive" : "text-muted-foreground",
+                                  !checked && "invisible",
+                                )}
+                                aria-hidden={!checked}
+                                aria-busy={pending}
+                              >
+                                {!checked ? "" : cleanupPreviewError ? t("accounts.linkedDeleteExtraFailed") : pending ? <Spinner className="size-3.5" /> : t("accounts.linkedDeleteExtra", { count: cleanupPreviewTotals?.linkedByProvider?.[target] ?? 0 })}
+                              </span>
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                    {/* Stacked messages: the container keeps the tallest variant's height,
+                        so switching hint/warning/error never resizes the dialog. */}
+                    <div className="grid text-xs">
+                      {([
+                        ["error", cleanupPreviewError, t("accounts.cleanupPreviewFailed"), "text-destructive"],
+                        ["warning", !cleanupPreviewError && cleanupLinkedTargets.length > 0, t("accounts.cleanupLinkedWarning"), "text-destructive"],
+                        ["hint", !cleanupPreviewError && cleanupLinkedTargets.length === 0, t("accounts.linkedDeleteHint"), "text-muted-foreground"],
+                      ] as const).map(([key, visible, text, tone]) => (
+                        <p key={key} aria-hidden={!visible} className={cn("col-start-1 row-start-1", tone, !visible && "invisible")}>{text}</p>
+                      ))}
+                    </div>
+                  </>
+                ) : null}
                 {/* Always rendered so the total line never unmounts between refreshes. */}
                 <p className="flex min-h-4 items-center gap-1.5 text-xs text-muted-foreground" aria-busy={!cleanupPreviewFresh && !cleanupPreviewError}>
                   {cleanupPreviewError ? t("accounts.cleanupPreviewFailed") : !cleanupPreviewFresh ? <Spinner className="size-3.5" /> : t("accounts.cleanupPreviewTotal", { total: cleanupPreviewTotals?.total ?? 0 })}
@@ -1957,7 +1974,15 @@ function downloadAccountExport(blob: Blob, provider: AccountProvider, suffix: st
 function scopeSupportsAccountProvider(scope: EgressScope, provider: AccountProvider): boolean {
   if (provider === "grok_build") return scope === "grok_build";
   if (provider === "grok_web") return scope === "grok_web";
+  if (provider === "xai_official") return scope === "xai_official";
   return scope === "grok_web" || scope === "grok_console";
+}
+
+function accountProviderLabel(provider: AccountProvider): string {
+  if (provider === "grok_build") return "Grok Build";
+  if (provider === "grok_web") return "Grok Web";
+  if (provider === "xai_official") return "xAI Official";
+  return "Grok Console";
 }
 
 function AccountMetricPanel({ icon, label, value, detail, loading, tone }: { icon: ReactNode; label: string; value: string; detail: string; loading: boolean; tone: string }) {

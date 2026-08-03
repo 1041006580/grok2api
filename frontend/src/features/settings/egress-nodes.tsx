@@ -33,6 +33,12 @@ import { nextTableSort, type SortOrder, type TableSort } from "@/shared/lib/tabl
 const emptyInput: EgressNodeInput = { name: "", scope: "grok_build", enabled: true, proxyPool: false, accountCapacity: 0, proxyURL: "", userAgent: "", cloudflareCookies: "" };
 type ImportForm = { name: string; scope: EgressScope; accountCapacity: number; content: string };
 const emptyImport: ImportForm = { name: "", scope: "grok_build", accountCapacity: 0, content: "" };
+const scopeOptions: EgressScope[] = ["grok_build", "grok_web", "grok_console", "grok_web_asset", "xai_official"];
+
+// Grok Build 与 xAI Official 走 API 协议，出口节点不维护浏览器 User-Agent 和 Cloudflare Cookie。
+function usesBrowserIdentity(scope: EgressScope): boolean {
+  return scope !== "grok_build" && scope !== "xai_official";
+}
 
 export function EgressNodes({ title, clearanceMode }: { title: string; clearanceMode: "manual" | "flaresolverr" }) {
   const { t } = useTranslation();
@@ -65,8 +71,8 @@ export function EgressNodes({ title, clearanceMode }: { title: string; clearance
       const input = {
         ...form,
         proxyURL: form.proxyURL?.trim() || undefined,
-        userAgent: form.scope === "grok_build" ? "" : form.userAgent,
-        cloudflareCookies: form.scope === "grok_build" ? undefined : form.cloudflareCookies?.trim() || undefined,
+        userAgent: usesBrowserIdentity(form.scope) ? form.userAgent : "",
+        cloudflareCookies: usesBrowserIdentity(form.scope) ? form.cloudflareCookies?.trim() || undefined : undefined,
       };
       return editing ? updateEgressNode(editing.id, input) : createEgressNode(input);
     },
@@ -155,7 +161,7 @@ export function EgressNodes({ title, clearanceMode }: { title: string; clearance
   }
 
   function openEdit(node: EgressNodeDTO) {
-    setForm({ name: node.name, scope: node.scope, enabled: node.enabled, proxyPool: node.proxyPool, accountCapacity: node.accountCapacity, userAgent: node.scope === "grok_build" ? "" : node.userAgent, proxyURL: "", cloudflareCookies: "" });
+    setForm({ name: node.name, scope: node.scope, enabled: node.enabled, proxyPool: node.proxyPool, accountCapacity: node.accountCapacity, userAgent: usesBrowserIdentity(node.scope) ? node.userAgent : "", proxyURL: "", cloudflareCookies: "" });
     setEditing(node);
   }
 
@@ -165,8 +171,8 @@ export function EgressNodes({ title, clearanceMode }: { title: string; clearance
     setForm({
       ...form,
       scope,
-      userAgent: scope === "grok_build" ? "" : (form.userAgent === "" || form.userAgent === previousDefault ? nextDefault : form.userAgent),
-      cloudflareCookies: scope === "grok_build" ? "" : form.cloudflareCookies,
+      userAgent: usesBrowserIdentity(scope) ? (form.userAgent === "" || form.userAgent === previousDefault ? nextDefault : form.userAgent) : "",
+      cloudflareCookies: usesBrowserIdentity(scope) ? form.cloudflareCookies : "",
     });
   }
 
@@ -174,6 +180,7 @@ export function EgressNodes({ title, clearanceMode }: { title: string; clearance
     if (scope === "grok_build") return t("settings.egress.scopeBuild");
     if (scope === "grok_console") return t("console.name");
     if (scope === "grok_web_asset") return t("settings.egress.scopeWebAsset");
+    if (scope === "xai_official") return t("models.providerXAIOfficial");
     return t("settings.egress.scopeWeb");
   }
 
@@ -233,6 +240,7 @@ export function EgressNodes({ title, clearanceMode }: { title: string; clearance
                     { value: "grok_web", label: scopeLabel("grok_web") },
                     { value: "grok_console", label: scopeLabel("grok_console") },
                     { value: "grok_web_asset", label: scopeLabel("grok_web_asset") },
+                    { value: "xai_official", label: scopeLabel("xai_official") },
                   ] },
                   { id: "enabled", label: t("settings.egress.enabled"), value: enabledFilter, onChange: (value) => { setEnabledFilter(value); setPage(1); setSelected(new Map()); }, options: [
                     { value: "enabled", label: t("common.enable") },
@@ -385,14 +393,11 @@ export function EgressNodes({ title, clearanceMode }: { title: string; clearance
               <Select value={form.scope} onValueChange={(value) => changeScope(value as EgressScope)}>
                 <SelectTrigger id="egress-scope"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="grok_build">{t("settings.egress.scopeBuild")}</SelectItem>
-                  <SelectItem value="grok_web">{t("settings.egress.scopeWeb")}</SelectItem>
-                  <SelectItem value="grok_console">{t("console.name")}</SelectItem>
-                  <SelectItem value="grok_web_asset">{t("settings.egress.scopeWebAsset")}</SelectItem>
+                  {scopeOptions.map((scope) => <SelectItem key={scope} value={scope}>{scopeLabel(scope)}</SelectItem>)}
                 </SelectContent>
               </Select>
             </Field>
-            {form.scope !== "grok_build" ? (
+            {usesBrowserIdentity(form.scope) ? (
               <div className="flex h-10 items-center justify-between gap-4 rounded-md bg-muted/45 px-3">
                 <span className="text-xs font-medium">{t("settings.egress.clearance")}</span>
                 <Badge variant="secondary" className="shrink-0 text-[10px]">
@@ -413,12 +418,12 @@ export function EgressNodes({ title, clearanceMode }: { title: string; clearance
               </div>
               <Switch id="egress-proxy-pool" className="mt-0.5" checked={form.proxyPool} disabled={!editing?.proxyConfigured && !form.proxyURL?.trim()} onCheckedChange={(proxyPool) => setForm({ ...form, proxyPool })} />
             </div>
-            {form.scope !== "grok_build" && clearanceMode === "manual" ? (
+            {usesBrowserIdentity(form.scope) && clearanceMode === "manual" ? (
               <Field label={t("settings.egress.userAgent")} controlId="egress-user-agent">
                 <Input id="egress-user-agent" value={form.userAgent} onChange={(event) => setForm({ ...form, userAgent: event.target.value })} />
               </Field>
             ) : null}
-            {form.scope !== "grok_build" && clearanceMode === "manual" ? (
+            {usesBrowserIdentity(form.scope) && clearanceMode === "manual" ? (
               <Field label={t("settings.egress.cloudflareCookie")} controlId="egress-cookie">
                 <Input id="egress-cookie" type="password" autoComplete="new-password" placeholder={editing?.cookieConfigured ? t("settings.egress.keepConfigured") : "cf_clearance=...; __cf_bm=..."} value={form.cloudflareCookies} onChange={(event) => setForm({ ...form, cloudflareCookies: event.target.value })} />
               </Field>
@@ -441,10 +446,7 @@ export function EgressNodes({ title, clearanceMode }: { title: string; clearance
                 <Select value={importForm.scope} onValueChange={(value) => setImportForm({ ...importForm, scope: value as EgressScope })}>
                   <SelectTrigger id="egress-import-scope"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="grok_build">{t("settings.egress.scopeBuild")}</SelectItem>
-                    <SelectItem value="grok_web">{t("settings.egress.scopeWeb")}</SelectItem>
-                    <SelectItem value="grok_console">{t("console.name")}</SelectItem>
-                    <SelectItem value="grok_web_asset">{t("settings.egress.scopeWebAsset")}</SelectItem>
+                    {scopeOptions.map((scope) => <SelectItem key={scope} value={scope}>{scopeLabel(scope)}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </Field>
@@ -481,7 +483,7 @@ function ErrorTooltip({ message }: { message: string }) {
 
 function ClearanceBadge({ node, clearanceMode }: { node: EgressNodeDTO; clearanceMode: "manual" | "flaresolverr" }) {
   const { t } = useTranslation();
-  if (node.scope === "grok_build") return <span className="text-xs text-muted-foreground">—</span>;
+  if (!usesBrowserIdentity(node.scope)) return <span className="text-xs text-muted-foreground">—</span>;
   if (clearanceMode === "flaresolverr") {
     return <Badge variant="secondary" className="text-[10px]">{node.accountBoundProxy ? `${t("settings.web.clearanceFlareSolverr")} · Resin` : t("settings.web.clearanceFlareSolverr")}</Badge>;
   }

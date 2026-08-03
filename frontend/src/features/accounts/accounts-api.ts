@@ -3,7 +3,7 @@ import { createObjectDecoder, createPaginatedDecoder, createValidatedDecoder, de
 import { i18n } from "@/shared/i18n";
 import type { SortOrder } from "@/shared/lib/table-sort";
 
-export type AccountProvider = "grok_build" | "grok_web" | "grok_console";
+export type AccountProvider = "grok_build" | "grok_web" | "grok_console" | "xai_official";
 export type BuildRouteMode = "auto" | "build" | "xai";
 export type AccountCleanupStatus = "cooldown" | "disabled" | "reauthRequired";
 
@@ -64,7 +64,7 @@ export type QuotaDTO = {
 export type AccountDTO = {
   id: string;
   provider: AccountProvider;
-  authType: "oauth" | "sso";
+  authType: "oauth" | "sso" | "api_key";
   webTier?: "auto" | "basic" | "super" | "heavy";
   webTierSyncedAt?: string;
   nsfwEnabledAt?: string;
@@ -110,7 +110,7 @@ export type AccountDTO = {
 
 export type LinkedAccountDTO = {
   id: string;
-  provider: "grok_build" | "grok_web" | "grok_console";
+  provider: "grok_build" | "grok_web" | "grok_console" | "xai_official";
   name: string;
   email?: string;
   userId?: string;
@@ -179,9 +179,9 @@ const quotaWindowValidator = hasShape({
   mode: isString, remaining: isNumber, total: isNumber, usagePercent: isNumber, breakdown: isOptional(isArrayOf(quotaBreakdownValidator)),
   windowSeconds: isNumber, resetAt: isOptional(isString), syncedAt: isOptional(isString), source: isOneOf("default", "estimated", "upstream"),
 });
-const linkedAccountValidator = hasShape({ id: isString, provider: isOneOf("grok_build", "grok_web", "grok_console"), name: isString, email: isOptional(isString), userId: isOptional(isString) });
+const linkedAccountValidator = hasShape({ id: isString, provider: isOneOf("grok_build", "grok_web", "grok_console", "xai_official"), name: isString, email: isOptional(isString), userId: isOptional(isString) });
 const accountValidator = hasShape({
-  id: isString, provider: isOneOf("grok_build", "grok_web", "grok_console"), authType: isOneOf("oauth", "sso"), webTier: isOptional(isOneOf("auto", "basic", "super", "heavy")),
+  id: isString, provider: isOneOf("grok_build", "grok_web", "grok_console", "xai_official"), authType: isOneOf("oauth", "sso", "api_key"), webTier: isOptional(isOneOf("auto", "basic", "super", "heavy")),
   webTierSyncedAt: isOptional(isString), nsfwEnabledAt: isOptional(isString), termsAcceptedAt: isOptional(isString), name: isString, email: isOptional(isString), userId: isOptional(isString), teamId: isOptional(isString),
   enabled: isBoolean, authStatus: isOneOf("active", "reauthRequired"), expiresAt: isOptional(isString), refreshable: isBoolean, cloudflareCookieConfigured: isBoolean,
   buildSuperEntitled: isBoolean, buildRouteMode: isOneOf("auto", "build", "xai"), buildBotFlagged: isBoolean, modelSyncFailed: isOptional(isBoolean), refreshDueAt: isOptional(isString), lastRefreshAt: isOptional(isString), refreshFailureCount: isNumber,
@@ -490,6 +490,12 @@ export function importConsoleAccounts(files: readonly File[], onProgress?: (valu
   const body = new FormData();
   files.forEach((file) => body.append("files", file, file.name));
   return runAccountTask("/api/admin/v1/accounts/console/import", body, ["created", "updated", "synced", "syncFailed"], onProgress, signal);
+}
+
+export function importXAIOfficialAccounts(files: readonly File[], onProgress?: (value: AccountTaskProgressDTO) => void, signal?: AbortSignal): Promise<AccountImportResultDTO> {
+  const body = new FormData();
+  files.forEach((file) => body.append("files", file, file.name));
+  return runAccountTask("/api/admin/v1/accounts/xai-official/import", body, ["created", "updated", "synced", "syncFailed"], onProgress, signal);
 }
 
 export function refreshAccountQuota(id: string): Promise<AccountDTO> {

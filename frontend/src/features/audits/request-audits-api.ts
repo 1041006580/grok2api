@@ -31,14 +31,14 @@ export type AuditDTO = {
   modelRouteId: string;
   modelPublicId?: string;
   modelUpstreamModel?: string;
-  provider: "grok_build" | "grok_web" | "grok_console";
+  provider: "grok_build" | "grok_web" | "grok_console" | "xai_official";
   operation: "responses" | "compaction" | "chat" | "messages" | "image" | "image_edit" | "video";
   usageSource: "upstream" | "estimated" | "none";
   accountId?: string;
   accountName?: string;
   egressNodeId?: string;
   egressNodeName?: string;
-  egressScope?: "grok_build" | "grok_web" | "grok_console" | "grok_web_asset";
+  egressScope?: "grok_build" | "grok_web" | "grok_console" | "grok_web_asset" | "xai_official";
   egressMode?: "direct" | "proxy";
   statusCode: number;
   streaming: boolean;
@@ -139,11 +139,11 @@ const auditBillingValidator = hasShape({
 });
 const auditValidator = hasShape({
   id: isString, requestId: isString, clientKeyId: isString, clientKeyName: isOptional(isString), modelRouteId: isString,
-  modelPublicId: isOptional(isString), modelUpstreamModel: isOptional(isString), provider: isOneOf("grok_build", "grok_web", "grok_console"),
+  modelPublicId: isOptional(isString), modelUpstreamModel: isOptional(isString), provider: isOneOf("grok_build", "grok_web", "grok_console", "xai_official"),
   operation: isOneOf("responses", "compaction", "chat", "messages", "image", "image_edit", "video"), usageSource: isOneOf("upstream", "estimated", "none"),
   accountId: isOptional(isString), accountName: isOptional(isString),
   egressNodeId: isOptional(isString), egressNodeName: isOptional(isString),
-  egressScope: isOptional(isOneOf("grok_build", "grok_web", "grok_console", "grok_web_asset")), egressMode: isOptional(isOneOf("direct", "proxy")),
+  egressScope: isOptional(isOneOf("grok_build", "grok_web", "grok_console", "grok_web_asset", "xai_official")), egressMode: isOptional(isOneOf("direct", "proxy")),
   statusCode: isNumber, streaming: isBoolean,
   mediaInputImages: isNumber, mediaOutputImages: isNumber, mediaOutputSeconds: isNumber, inputTokens: isNumber,
   cachedInputTokens: isNumber, outputTokens: isNumber, reasoningTokens: isNumber, totalTokens: isNumber,

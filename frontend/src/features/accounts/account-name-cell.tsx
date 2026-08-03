@@ -1,4 +1,4 @@
-import { Bot, Compass, Handshake, SquareTerminal, VenusAndMars, Webhook, type LucideIcon } from "lucide-react";
+import { Bot, Compass, Handshake, KeyRound, SquareTerminal, VenusAndMars, Webhook, type LucideIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -10,12 +10,14 @@ const providerOrder: Record<AccountProvider, number> = {
   grok_build: 0,
   grok_web: 1,
   grok_console: 2,
+  xai_official: 3,
 };
 
 const providerIcon: Record<AccountProvider, { icon: LucideIcon; className: string }> = {
   grok_build: { icon: SquareTerminal, className: "text-quota-product-1" },
   grok_web: { icon: Compass, className: "text-quota-product-2" },
   grok_console: { icon: Webhook, className: "text-quota-product-4" },
+  xai_official: { icon: KeyRound, className: "text-quota-product-5" },
 };
 
 function identityDetails(name: string, email?: string, userId?: string): string[] {
@@ -44,7 +46,9 @@ export function AccountNameCell({ account }: { account: AccountDTO }) {
     ? t("models.providerGrokBuild")
     : provider === "grok_web"
       ? t("models.providerGrokWeb")
-      : t("console.name");
+      : provider === "xai_official"
+        ? t("models.providerXAIOfficial")
+        : t("console.name");
   const connections = [
     { id: account.id, provider: account.provider, details: identityDetails(account.name, account.email, account.userId) },
     ...links.filter((linked) => linked.provider !== account.provider).map((linked) => ({ id: linked.id, provider: linked.provider, details: identityDetails(linked.name, linked.email, linked.userId) })),

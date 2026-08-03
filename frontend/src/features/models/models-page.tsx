@@ -49,7 +49,7 @@ export function ModelsPage() {
   const debouncedSearch = useDebouncedValue(search);
   const schema = z.object({
     publicId: z.string().min(1, t("errors.required")),
-    provider: z.enum(["grok_build", "grok_web", "grok_console"]),
+    provider: z.enum(["grok_build", "grok_web", "grok_console", "xai_official"]),
     upstreamModel: z.string().min(1, t("errors.required")),
     capability: z.enum(["responses", "chat", "image", "image_edit", "video"]),
     enabled: z.boolean(),
@@ -218,6 +218,7 @@ export function ModelsPage() {
                   { value: "grok_build", label: t("models.providerGrokBuild") },
                   { value: "grok_web", label: t("models.providerGrokWeb") },
                   { value: "grok_console", label: t("console.name") },
+                  { value: "xai_official", label: t("models.providerXAIOfficial") },
                 ] },
                 { id: "status", label: t("models.status"), value: statusFilter, onChange: (value) => { setStatusFilter(value); setPage(1); }, options: [
                   { value: "enabled", label: t("common.enabled") },
@@ -406,8 +407,8 @@ export function ModelsPage() {
 
 function ModelProvider({ provider }: { provider: ModelRouteDTO["provider"] }) {
   const { t } = useTranslation();
-  const label = provider === "grok_web" ? t("models.providerGrokWeb") : provider === "grok_console" ? t("console.name") : t("models.providerGrokBuild");
-  const color = provider === "grok_web" ? "bg-quota-product-2" : provider === "grok_console" ? "bg-quota-product-4" : "bg-quota-product-1";
+  const label = provider === "grok_web" ? t("models.providerGrokWeb") : provider === "grok_console" ? t("console.name") : provider === "xai_official" ? t("models.providerXAIOfficial") : t("models.providerGrokBuild");
+  const color = provider === "grok_web" ? "bg-quota-product-2" : provider === "grok_console" ? "bg-quota-product-4" : provider === "xai_official" ? "bg-quota-product-5" : "bg-quota-product-1";
   return (
     <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground">
       <span className={cn("size-2 rounded-full", color)} />

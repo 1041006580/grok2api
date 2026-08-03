@@ -584,6 +584,8 @@ function providerLabel(provider: AuditDTO["provider"]): string {
       return "Grok Web";
     case "grok_console":
       return "Grok Console";
+    case "xai_official":
+      return "xAI Official";
   }
 }
 

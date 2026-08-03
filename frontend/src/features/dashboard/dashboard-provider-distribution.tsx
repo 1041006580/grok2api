@@ -15,13 +15,14 @@ type DashboardProviderDistributionProps = {
   loading: boolean;
 };
 
-type ProviderKey = "grok_build" | "grok_web" | "grok_console";
+type ProviderKey = "grok_build" | "grok_web" | "grok_console" | "xai_official";
 
 const STRIPE_COUNT = 40;
 const PROVIDERS: Array<{ key: ProviderKey; color: string; dot: string }> = [
   { key: "grok_build", color: "bg-quota-product-1", dot: "bg-quota-product-1" },
   { key: "grok_web", color: "bg-quota-product-2", dot: "bg-quota-product-2" },
   { key: "grok_console", color: "bg-quota-product-4", dot: "bg-quota-product-4" },
+  { key: "xai_official", color: "bg-quota-product-5", dot: "bg-quota-product-5" },
 ];
 
 export function DashboardProviderDistribution({ dashboard, locale, loading }: DashboardProviderDistributionProps) {
@@ -82,7 +83,7 @@ export function DashboardProviderDistribution({ dashboard, locale, loading }: Da
             </div>
           </div>
 
-          <div className="mt-3 grid flex-1 grid-rows-3 divide-y">
+          <div className="mt-3 grid flex-1 grid-rows-4 divide-y">
             {providers.map((provider) => {
               const share = totalRequests > 0 ? provider.requests / totalRequests * 100 : 0;
               const successRate = provider.requests > 0 ? provider.successfulRequests / provider.requests * 100 : 0;
@@ -136,6 +137,7 @@ function buildProviderStripes<T extends { requests: number }>(providers: T[], to
 function providerLabel(provider: ProviderKey, t: TFunction): string {
   if (provider === "grok_build") return t("models.providerGrokBuild");
   if (provider === "grok_web") return t("models.providerGrokWeb");
+  if (provider === "xai_official") return t("models.providerXAIOfficial");
   return t("console.name");
 }
 

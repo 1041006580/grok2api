@@ -37,6 +37,8 @@ import { nextTableSort, type SortOrder, type TableSort } from "@/shared/lib/tabl
 
 const USD_TICKS = 10_000_000_000;
 const MAX_BILLING_LIMIT_USD = 900_000;
+// xai_official 走 fail-closed：新建密钥默认只授予三个既有渠道，官方 API Key 必须显式勾选。
+const defaultProviderScope: ProviderScopeValue[] = ["grok_build", "grok_web", "grok_console"];
 
 type SecretDialogState = {
   secret: string;
@@ -76,7 +78,7 @@ export function ClientKeysPage() {
     allowModelAliases: z.boolean(),
     modelScopeMode: z.enum(["all", "restricted"]),
     allowedModelIds: z.array(z.string()),
-    providerScope: z.array(z.enum(["all", "grok_build", "grok_web", "grok_console"])).min(1),
+    providerScope: z.array(z.enum(["all", "grok_build", "grok_web", "grok_console", "xai_official"])).min(1),
     tierScope: z.array(z.enum(["all", "free", "super"])).min(1),
   }).superRefine((value, context) => {
     if (!value.expiryUnlimited && !value.expiresAt) {
@@ -89,7 +91,7 @@ export function ClientKeysPage() {
   type KeyForm = z.infer<typeof schema>;
   const form = useForm<KeyForm>({
     resolver: zodResolver(schema),
-    defaultValues: { name: "", enabled: true, expiryUnlimited: true, expiresAt: "", rpmUnlimited: false, rpmLimit: 120, concurrencyUnlimited: false, maxConcurrent: 8, billingUnlimited: true, billingLimitUsd: 10, allowModelAliases: false, modelScopeMode: "all", allowedModelIds: [], providerScope: ["all"], tierScope: ["all"] },
+    defaultValues: { name: "", enabled: true, expiryUnlimited: true, expiresAt: "", rpmUnlimited: false, rpmLimit: 120, concurrencyUnlimited: false, maxConcurrent: 8, billingUnlimited: true, billingLimitUsd: 10, allowModelAliases: false, modelScopeMode: "all", allowedModelIds: [], providerScope: defaultProviderScope, tierScope: ["all"] },
   });
   const keyEnabled = useWatch({ control: form.control, name: "enabled" });
   const allowModelAliases = useWatch({ control: form.control, name: "allowModelAliases" });
@@ -103,7 +105,7 @@ export function ClientKeysPage() {
   const billingUnlimited = useWatch({ control: form.control, name: "billingUnlimited" });
   const modelProviderScope = providerScope.filter((value): value is Exclude<ProviderScopeValue, "all"> => value !== "all");
   const modelTierScope = tierScope.filter((value): value is Exclude<TierScopeValue, "all"> => value !== "all");
-  const providerScopeSummary = providerScope.includes("all") ? t("keys.allProviders") : modelProviderScope.map((value) => ({ grok_build: "Build", grok_web: "Web", grok_console: "Console" })[value]).join(" · ");
+  const providerScopeSummary = providerScope.includes("all") ? t("keys.allProviders") : modelProviderScope.map((value) => ({ grok_build: "Build", grok_web: "Web", grok_console: "Console", xai_official: "xAI" })[value]).join(" · ");
   const tierScopeSummary = tierScope.includes("all") ? t("keys.allTiers") : modelTierScope.map((value) => value === "free" ? "Free" : "Super").join(" · ");
   const modelScopeSummary = modelScopeMode === "all" ? t("keys.allModels") : t("keys.selectedModels", { count: selectedModels.length });
 
@@ -195,7 +197,7 @@ export function ClientKeysPage() {
     setEditing("new");
     setModelOptionsPage(1);
     setModelOptionsSearch("");
-    form.reset({ name: "", enabled: true, expiryUnlimited: true, expiresAt: "", rpmUnlimited: false, rpmLimit: 120, concurrencyUnlimited: false, maxConcurrent: 8, billingUnlimited: true, billingLimitUsd: 10, allowModelAliases: false, modelScopeMode: "all", allowedModelIds: [], providerScope: ["all"], tierScope: ["all"] });
+    form.reset({ name: "", enabled: true, expiryUnlimited: true, expiresAt: "", rpmUnlimited: false, rpmLimit: 120, concurrencyUnlimited: false, maxConcurrent: 8, billingUnlimited: true, billingLimitUsd: 10, allowModelAliases: false, modelScopeMode: "all", allowedModelIds: [], providerScope: defaultProviderScope, tierScope: ["all"] });
   }
 
   function beginEdit(key: ClientKeyDTO): void {
@@ -499,6 +501,7 @@ export function ClientKeysPage() {
                           { value: "grok_build", label: "Build" },
                           { value: "grok_web", label: "Web" },
                           { value: "grok_console", label: "Console" },
+                          { value: "xai_official", label: "xAI" },
                         ]}
                       />
                     )} />
@@ -729,7 +732,7 @@ function ScopeDropdown({ allLabel, ariaLabel, summary, value, onChange, options,
 
 function AccountScopeSummary({ providerScope, tierScope }: { providerScope: ProviderScopeValue[]; tierScope: TierScopeValue[] }) {
   const { t } = useTranslation();
-  const providerLabels: Record<ProviderScopeValue, string> = { all: t("keys.allProviders"), grok_build: "Build", grok_web: "Web", grok_console: "Console" };
+  const providerLabels: Record<ProviderScopeValue, string> = { all: t("keys.allProviders"), grok_build: "Build", grok_web: "Web", grok_console: "Console", xai_official: "xAI" };
   const tierLabels: Record<TierScopeValue, string> = { all: t("keys.allTiers"), free: "Free", super: "Super" };
   return (
     <span className="inline-flex max-w-full flex-col items-start gap-0.5 text-left text-[10px] leading-4">

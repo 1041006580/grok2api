@@ -110,6 +110,13 @@ export function ConsoleQuota({ windows, locale }: { windows: NonNullable<Account
   return <WebQuotaMode mode="Console" window={window} locale={locale} />;
 }
 
+export function XAIOfficialQuota({ windows, locale }: { windows: NonNullable<AccountDTO["quotaWindows"]>; locale: string }) {
+  const { t } = useTranslation();
+  const window = windows.find((value) => value.mode === "xai_official") ?? windows[0];
+  if (!window) return <span className="text-xs text-muted-foreground">{t("accounts.quotaNotSynced")}</span>;
+  return <WebQuotaMode mode="xAI" window={window} locale={locale} />;
+}
+
 export function WebQuota({ windows, locale, tier }: { windows: NonNullable<AccountDTO["quotaWindows"]>; locale: string; tier?: AccountDTO["webTier"] }) {
   const { t } = useTranslation();
   if (windows.length === 0) return <span className="text-xs text-muted-foreground">{t("accounts.quotaNotSynced")}</span>;
