@@ -22,6 +22,9 @@ const (
 	ProviderScopeConsole
 	ProviderScopeXAIOfficial
 	ProviderScopeAll = ProviderScopeBuild | ProviderScopeWeb | ProviderScopeConsole | ProviderScopeXAIOfficial
+	// ProviderScopeDefault 是未显式指定 scope 时授予的三个既有渠道;
+	// xai_official 必须显式授权(fail-closed),因此不在默认集合内。
+	ProviderScopeDefault = ProviderScopeBuild | ProviderScopeWeb | ProviderScopeConsole
 )
 
 type TierScope uint8
@@ -134,8 +137,7 @@ func (s TierScope) Values() []string {
 
 func NormalizeProviderScope(value ProviderScope) (ProviderScope, bool) {
 	if value == 0 {
-		// 未显式指定时只授予三个既有渠道;xai_official 必须显式授权(fail-closed)。
-		return ProviderScopeBuild | ProviderScopeWeb | ProviderScopeConsole, true
+		return ProviderScopeDefault, true
 	}
 	if value&^ProviderScopeAll != 0 {
 		return value, false
@@ -218,7 +220,13 @@ func (s AccountScope) AllowsAccount(provider account.Provider, tier AccountTier)
 
 func (s AccountScope) IsRestricted() bool {
 	value, valid := NormalizeAccountScope(s)
-	return valid && (value.Providers != ProviderScopeAll || value.Tiers != TierScopeAll)
+	if !valid {
+		return false
+	}
+	// 默认三渠道集合不算受限:它是未显式配置时的正常形态,错误分类与
+	// 模型可见性都不应因 fail-closed 默认值而改变。
+	restrictedProviders := value.Providers != ProviderScopeAll && value.Providers != ProviderScopeDefault
+	return restrictedProviders || value.Tiers != TierScopeAll
 }
 
 func (k Key) AccountScope() AccountScope {

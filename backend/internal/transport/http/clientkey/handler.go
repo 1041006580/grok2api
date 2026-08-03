@@ -296,7 +296,7 @@ func parseRequestedScopes(providerValues, tierValues *[]string, legacyPool *stri
 	}
 	if legacyPool != nil {
 		// 旧 accountPool 语义只覆盖三个既有渠道;xai_official 需显式授权。
-		providers := clientkeydomain.ProviderScopeBuild | clientkeydomain.ProviderScopeWeb | clientkeydomain.ProviderScopeConsole
+		providers := clientkeydomain.ProviderScopeDefault
 		var tiers clientkeydomain.TierScope
 		switch strings.TrimSpace(*legacyPool) {
 		case "all":

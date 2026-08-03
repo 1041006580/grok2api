@@ -318,7 +318,7 @@ func TestAccountScopePersistsAndAuthCacheInvalidatesOnChange(t *testing.T) {
 		t.Fatalf("invalid account scope error = %v", err)
 	}
 	all, err := service.Create(ctx, CreateInput{Name: "legacy-default", Enabled: true})
-	if err != nil || all.Key.ProviderScope != clientkeydomain.ProviderScopeBuild|clientkeydomain.ProviderScopeWeb|clientkeydomain.ProviderScopeConsole || all.Key.TierScope != clientkeydomain.TierScopeAll {
+	if err != nil || all.Key.ProviderScope != clientkeydomain.ProviderScopeDefault || all.Key.TierScope != clientkeydomain.TierScopeAll {
 		t.Fatalf("default account scope = %+v, err = %v", all.Key.AccountScope(), err)
 	}
 }
