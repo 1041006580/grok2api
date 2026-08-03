@@ -173,7 +173,11 @@ func TestImportAccountsIsIdempotentAndVerifyPasses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	archive := Archive{FormatVersion: ArchiveFormatVersion, Accounts: accounts}
+	_, xaiKeys, err := fixtureSource().LoadConfig(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	archive := Archive{FormatVersion: ArchiveFormatVersion, Accounts: accounts, XAIKeys: xaiKeys}
 
 	importer, err := NewImporter(database, cipher, ImportOptions{})
 	if err != nil {
@@ -185,6 +189,9 @@ func TestImportAccountsIsIdempotentAndVerifyPasses(t *testing.T) {
 	}
 	if report.Accounts.Imported != 2 || report.Accounts.Failed != 0 {
 		t.Fatalf("首轮导入: %+v", report.Accounts)
+	}
+	if report.XAIKeys.Imported != 1 || report.XAIKeys.Failed != 0 {
+		t.Fatalf("xAI Key 导入: %+v", report.XAIKeys)
 	}
 
 	// 幂等:重跑必须全部命中更新而不是新建。
@@ -223,6 +230,18 @@ func TestImportAccountsIsIdempotentAndVerifyPasses(t *testing.T) {
 	}
 	if superStored.EncryptedAccessToken == "" || strings.Contains(superStored.EncryptedAccessToken, "token-super-1") {
 		t.Fatal("凭据必须加密落库")
+	}
+
+	// xAI Key 落入 xai_official 账号池,SourceKey 与管理端导入一致。
+	xaiStored, _, err := repo.ListProviderAccountBatch(ctx, account.ProviderXAIOfficial, 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(xaiStored) != 1 {
+		t.Fatalf("应有 1 个 xAI Key 账号,得到 %d", len(xaiStored))
+	}
+	if xaiStored[0].SourceKey != "apikey:"+security.HashToken("xai-abc") || xaiStored[0].AuthType != account.AuthTypeAPIKey {
+		t.Fatalf("xAI Key 映射错误: %+v", xaiStored[0])
 	}
 
 	// verify 对账全绿。
