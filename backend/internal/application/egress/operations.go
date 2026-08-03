@@ -516,7 +516,7 @@ func publicSource(value domain.SubscriptionSource) domain.PublicSubscriptionSour
 }
 
 func validScope(scope domain.Scope) bool {
-	return scope == domain.ScopeBuild || scope == domain.ScopeWeb || scope == domain.ScopeConsole || scope == domain.ScopeWebAsset
+	return scope == domain.ScopeBuild || scope == domain.ScopeWeb || scope == domain.ScopeConsole || scope == domain.ScopeWebAsset || scope == domain.ScopeXAIOfficial
 }
 
 func validateImportInput(input ImportInput) error {

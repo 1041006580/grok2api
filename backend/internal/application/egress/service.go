@@ -139,7 +139,7 @@ func (s *Service) DefaultUserAgents() map[string]string {
 	defer s.mu.RUnlock()
 	return map[string]string{
 		string(domain.ScopeBuild): "", string(domain.ScopeWeb): s.browserUA, string(domain.ScopeConsole): s.browserUA,
-		string(domain.ScopeWebAsset): s.browserUA,
+		string(domain.ScopeWebAsset): s.browserUA, string(domain.ScopeXAIOfficial): "",
 	}
 }
 
@@ -193,7 +193,7 @@ func (s *Service) publicNodes(values []domain.Node) []domain.PublicNode {
 }
 
 func validListScope(scope domain.Scope) bool {
-	return scope == "" || scope == domain.ScopeBuild || scope == domain.ScopeWeb || scope == domain.ScopeConsole || scope == domain.ScopeWebAsset
+	return scope == "" || scope == domain.ScopeBuild || scope == domain.ScopeWeb || scope == domain.ScopeConsole || scope == domain.ScopeWebAsset || scope == domain.ScopeXAIOfficial
 }
 
 func validListValue(value string, allowed ...string) bool {
@@ -535,6 +535,8 @@ func scopeSupportsProvider(scope domain.Scope, provider accountdomain.Provider) 
 		return scope == domain.ScopeWeb
 	case accountdomain.ProviderConsole:
 		return domain.SupportsScope(scope, domain.ScopeConsole)
+	case accountdomain.ProviderXAIOfficial:
+		return scope == domain.ScopeXAIOfficial
 	default:
 		return false
 	}
@@ -622,8 +624,8 @@ func (s *Service) applyInput(value domain.Node, input Input, create bool) (domai
 	if name == "" || len(name) > 160 {
 		return domain.Node{}, fmt.Errorf("%w: 名称必须在 1 到 160 个字符之间", ErrInvalidInput)
 	}
-	if input.Scope != domain.ScopeBuild && input.Scope != domain.ScopeWeb && input.Scope != domain.ScopeConsole && input.Scope != domain.ScopeWebAsset {
-		return domain.Node{}, fmt.Errorf("%w: scope 必须是 grok_build、grok_web、grok_console 或 grok_web_asset", ErrInvalidInput)
+	if input.Scope != domain.ScopeBuild && input.Scope != domain.ScopeWeb && input.Scope != domain.ScopeConsole && input.Scope != domain.ScopeWebAsset && input.Scope != domain.ScopeXAIOfficial {
+		return domain.Node{}, fmt.Errorf("%w: scope 必须是 grok_build、grok_web、grok_console、grok_web_asset 或 xai_official", ErrInvalidInput)
 	}
 	value.Name, value.Scope, value.Enabled, value.ProxyPool = name, input.Scope, input.Enabled, proxyPool
 	if input.AccountCapacity != nil {
