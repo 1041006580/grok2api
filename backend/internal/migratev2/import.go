@@ -50,13 +50,8 @@ func (im *Importer) Run(ctx context.Context, archive Archive, options ImportOpti
 	if err := im.importAccounts(ctx, archive.Accounts, options.DryRun, &report); err != nil {
 		return report, err
 	}
-	// 官方 xAI Key 的导入依赖 xai_official Provider;在 Provider 落地前
-	// Key 保留在加密档案中,这里只如实计数,绝不静默丢弃。
-	report.XAIKeys.Found = len(archive.XAIKeys)
-	if len(archive.XAIKeys) > 0 {
-		report.XAIKeys.Skipped = len(archive.XAIKeys)
-		report.Problems = append(report.Problems,
-			fmt.Sprintf("%d 个官方 xAI Key 暂未导入(等待 xai_official Provider),保留在加密档案中", len(archive.XAIKeys)))
+	if err := im.importXAIKeys(ctx, archive.XAIKeys, options.DryRun, &report); err != nil {
+		return report, err
 	}
 	if im.media != nil {
 		if err := im.media.run(ctx, archive.Media, options.DryRun, &report); err != nil {
@@ -121,6 +116,67 @@ func (im *Importer) disableAccount(ctx context.Context, id uint64) error {
 	stored.Enabled = false
 	_, err = im.accounts.Update(ctx, stored)
 	return err
+}
+
+// importXAIKeys 把 v2 配置中的官方 xAI Key 导入为 xai_official Provider 账号。
+// SourceKey 使用与 xaiofficial 导入相同的 "apikey:" 指纹派生,保证与管理端
+// 后续手工导入互相幂等;停用的 Key 导入后回写停用状态。
+func (im *Importer) importXAIKeys(ctx context.Context, keys []V2XAIKey, dryRun bool, report *Report) error {
+	report.XAIKeys.Found = len(keys)
+	if len(keys) == 0 {
+		return nil
+	}
+	values := make([]account.Credential, 0, len(keys))
+	for _, key := range keys {
+		raw := strings.TrimSpace(key.Key)
+		if raw == "" {
+			report.XAIKeys.Failed++
+			report.Problems = append(report.Problems, "跳过空的 v2 xAI Key 记录")
+			continue
+		}
+		encrypted, err := im.cipher.Encrypt(raw)
+		if err != nil {
+			return fmt.Errorf("加密 xAI Key: %w", err)
+		}
+		fingerprint := security.HashToken(raw)
+		name := strings.TrimSpace(key.Name)
+		if name == "" {
+			name = "xAI Key " + fingerprint[:8]
+		}
+		values = append(values, account.Credential{
+			Provider:             account.ProviderXAIOfficial,
+			AuthType:             account.AuthTypeAPIKey,
+			Name:                 name,
+			SourceKey:            "apikey:" + fingerprint,
+			EncryptedAccessToken: encrypted,
+			Enabled:              key.Enabled,
+			AuthStatus:           account.AuthStatusActive,
+			Priority:             account.DefaultPriority,
+			MaxConcurrent:        account.DefaultMaxConcurrent,
+			MinimumRemaining:     account.DefaultMinimumRemaining,
+		})
+	}
+	if dryRun {
+		report.XAIKeys.Skipped = len(values)
+		return nil
+	}
+	results, err := im.accounts.UpsertManyByIdentity(ctx, values)
+	if err != nil {
+		return fmt.Errorf("写入 xAI Key: %w", err)
+	}
+	for index, result := range results {
+		if result.Created {
+			report.XAIKeys.Imported++
+		} else {
+			report.XAIKeys.Updated++
+		}
+		if index < len(values) && !values[index].Enabled {
+			if err := im.disableAccount(ctx, result.ID); err != nil {
+				report.Problems = append(report.Problems, fmt.Sprintf("xAI Key %s 回写停用状态失败: %v", values[index].Name, err))
+			}
+		}
+	}
+	return nil
 }
 
 // credentialFromV2 把 v2 账号映射为 v3 grok_web 凭据。构造规则与
