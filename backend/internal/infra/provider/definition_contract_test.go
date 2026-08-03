@@ -11,6 +11,7 @@ import (
 	cliprovider "github.com/chenyme/grok2api/backend/internal/infra/provider/cli"
 	consoleprovider "github.com/chenyme/grok2api/backend/internal/infra/provider/console"
 	webprovider "github.com/chenyme/grok2api/backend/internal/infra/provider/web"
+	xaiofficialprovider "github.com/chenyme/grok2api/backend/internal/infra/provider/xaiofficial"
 )
 
 func TestReadDiagnosticBodyAppliesHardLimit(t *testing.T) {
@@ -26,6 +27,7 @@ func TestProductionProviderDefinitionsMatchImplementedCapabilities(t *testing.T)
 		cliprovider.NewAdapter(cliprovider.Config{}, nil),
 		webprovider.NewAdapter(webprovider.Config{}, nil, nil, nil, nil),
 		consoleprovider.NewAdapter(consoleprovider.Config{}, nil, nil),
+		xaiofficialprovider.NewAdapter(xaiofficialprovider.Config{}, nil, nil),
 	)
 	if err := registry.Validate(); err != nil {
 		t.Fatalf("production registry validation failed: %v", err)
@@ -66,6 +68,13 @@ func TestProductionProviderDefinitionsMatchImplementedCapabilities(t *testing.T)
 			credential:   provider.CredentialSurface{AuthType: account.AuthTypeSSO, Import: true},
 			conversation: provider.ConversationSurface{Responses: true, ChatCompletions: true, Messages: true},
 			inference:    provider.InferencePolicy{Usage: provider.UsageUpstream, RetryForbiddenAsEgress: true},
+		},
+		{
+			provider: account.ProviderXAIOfficial, catalog: provider.ModelCatalogRemote, quota: provider.QuotaLocalWindow,
+			capabilities: []modeldomain.Capability{modeldomain.CapabilityResponses, modeldomain.CapabilityChat},
+			credential:   provider.CredentialSurface{AuthType: account.AuthTypeAPIKey, Import: true},
+			conversation: provider.ConversationSurface{Responses: true, ChatCompletions: true, Messages: true, StoredResponses: true},
+			inference:    provider.InferencePolicy{Usage: provider.UsageUpstream},
 		},
 	}
 	for _, test := range tests {

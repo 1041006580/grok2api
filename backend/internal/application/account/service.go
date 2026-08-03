@@ -1176,6 +1176,15 @@ func (s *Service) ImportConsoleCredentialDocumentsWithProgress(ctx context.Conte
 	return s.importCredentialDocumentsWithProgress(ctx, adapter, documents, observer, progress)
 }
 
+// ImportXAIOfficialCredentialDocumentsWithProgress 合并解析多个 xAI API Key 文件,并作为一个批次写入和同步。
+func (s *Service) ImportXAIOfficialCredentialDocumentsWithProgress(ctx context.Context, documents [][]byte, observer ImportedAccountObserver, progress BatchProgressObserver) (ImportResult, error) {
+	adapter, ok := s.providers.CredentialCodec(accountdomain.ProviderXAIOfficial)
+	if !ok {
+		return ImportResult{}, fmt.Errorf("xAI Official Provider 未注册")
+	}
+	return s.importCredentialDocumentsWithProgress(ctx, adapter, documents, observer, progress)
+}
+
 func (s *Service) importCredentialDocumentsWithProgress(ctx context.Context, adapter provider.CredentialCodecAdapter, documents [][]byte, observer ImportedAccountObserver, progress BatchProgressObserver) (ImportResult, error) {
 	if len(documents) == 0 {
 		return ImportResult{}, fmt.Errorf("%w: 没有可导入的账号文件", ErrInvalidImport)

@@ -34,6 +34,7 @@ import (
 	"github.com/chenyme/grok2api/backend/internal/infra/provider"
 	cliprovider "github.com/chenyme/grok2api/backend/internal/infra/provider/cli"
 	consoleprovider "github.com/chenyme/grok2api/backend/internal/infra/provider/console"
+	xaiofficialprovider "github.com/chenyme/grok2api/backend/internal/infra/provider/xaiofficial"
 	webprovider "github.com/chenyme/grok2api/backend/internal/infra/provider/web"
 	"github.com/chenyme/grok2api/backend/internal/infra/runtime/memory"
 	redisruntime "github.com/chenyme/grok2api/backend/internal/infra/runtime/redis"
@@ -213,7 +214,10 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Applicat
 	webAdapter := webprovider.NewAdapter(webProviderConfig(cfg), egressManager, cipher, responseRepo, mediaService)
 	webAdapter.SetLogger(logger)
 	consoleAdapter := consoleprovider.NewAdapter(consoleProviderConfig(cfg), egressManager, cipher)
-	providers := provider.NewRegistry(cliAdapter, webAdapter, consoleAdapter)
+	xaiOfficialAdapter := xaiofficialprovider.NewAdapter(xaiofficialprovider.Config{
+		BaseURL: cfg.Provider.XAIOfficial.BaseURL, TimeoutSeconds: cfg.Provider.XAIOfficial.TimeoutSeconds,
+	}, egressManager, cipher)
+	providers := provider.NewRegistry(cliAdapter, webAdapter, consoleAdapter, xaiOfficialAdapter)
 	if err := providers.Validate(); err != nil {
 		if runtimeStore != nil {
 			_ = runtimeStore.Close()

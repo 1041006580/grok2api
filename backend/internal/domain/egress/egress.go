@@ -17,6 +17,8 @@ const (
 	ScopeWeb      Scope = "grok_web"
 	ScopeConsole  Scope = "grok_console"
 	ScopeWebAsset Scope = "grok_web_asset"
+	// ScopeXAIOfficial 是官方 api.x.ai 请求的独立出口作用域。
+	ScopeXAIOfficial Scope = "xai_official"
 )
 
 type Node struct {
@@ -229,6 +231,7 @@ func DefaultOperationsConfig() OperationsConfig {
 			ScopeWeb:      {Mode: FallbackModeNone},
 			ScopeConsole:  {Mode: FallbackModeNone},
 			ScopeWebAsset: {Mode: FallbackModeNone},
+			ScopeXAIOfficial: {Mode: FallbackModeNone},
 		},
 	}
 }

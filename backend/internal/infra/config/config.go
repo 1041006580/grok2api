@@ -138,9 +138,18 @@ type AuthConfig struct {
 }
 
 type ProviderConfig struct {
-	Build   BuildProviderConfig   `yaml:"build"`
-	Web     WebProviderConfig     `yaml:"web"`
-	Console ConsoleProviderConfig `yaml:"console"`
+	Build       BuildProviderConfig       `yaml:"build"`
+	Web         WebProviderConfig         `yaml:"web"`
+	Console     ConsoleProviderConfig     `yaml:"console"`
+	XAIOfficial XAIOfficialProviderConfig `yaml:"xaiOfficial"`
+}
+
+// XAIOfficialProviderConfig 配置官方 api.x.ai API Key Provider。
+// BaseURL 固定为官方地址且不暴露到管理端,防止凭据被发送到恶意地址;
+// 仅保留配置文件级覆盖以便测试。
+type XAIOfficialProviderConfig struct {
+	BaseURL        string `yaml:"baseURL"`
+	TimeoutSeconds int    `yaml:"timeoutSeconds"`
 }
 
 type BuildProviderConfig struct {
@@ -653,6 +662,7 @@ func defaultConfig() Config {
 				RecoveryBackoffMax: Duration(30 * time.Minute),
 			},
 			Console: ConsoleProviderConfig{BaseURL: "https://console.x.ai", ChatTimeout: Duration(5 * time.Minute)},
+			XAIOfficial: XAIOfficialProviderConfig{BaseURL: "https://api.x.ai/v1", TimeoutSeconds: 600},
 		},
 		Batch: BatchConfig{
 			ImportConcurrency: 25, ConversionConcurrency: 25, SyncConcurrency: 25,

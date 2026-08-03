@@ -313,12 +313,12 @@ func TestAccountScopePersistsAndAuthCacheInvalidatesOnChange(t *testing.T) {
 	if cacheEntries != 0 {
 		t.Fatalf("batch invalidation retained %d auth cache entries", cacheEntries)
 	}
-	invalid := clientkeydomain.ProviderScope(8)
+	invalid := clientkeydomain.ProviderScope(16)
 	if _, err := service.Update(ctx, created.Key.ID, UpdateInput{ProviderScope: &invalid}); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("invalid account scope error = %v", err)
 	}
 	all, err := service.Create(ctx, CreateInput{Name: "legacy-default", Enabled: true})
-	if err != nil || all.Key.ProviderScope != clientkeydomain.ProviderScopeAll || all.Key.TierScope != clientkeydomain.TierScopeAll {
+	if err != nil || all.Key.ProviderScope != clientkeydomain.ProviderScopeBuild|clientkeydomain.ProviderScopeWeb|clientkeydomain.ProviderScopeConsole || all.Key.TierScope != clientkeydomain.TierScopeAll {
 		t.Fatalf("default account scope = %+v, err = %v", all.Key.AccountScope(), err)
 	}
 }

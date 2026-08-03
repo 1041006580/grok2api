@@ -131,7 +131,7 @@ func resolveOfficialTokenPrice(model string) (tokenPrice, bool) {
 // normalizePricingModel 只移除系统已知的来源前缀，避免任意路径片段被误识别为可计费模型。
 func normalizePricingModel(model string) string {
 	normalized := strings.ToLower(strings.TrimSpace(model))
-	for _, prefix := range []string{"build/", "web/", "console/", "grok_build/", "grok_web/", "grok_console/"} {
+	for _, prefix := range []string{"build/", "web/", "console/", "xai/", "grok_build/", "grok_web/", "grok_console/", "xai_official/"} {
 		if strings.HasPrefix(normalized, prefix) {
 			return strings.TrimSpace(normalized[len(prefix):])
 		}

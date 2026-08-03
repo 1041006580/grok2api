@@ -157,9 +157,12 @@ func fromAccountCredentialDomain(value account.Credential) accountCredentialMode
 	}
 	authType := value.AuthType
 	if authType == "" {
-		if value.Provider == account.ProviderWeb || value.Provider == account.ProviderConsole {
+		switch value.Provider {
+		case account.ProviderWeb, account.ProviderConsole:
 			authType = account.AuthTypeSSO
-		} else {
+		case account.ProviderXAIOfficial:
+			authType = account.AuthTypeAPIKey
+		default:
 			authType = account.AuthTypeOAuth
 		}
 	}

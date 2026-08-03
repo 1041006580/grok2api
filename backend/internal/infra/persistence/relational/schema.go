@@ -148,6 +148,9 @@ func (d *Database) initializeSchema(ctx context.Context) error {
 	if err := d.ensureConsoleConstraints(ctx); err != nil {
 		return fmt.Errorf("迁移 Console 数据库约束: %w", err)
 	}
+	if err := d.ensureXAIOfficialConstraints(ctx); err != nil {
+		return fmt.Errorf("迁移 xAI Official 数据库约束: %w", err)
+	}
 	if err := d.ensureAuditOperationConstraints(ctx); err != nil {
 		return fmt.Errorf("迁移请求审计操作约束: %w", err)
 	}
@@ -290,6 +293,27 @@ func (d *Database) ensureConsoleConstraints(ctx context.Context) error {
 		{model: &responseOwnershipModel{}, table: "response_ownership", name: "chk_response_ownership_provider"},
 		{model: &egressNodeModel{}, table: "egress_nodes", name: "chk_egress_nodes_specific_scope"},
 	}, "grok_console")
+}
+
+// ensureXAIOfficialConstraints 把仅允许三个渠道的历史 CHECK 升级到含 xai_official,
+// 同时覆盖 api_key 凭据类型与客户端 Key scope 的新上界。
+// 存量 client key 的 scope 值不做迁移:旧"全部"值 7 升级后语义收敛为三渠道,
+// xai_official 必须由管理员显式授权(fail-closed)。
+func (d *Database) ensureXAIOfficialConstraints(ctx context.Context) error {
+	return d.ensureNamedConstraints(ctx, []consoleConstraint{
+		{model: &accountModel{}, table: "provider_accounts", name: "chk_accounts_provider"},
+		{model: &accountCredentialModel{}, table: "account_credentials", name: "chk_account_credentials_auth_type"},
+		{model: &accountCredentialModel{}, table: "account_credentials", name: "chk_account_credentials_secret"},
+		{model: &modelRouteModel{}, table: "model_routes", name: "chk_model_routes_provider"},
+		{model: &requestAuditModel{}, table: "request_audits", name: "chk_request_audits_provider"},
+		{model: &requestAuditModel{}, table: "request_audits", name: "chk_request_audits_egress_scope"},
+		{model: &responseOwnershipModel{}, table: "response_ownership", name: "chk_response_ownership_provider"},
+		{model: &mediaJobModel{}, table: "media_jobs", name: "chk_media_jobs_provider"},
+		{model: &mediaJobModel{}, table: "media_jobs", name: "chk_media_jobs_egress_scope"},
+		{model: &clientKeyModel{}, table: "client_keys", name: "chk_client_keys_provider_scope"},
+		{model: &egressSubscriptionSourceModel{}, table: "egress_subscription_sources", name: "chk_egress_subscription_sources_scope"},
+		{model: &egressNodeModel{}, table: "egress_nodes", name: "chk_egress_nodes_specific_scope"},
+	}, "xai_official")
 }
 
 // ensureAuditOperationConstraints upgrades existing databases so Codex remote

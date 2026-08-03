@@ -14,6 +14,9 @@ const (
 	ProviderBuild   Provider = "grok_build"
 	ProviderWeb     Provider = "grok_web"
 	ProviderConsole Provider = "grok_console"
+	// ProviderXAIOfficial 是官方 api.x.ai 的 API Key 渠道;凭据为管理员
+	// 导入的官方 API Key,无 OAuth/SSO 生命周期。
+	ProviderXAIOfficial Provider = "xai_official"
 )
 
 // LinkedAccount 表示同一上游用户在另一 Provider 下的弱关联账号。
@@ -26,7 +29,7 @@ type LinkedAccount struct {
 	UserID   string
 }
 
-var providers = [...]Provider{ProviderBuild, ProviderWeb, ProviderConsole}
+var providers = [...]Provider{ProviderBuild, ProviderWeb, ProviderConsole, ProviderXAIOfficial}
 
 // Providers 返回按产品展示和后台维护顺序排列的稳定 Provider 集合。
 func Providers() []Provider {
@@ -36,7 +39,7 @@ func Providers() []Provider {
 // IsValid 判断 Provider 是否属于当前系统固定支持的渠道。
 func (p Provider) IsValid() bool {
 	switch p {
-	case ProviderBuild, ProviderWeb, ProviderConsole:
+	case ProviderBuild, ProviderWeb, ProviderConsole, ProviderXAIOfficial:
 		return true
 	default:
 		return false
@@ -52,6 +55,8 @@ func (p Provider) ModelNamespace() string {
 		return "Web"
 	case ProviderConsole:
 		return "Console"
+	case ProviderXAIOfficial:
+		return "XAI"
 	default:
 		return ""
 	}
@@ -62,6 +67,8 @@ type AuthType string
 const (
 	AuthTypeOAuth AuthType = "oauth"
 	AuthTypeSSO   AuthType = "sso"
+	// AuthTypeAPIKey 表示凭据是长期有效的官方 API Key,无刷新流程。
+	AuthTypeAPIKey AuthType = "api_key"
 )
 
 type WebTier string

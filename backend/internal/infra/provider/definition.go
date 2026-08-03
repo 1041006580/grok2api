@@ -143,7 +143,7 @@ func (d Definition) Validate() error {
 	if d.Quota != QuotaBilling && d.Quota != QuotaRemoteWindow && d.Quota != QuotaLocalWindow {
 		return fmt.Errorf("Provider %s 的额度策略无效", d.Provider)
 	}
-	if d.Credential.AuthType != account.AuthTypeOAuth && d.Credential.AuthType != account.AuthTypeSSO {
+	if d.Credential.AuthType != account.AuthTypeOAuth && d.Credential.AuthType != account.AuthTypeSSO && d.Credential.AuthType != account.AuthTypeAPIKey {
 		return fmt.Errorf("Provider %s 的认证类型无效", d.Provider)
 	}
 	if d.Inference.Usage != UsageUpstream && d.Inference.Usage != UsageEstimated {

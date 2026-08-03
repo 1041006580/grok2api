@@ -20,7 +20,8 @@ const (
 	ProviderScopeBuild ProviderScope = 1 << iota
 	ProviderScopeWeb
 	ProviderScopeConsole
-	ProviderScopeAll = ProviderScopeBuild | ProviderScopeWeb | ProviderScopeConsole
+	ProviderScopeXAIOfficial
+	ProviderScopeAll = ProviderScopeBuild | ProviderScopeWeb | ProviderScopeConsole | ProviderScopeXAIOfficial
 )
 
 type TierScope uint8
@@ -63,6 +64,8 @@ func ParseProviderScopeValues(values []string) (ProviderScope, bool) {
 			scope |= ProviderScopeWeb
 		case string(account.ProviderConsole):
 			scope |= ProviderScopeConsole
+		case string(account.ProviderXAIOfficial):
+			scope |= ProviderScopeXAIOfficial
 		default:
 			return 0, false
 		}
@@ -98,7 +101,7 @@ func (s ProviderScope) Values() []string {
 	if !valid || value == ProviderScopeAll {
 		return []string{"all"}
 	}
-	values := make([]string, 0, 3)
+	values := make([]string, 0, 4)
 	if value&ProviderScopeBuild != 0 {
 		values = append(values, string(account.ProviderBuild))
 	}
@@ -107,6 +110,9 @@ func (s ProviderScope) Values() []string {
 	}
 	if value&ProviderScopeConsole != 0 {
 		values = append(values, string(account.ProviderConsole))
+	}
+	if value&ProviderScopeXAIOfficial != 0 {
+		values = append(values, string(account.ProviderXAIOfficial))
 	}
 	return values
 }
@@ -128,7 +134,8 @@ func (s TierScope) Values() []string {
 
 func NormalizeProviderScope(value ProviderScope) (ProviderScope, bool) {
 	if value == 0 {
-		return ProviderScopeAll, true
+		// 未显式指定时只授予三个既有渠道;xai_official 必须显式授权(fail-closed)。
+		return ProviderScopeBuild | ProviderScopeWeb | ProviderScopeConsole, true
 	}
 	if value&^ProviderScopeAll != 0 {
 		return value, false
@@ -166,6 +173,8 @@ func (s ProviderScope) Allows(provider account.Provider) bool {
 		return value&ProviderScopeWeb != 0
 	case account.ProviderConsole:
 		return value&ProviderScopeConsole != 0
+	case account.ProviderXAIOfficial:
+		return value&ProviderScopeXAIOfficial != 0
 	default:
 		return false
 	}
@@ -200,7 +209,8 @@ func (s AccountScope) AllowsAccount(provider account.Provider, tier AccountTier)
 	if !valid || !value.Providers.Allows(provider) {
 		return false
 	}
-	if provider == account.ProviderConsole {
+	// Console 与官方 API Key 账号没有 free/super 层级概念,只受 Provider 约束。
+	if provider == account.ProviderConsole || provider == account.ProviderXAIOfficial {
 		return true
 	}
 	return value.Tiers.Allows(tier)

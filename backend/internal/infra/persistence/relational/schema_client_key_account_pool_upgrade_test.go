@@ -72,7 +72,7 @@ func recreateClientKeysWithLegacyAccountPool(ctx context.Context, database *Data
 		}
 		legacySQL := strings.Replace(tableSQL, ",`provider_scope_mask` integer NOT NULL DEFAULT 7", "", 1)
 		legacySQL = strings.Replace(legacySQL, ",`tier_scope_mask` integer NOT NULL DEFAULT 7", "", 1)
-		legacySQL = strings.Replace(legacySQL, ",CONSTRAINT `chk_client_keys_provider_scope` CHECK (provider_scope_mask BETWEEN 1 AND 7)", "", 1)
+		legacySQL = strings.Replace(legacySQL, ",CONSTRAINT `chk_client_keys_provider_scope` CHECK (provider_scope_mask BETWEEN 1 AND 15)", "", 1)
 		legacySQL = strings.Replace(legacySQL, ",CONSTRAINT `chk_client_keys_tier_scope` CHECK (tier_scope_mask IN (1,2,3,7))", "", 1)
 		legacySQL = strings.Replace(legacySQL, ",CONSTRAINT", ",`account_pool` text NOT NULL DEFAULT 'all' CHECK (account_pool IN ('all','free','super')),CONSTRAINT", 1)
 		legacySQL = strings.Replace(legacySQL, "client_keys", "client_keys_legacy_scope", 1)

@@ -142,6 +142,7 @@ func (h *Handler) Register(router *gin.RouterGroup) {
 	router.POST("/accounts/import", h.importAuth)
 	router.POST("/accounts/web/import", h.importWebAuth)
 	router.POST("/accounts/console/import", h.importConsoleAuth)
+	router.POST("/accounts/xai-official/import", h.importXAIOfficialAuth)
 	router.POST("/accounts/web/convert-to-build", h.convertWebToBuild)
 	router.POST("/accounts/web/sync-to-console", h.syncWebToConsole)
 	router.POST("/accounts/web/run-scripts", h.runWebAccountScripts)
@@ -752,6 +753,10 @@ func (h *Handler) importConsoleAuth(c *gin.Context) {
 	h.importFile(c, accountdomain.ProviderConsole)
 }
 
+func (h *Handler) importXAIOfficialAuth(c *gin.Context) {
+	h.importFile(c, accountdomain.ProviderXAIOfficial)
+}
+
 func (h *Handler) convertWebToBuild(c *gin.Context) {
 	var request buildConversionRequest
 	if c.ShouldBindJSON(&request) != nil {
@@ -994,6 +999,8 @@ func (h *Handler) importFile(c *gin.Context, providerValue accountdomain.Provide
 		fileDescription = "Grok Web JSON、逐行 JSON 或 SSO 文本"
 	} else if providerValue == accountdomain.ProviderConsole {
 		fileDescription = "Grok Console JSON、逐行 JSON 或 SSO 文本"
+	} else if providerValue == accountdomain.ProviderXAIOfficial {
+		fileDescription = "xAI API Key JSON 或逐行 Key 文本"
 	}
 	documents, ok := readAccountImportDocuments(c, fileDescription)
 	if !ok {
@@ -1009,6 +1016,8 @@ func (h *Handler) importFile(c *gin.Context, providerValue accountdomain.Provide
 		result, err = h.service.ImportWebCredentialDocumentsWithProgress(pipeline.ctx, documents, pipeline.Observe, stream.PhaseProgressObserver("importing", &total))
 	} else if providerValue == accountdomain.ProviderConsole {
 		result, err = h.service.ImportConsoleCredentialDocumentsWithProgress(pipeline.ctx, documents, pipeline.Observe, stream.PhaseProgressObserver("importing", &total))
+	} else if providerValue == accountdomain.ProviderXAIOfficial {
+		result, err = h.service.ImportXAIOfficialCredentialDocumentsWithProgress(pipeline.ctx, documents, pipeline.Observe, stream.PhaseProgressObserver("importing", &total))
 	} else {
 		result, err = h.service.ImportCredentialDocumentsWithProgress(pipeline.ctx, documents, pipeline.Observe, stream.PhaseProgressObserver("importing", &total))
 	}
